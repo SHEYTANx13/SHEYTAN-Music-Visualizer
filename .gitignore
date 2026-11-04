@@ -1,0 +1,15 @@
+# Go build and test artifacts
+/bin/
+/dist/
+ci-parts/
+*.test
+*.out
+*.prof
+
+# Local CI logs (the packaged evidence log is committed explicitly)
+/ci-logs/
+
+# Local toolchains and editor state
+/.toolchain/
+.idea/
+.vscode/
