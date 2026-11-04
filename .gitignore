@@ -1,19 +1,15 @@
-# Source archives and build outputs
-/dist/
-/ci-logs/
+# Go build and test artifacts
 /bin/
-*.zip
-*.tar.gz
-
-# Go
+/dist/
+ci-parts/
 *.test
 *.out
-coverage.txt
+*.prof
 
-# Local runtime state (never committed)
-*.log
-!evidence/phase1-build.log
+# Local CI logs (the packaged evidence log is committed explicitly)
+/ci-logs/
 
-# Editors / OS
-.DS_Store
-Thumbs.db
+# Local toolchains and editor state
+/.toolchain/
+.idea/
+.vscode/

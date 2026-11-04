@@ -5,74 +5,60 @@ reserved.
 
 This is the **sole licensing artifact** of SHEYTAN Music Visualizer ("the
 Software"). It carries the complete licensing picture in one document: the
-licensing model, the full legal text of the license in force (the Parsaetak
-Proprietary License v1.1), the trademark notice, the third-party attribution
-inventory, and the governance/contact points. No other license, licence,
-notice, or copying file in this repository carries legal authority.
+licensing model, the FULL legal text of the Parsaetak Proprietary License
+v1.1, the trademark notice, the third-party attribution notices, and the
+governance/contact points. No other license, licence, notice, or copying
+file in this repository carries legal authority.
+
+Product identity: SHEYTAN™ · SHEYTAN Music Visualizer · Licensor and
+copyright holder: Parsaetak · Authored by Parsa Tak.
 
 ---
 
 ## 1. Licensing model
 
-SHEYTAN Music Visualizer is proprietary software. Every file in this
-repository — and every artifact built from it — is governed by the **Parsaetak
-Proprietary License v1.1** (§3 of this document):
+SHEYTAN Music Visualizer is distributed under a deliberately conservative
+**single-license model**:
 
-| Material | Classification |
-|---|---|
-| First-party product code (`cmd/`, `internal/`, `ui/`) | Proprietary |
-| Documentation (`readme.md`, `agent.md`, `roadmap.md`, `ai-notes.md`, this file) | Proprietary |
-| Brand assets, designs and identity constants (including `internal/brand`) | Proprietary (trademarks of Parsaetak) |
-| Build, release and CI machinery (`scripts/`, `.github/`) | Proprietary |
-| Test suites (`*_test.go`, fixtures) | Proprietary (verification records of proprietary components) |
-| Third-party dependencies (`go.mod` / `go.sum` graph) | Governed by their own licenses (§4) — never relicensed by this document |
-
-The default is Proprietary. There are **no open-designated first-party
-components** in Phase 1. If the licensor later designates a component as
-open, that designation will be recorded here with an SPDX identifier and the
-full open license text; until then, no open licensing applies to any
-first-party material.
-
-This document is adapted from the Parsaetak Proprietary License v1.1 as
-published for the licensor's SHEYTAN-Local-Agent project
-(https://github.com/SHEYTANx13/SHEYTAN-LA, `LICENSE.md` §5, retrieved
-2026-11-04). The substantive legal terms — grant, intellectual property,
-trademark, distribution restrictions, derivative-works restrictions,
-privacy, acceptable use, warranty disclaimer, termination and changes — are
-preserved unchanged; the scope statements and defined Software name are
-adapted to SHEYTAN Music Visualizer. Unlike the reference repository, this
-product has no mixed Apache-2.0 component and therefore no Apache-2.0 text
-appears here.
+1. **Everything is Proprietary.** All first-party material in this
+   repository — and every artifact built from it — is governed by the
+   Parsaetak Proprietary License v1.1 (§2). This includes, non-exhaustively:
+   the Go product implementation (`cmd/`, `internal/`, `ui/`), the brand
+   identity constants and theme tokens, all product documentation
+   (`license.md`, `readme.md`, `agent.md`, `roadmap.md`, `ai-notes.md`),
+   the build and release scripts (`scripts/`), the CI machinery
+   (`.github/`), all tests, and the log-capture/consolidation subsystem.
+2. **No open-designated components exist in Phase 1.** Unlike the reference
+   SHEYTAN-LA repository, this repository contains no Apache-2.0 component
+   and no mixed-license model. Material becomes open only by an explicit,
+   written designation by Parsaetak in a future revision of this document
+   (see §5) — never by omission.
+3. **Third-party software keeps its own licenses.** Nothing in this
+   document relicenses any third-party dependency (see §4).
 
 ---
 
-## 2. IMPORTANT — READ CAREFULLY
+## 2. Parsaetak Proprietary License v1.1
 
-By installing, copying, or otherwise using SHEYTAN Music Visualizer ("the
-Software") you agree to be bound by the terms of the license in §3. If you
-do not agree, do not install or use the Software.
-
----
-
-## 3. Parsaetak Proprietary License v1.1
+The complete, legally binding license text governing every component of the
+Software:
 
 <!-- proprietary-text-begin -->
 
-PARSAETAK PROPRIETARY LICENSE
+PARSAETAK & SHEYTAN PROPRIETARY LICENSE
 =============================
 Version 1.1 · Last updated: 2026-09-26
 
 Copyright © 2024–2026 Parsaetak (https://github.com/Parsaetak). All rights
-reserved.
+reserved. Product of Parsaetak; authored by Parsa Tak.
 
 SCOPE OF THIS LICENSE
 ---------------------
-This license governs every component of SHEYTAN Music Visualizer. All
-first-party components of the Software are Proprietary under this license:
-the SHEYTAN-specific mechanisms, the product-specific implementation, the
-assets and designs, the documentation, and all other material of the
-Software. Third-party dependencies are governed by their own licenses and
-are not relicensed by this document (see §4 of LICENSE.md).
+This license governs every component of SHEYTAN Music Visualizer — the
+SHEYTAN-specific proprietary mechanisms, the product-specific
+implementation, the assets and designs, and all other first-party material
+listed in §1 of LICENSE.md. No components are designated as open; there is
+no open-source grant of any kind in this repository.
 
 IMPORTANT — READ CAREFULLY. By installing, copying, or otherwise using
 SHEYTAN Music Visualizer ("the Software") you agree to be bound by the terms
@@ -88,9 +74,9 @@ of this agreement. If you do not agree, do not install or use the Software.
    The Software — its source code, binaries, documentation, icons, and
    designs — is and remains the exclusive property of Parsaetak and its
    contributors. No ownership rights are transferred to you by this
-   license. This license attaches to the concrete expressions of the
-   Software (actual code, documentation, assets, and implementations); it
-   does not assert that abstract ideas, techniques, algorithms, or
+   license. This license attaches to the concrete expressions that make up
+   the Software (actual code, documentation, assets, and implementations);
+   it does not assert that abstract ideas, techniques, algorithms, or
    functionality described by those expressions are themselves protected
    intellectual property.
 
@@ -106,28 +92,26 @@ of this agreement. If you do not agree, do not install or use the Software.
    You may NOT redistribute, sublicense, sell, rent, lease, or host the
    Software (in whole or in part, original or modified) without prior
    written permission. Sharing an unmodified official release archive for
-   non-commercial personal use is permitted, provided all files —
-   including this license — remain intact.
+   non-commercial personal use is permitted, provided all files — including
+   this license — remain intact.
 
 5. DERIVATIVE WORKS
    You may modify the Software for your own personal use. You may NOT
    distribute modified versions, rebranded builds, or extractions of the
-   proprietary source code without prior written permission.
+   source code without prior written permission.
 
 6. LOCAL-FIRST PRIVACY
-   The Software is designed to run audio analysis, rendering and export
-   locally on your machine, with all data stored inside your own
-   application data directories. The Licensor designs the Software so that
-   your audio files, media contents, analysis results and project files
-   are processed locally and are not sent anywhere by the Software. Local
-   logs (application diagnostics, crash records) stay on your disk until
-   you choose to export or share them.
+   The Software is designed to run all audio analysis, rendering, and
+   export locally on your machine. It does not send your media files,
+   analysis results, or project data to any server, and it contains no
+   telemetry or mandatory account. Local logs (application diagnostics,
+   crash records) stay on your disk until you choose to export them.
 
 7. ACCEPTABLE USE
    You agree to use the Software only in compliance with applicable law.
-   You are solely responsible for the media you analyze, render, and
-   export with the Software, including respecting the rights of copyright
-   and other rights holders in any audio or visual material you process.
+   You are solely responsible for the media files you import, process, and
+   export with the Software, including securing any rights required for
+   third-party music you use.
 
 8. DISCLAIMER OF WARRANTY
    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
@@ -147,97 +131,159 @@ of this agreement. If you do not agree, do not install or use the Software.
 
 <!-- proprietary-text-end -->
 
-This document is a licensing statement prepared for the Software. It is not
-legal advice.
+Scope adaptation note: this text is the Parsaetak Proprietary License v1.1
+from the licensor's reference repository (SHEYTAN-LA, `LICENSE.md` §5,
+checked 2026-11-04), with the defined Software changed to SHEYTAN Music
+Visualizer, references to that repository's mixed-license classification
+removed (none applies here), and the privacy/acceptable-use clauses adapted
+to this product's local-first media scope. Substantive grant, permission,
+restriction, warranty, liability, termination and trademark terms are
+unchanged.
+
+---
+
+## 3. Trademarks
+
+SHEYTAN™, SHEYTAN Music Visualizer and the SHEYTAN logo are trademarks of
+Parsaetak. They identify the Software and its distribution; no license in
+this repository grants any right to use the SHEYTAN name, logo or branding
+beyond what trademark law allows, and nothing here implies endorsement of
+derived works, that the Software is open source, or that third parties are
+licensed to reuse SHEYTAN branding. The trademark grant and restrictions
+are stated in §2 clause 3 (Trademark) above.
 
 ---
 
 ## 4. Third-party software and attribution notices
 
-The first-party proprietary license does **not** relicense third-party
-dependencies. Each dependency keeps its own license, and the binary
-distributions of the Software link against them under those licenses.
+SHEYTAN Music Visualizer builds on third-party software. **Each component
+remains under its own license; nothing in this repository modifies any
+third-party licensing term.** Licenses below were read directly from the
+license files inside the module archives of the actual module graph at
+packaging time (2026-11-04). Verbatim license texts ship inside each
+module's archive (available via the Go module proxy and the respective
+repositories); they are reproduced here by reference, not copied.
 
-### 4.1 Toolchain
+### Go toolchain
 
-- **Go** (programming language and standard library), distributed by the Go
-  authors under the Go license (BSD-style; see
-  https://go.dev/LICENSE/). The Phase 1 module requires Go 1.27 with
-  toolchain go1.27.3.
-
-### 4.2 Linked Go module graph (actual Phase 1 dependencies)
-
-The table below was generated from the actual module graph of the shipped
-binaries (`go list -deps ./cmd/...` at Phase 1 completion) by reading each
-module's license file in the module cache. License identifiers were detected
-by content inspection; where a module ships a differently formatted license,
-the identifier is stated with the detection method and the verbatim text
-remains authoritative in the module's own file.
-
-| Module | Version | License |
+| Component | License | Where |
 |---|---|---|
-| `fyne.io/fyne/v2` | `v2.8.2` | BSD-3-Clause |
-| `fyne.io/systray` | `v1.12.3-0.20260810170012-af4e8e793ec4` | Apache-2.0 |
-| `github.com/BurntSushi/toml` | `v1.6.0` | MIT (module `COPYING`) |
-| `github.com/anthonynsimon/bild` | `v0.14.0` | MIT |
-| `github.com/clipperhouse/uax29/v2` | `v2.2.0` | MIT |
-| `github.com/fsnotify/fsnotify` | `v1.9.0` | BSD-3-Clause |
-| `github.com/fyne-io/image` | `v0.1.1` | BSD-3-Clause |
-| `github.com/fyne-io/oksvg` | `v0.2.1-0.20260918172519-a9af55fa95d9` | BSD-3-Clause |
-| `github.com/go-gl/gl` | `v0.0.0-20260331235117-4566fea9a276` | MIT |
-| `github.com/go-gl/glfw/v3.4/glfw` | `v0.1.0-pre.2` | BSD-3-Clause |
-| `github.com/go-text/render` | `v0.2.1` | BSD-3-Clause |
-| `github.com/go-text/typesetting` | `v0.3.5` | BSD-3-Clause |
-| `github.com/godbus/dbus/v5` | `v5.2.2` | BSD-2-Clause or BSD-3-Clause (module license offers both options) |
-| `github.com/jeandeaual/go-locale` | `v0.0.0-20250612000132-0ef82f21eade` | MIT |
-| `github.com/jsummers/gobmp` | `v0.0.0-20230614200233-a9de23ed2e25` | MIT (module `COPYING.txt`) |
-| `github.com/mattn/go-runewidth` | `v0.0.24` | MIT |
-| `github.com/nfnt/resize` | `v0.0.0-20180221191011-83c6a9932646` | ISC-style permissive text (verbatim in module `LICENSE`; detected by content, not SPDX header) |
-| `github.com/nicksnyder/go-i18n/v2` | `v2.5.1` | MIT |
-| `github.com/rymdport/portal` | `v0.4.2` | Apache-2.0 |
-| `github.com/srwiley/oksvg` | `v0.0.0-20221011165216-be6e8873101c` | BSD-3-Clause |
-| `github.com/srwiley/rasterx` | `v0.0.0-20220730225603-2ab79fcdd4ef` | BSD-3-Clause |
-| `github.com/yuin/goldmark` | `v1.8.2` | MIT |
-| `golang.org/x/image` | `v0.43.0` | BSD-3-Clause |
-| `golang.org/x/net` | `v0.35.0` | BSD-3-Clause |
-| `golang.org/x/sys` | `v0.30.0` | BSD-3-Clause |
-| `golang.org/x/text` | `v0.38.0` | BSD-3-Clause |
+| Go 1.27.3 toolchain and standard library | BSD-3-Clause (Go license) | https://go.dev/doc/devel/release — Copyright The Go Authors |
 
-Full license texts are distributed inside each module's source (Go module
-proxy cache / upstream repository) and remain authoritative. No copyright
-holder names have been invented in this table; where a copyright statement
-matters, read the module's own license file.
+### Direct dependency
 
-### 4.3 Native platform prerequisites (not distributed by this project)
+| Module | Version | License (verified in module archive) |
+|---|---|---|
+| fyne.io/fyne/v2 | v2.8.2 | BSD-3-Clause |
 
-Desktop builds link against platform-provided native libraries (for example
-Microsoft Win32/GDI on Windows; X11, Wayland, OpenGL/EGL drivers on Linux).
-Those components are governed by their own licenses and are supplied by the
-operating system, driver vendors, or the user's toolchain. The Software does
-not bundle proprietary system DLLs, GPU drivers, or unlicensed media codecs.
+Fyne v2.8.2 (https://github.com/fyne-io/fyne, release 2026-10-07) is the
+desktop UI toolkit linked into every desktop build.
+
+### Modules linked into the Phase 1 desktop binary
+
+| Module | Version | License (verified) |
+|---|---|---|
+| fyne.io/systray | v1.12.3-0.20260810170012-af4e8e793ec4 | Apache-2.0 |
+| github.com/BurntSushi/toml | v1.6.0 | MIT |
+| github.com/anthonynsimon/bild | v0.14.0 | MIT |
+| github.com/clipperhouse/uax29/v2 | v2.2.0 | MIT |
+| github.com/fsnotify/fsnotify | v1.9.0 | BSD-3-Clause |
+| github.com/fyne-io/image | v0.1.1 | BSD-3-Clause |
+| github.com/fyne-io/oksvg | v0.2.1-0.20260918172519-a9af55fa95d9 | BSD-3-Clause |
+| github.com/go-gl/gl | v0.0.0-20260331235117-4566fea9a276 | MIT |
+| github.com/go-gl/glfw/v3.4/glfw | v0.1.0-pre.2 | BSD-3-Clause |
+| github.com/go-text/render | v0.2.1 | BSD-3-Clause |
+| github.com/go-text/typesetting | v0.3.5 | BSD-3-Clause |
+| github.com/go-text/typesetting-utils | v0.0.0-20260419141703-4ffe8874dabc | BSD-3-Clause |
+| github.com/godbus/dbus/v5 | v5.2.2 | BSD-3-Clause |
+| github.com/jeandeaual/go-locale | v0.0.0-20250612000132-0ef82f21eade | MIT |
+| github.com/jsummers/gobmp | v0.0.0-20230614200233-a9de23ed2e25 | MIT |
+| github.com/mattn/go-runewidth | v0.0.24 | MIT |
+| github.com/nfnt/resize | v0.0.0-20180221191011-83c6a9932646 | ISC |
+| github.com/nicksnyder/go-i18n/v2 | v2.5.1 | MIT |
+| github.com/rymdport/portal | v0.4.2 | Apache-2.0 |
+| github.com/srwiley/oksvg | v0.0.0-20221011165216-be6e8873101c | BSD-3-Clause |
+| github.com/srwiley/rasterx | v0.0.0-20220730225603-2ab79fcdd4ef | BSD-3-Clause |
+| github.com/yuin/goldmark | v1.8.2 | MIT |
+| golang.org/x/image | v0.43.0 | BSD-3-Clause (Copyright The Go Authors) |
+| golang.org/x/net | v0.35.0 | BSD-3-Clause (Copyright The Go Authors) |
+| golang.org/x/sys | v0.30.0 | BSD-3-Clause (Copyright The Go Authors) |
+| golang.org/x/text | v0.38.0 | BSD-3-Clause (Copyright The Go Authors) |
+
+### Full module graph (superset of the linked set; build/test/tooling only)
+
+The Go module graph additionally contains the following modules. They are
+not necessarily linked into the product binaries (tooling, test, or
+platform-conditional dependencies), but are listed for completeness; each
+remains under its own license as verified in its module archive:
+
+| Module | Version | License (verified) |
+|---|---|---|
+| github.com/FyshOS/fancyfs | v0.0.1 | BSD-3-Clause |
+| github.com/akavel/rsrc | v0.10.2 | MIT |
+| github.com/cpuguy83/go-md2man/v2 | v2.0.7 | MIT |
+| github.com/creack/pty | v1.1.9 | MIT |
+| github.com/davecgh/go-spew | v1.1.1 | ISC |
+| github.com/fogleman/gg | v1.3.0 | MIT |
+| github.com/fyne-io/gl-js | v0.2.1-0.20260315212741-029c47fd27e8 | BSD-3-Clause |
+| github.com/fyne-io/glfw-js | v0.4.0 | MIT |
+| github.com/golang/freetype | v0.0.0-20170609003504-e2365dfdc4a0 | FTL or GPLv2+ (dual license, per module LICENSE) |
+| github.com/hack-pad/go-indexeddb | v0.3.2 | Apache-2.0 |
+| github.com/hack-pad/safejs | v0.1.0 | Apache-2.0 |
+| github.com/inconshreveable/mousetrap | v1.0.0 | Apache-2.0 |
+| github.com/jackmordaunt/icns/v2 | v2.2.7 | MIT |
+| github.com/josephspurrier/goversioninfo | v1.7.0 | MIT |
+| github.com/kr/text | v0.2.0 | MIT |
+| github.com/lucor/goinfo | v0.9.0 | BSD-3-Clause |
+| github.com/mcuadros/go-version | v0.0.0-20190830083331-035f6764e8d2 | MIT |
+| github.com/natefinch/atomic | v1.0.1 | MIT |
+| github.com/niemeyer/pretty | v0.0.0-20200227124842-a10e7caefd8e | MIT |
+| github.com/pmezard/go-difflib | v1.0.0 | BSD-3-Clause |
+| github.com/russross/blackfriday/v2 | v2.1.0 | BSD-3-Clause |
+| github.com/spf13/cobra | v0.0.5 | Apache-2.0 |
+| github.com/spf13/pflag | v1.0.3 | BSD-3-Clause |
+| github.com/stretchr/objx | v0.5.2 | MIT |
+| github.com/stretchr/testify | v1.11.1 | MIT |
+| github.com/urfave/cli/v2 | v2.27.7 | MIT |
+| github.com/xrash/smetrics | v0.0.0-20240521201337-686a1a2994c1 | MIT |
+| golang.org/x/crypto | v0.33.0 | BSD-3-Clause |
+| golang.org/x/mobile | v0.0.0-20231127183840-76ac6878050a | BSD-3-Clause |
+| golang.org/x/mod | v0.36.0 | BSD-3-Clause |
+| golang.org/x/sync | v0.21.0 | BSD-3-Clause |
+| golang.org/x/term | v0.29.0 | BSD-3-Clause |
+| golang.org/x/tools | v0.45.0 | BSD-3-Clause |
+| golang.org/x/tools/go/vcs | v0.1.0-deprecated | BSD-3-Clause |
+| gopkg.in/check.v1 | v1.0.0-20200227125254-8fa46927fb4f | BSD-3-Clause |
+| gopkg.in/yaml.v3 | v3.0.1 | Apache-2.0 |
+
+Inventory method note: license identifiers above were classified by reading
+each module's license file in the extracted Go module cache
+(GOMODCACHE) during Phase 1 packaging. This inventory is informational;
+the verbatim license text in each module archive is authoritative for that
+module.
 
 ---
 
-## 5. Trademarks
+## 5. Governance — changing the licensing model
 
-SHEYTAN™ and the SHEYTAN logo are trademarks of Parsaetak. They identify the
-Software and its distribution; no license in this repository grants any
-right to use the SHEYTAN name, logo or branding beyond what trademark law
-allows, and nothing here implies endorsement of derived works. The trademark
-grant and restrictions are stated in §3 clause 3 (Trademark) of the
-Parsaetak Proprietary License above.
+Only the repository maintainer (Parsaetak) may change this licensing model:
 
----
-
-## 6. Governance
-
-Only the licensor (Parsaetak) may change a classification, grant an
-exception, or relicense any component. Any such change must be recorded in
-this document with the rationale and the date.
+1. To designate a component as open in the future, this document must be
+   revised by Parsaetak to name the component and its license explicitly,
+   and every file in that component must carry the corresponding license
+   header. There are no such components as of Phase 1.
+2. Any change must be described in the repository history and reflected in
+   `ai-notes.md`.
 
 ---
 
-## 7. Contact
+## 6. Contact
 
 Licensing questions, proprietary-use inquiries and exceptions:
 **https://github.com/Parsaetak** (use the contact channel listed there).
+
+Trademark and branding inquiries: the same contact point.
+
+---
+
+This document is provided for licensing information. It is not legal advice.

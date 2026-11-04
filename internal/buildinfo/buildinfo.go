@@ -1,90 +1,70 @@
-// Package buildinfo is the single version/build metadata authority for
+// Package buildinfo is the single version / build metadata authority for
 // SHEYTAN Music Visualizer.
 //
-// The Version, Commit and BuildDate variables may be set at link time:
-//
-//	go build -ldflags "-X github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo.Version=0.1.0 \
-//	                   -X .../buildinfo.Commit=abcdef -X .../buildinfo.BuildDate=2026-11-04T00:00:00Z"
-//
-// Values are normalized when read: unset or empty values fall back to safe
-// development defaults, and whitespace is trimmed. There must be no second
-// competing version constant anywhere else in the product.
+// Version, commit and build date may be injected at link time with
+// -ldflags "-X github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo.version=...".
+// Unset values fall back to safe development defaults; all values are
+// normalized so consumers never see empty or multi-line fields.
 package buildinfo
 
 import (
-	"errors"
+	"fmt"
 	"runtime"
 	"strings"
+	"unicode"
 )
 
-// Link-time variables. Defaults describe an untagged development build.
+// Linker-injected variables. Keep this the only competing version
+// authority in the repository.
 var (
-	Version   = "0.1.0-dev" // default dev version authority (recorded in ai-notes.md)
-	Commit    = "unknown"
-	BuildDate = "unknown"
+	version = "0.1.0-dev"
+	commit  = "unknown"
+	date    = "unknown"
+	builtBy = "local"
 )
 
-const (
-	defaultVersion   = "0.1.0-dev"
-	defaultTimestamp = "unknown"
-)
-
-// Info is the immutable build identity snapshot.
+// Info is the normalized build metadata snapshot.
 type Info struct {
-	Version   string `json:"version"`
-	Commit    string `json:"commit"`
-	BuildDate string `json:"build_date"`
-	GoVersion string `json:"go_version"`
-	GOOS      string `json:"goos"`
-	GOARCH    string `json:"goarch"`
+	Version   string
+	Commit    string
+	Date      string
+	BuiltBy   string
+	GoVersion string
 }
 
-// Get returns the normalized build info.
-func Get() Info {
-	v := strings.TrimSpace(Version)
-	if v == "" {
-		v = defaultVersion
+// sanitize collapses control characters (including newlines) and trims
+// space so injected values cannot forge multi-line log records.
+func sanitize(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, strings.TrimSpace(s))
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
 	}
-	c := strings.TrimSpace(Commit)
-	if c == "" {
-		c = defaultTimestamp
-	}
-	d := strings.TrimSpace(BuildDate)
-	if d == "" {
-		d = defaultTimestamp
-	}
+	return s
+}
+
+// Normalized returns the validated build metadata. Empty injected values
+// fall back to development defaults; control characters are collapsed.
+func Normalized() Info {
 	return Info{
-		Version:   v,
-		Commit:    c,
-		BuildDate: d,
-		GoVersion: runtime.Version(),
-		GOOS:      runtime.GOOS,
-		GOARCH:    runtime.GOARCH,
+		Version:   orDefault(sanitize(version), "0.1.0-dev"),
+		Commit:    orDefault(sanitize(commit), "unknown"),
+		Date:      orDefault(sanitize(date), "unknown"),
+		BuiltBy:   orDefault(sanitize(builtBy), "local"),
+		GoVersion: sanitize(runtime.Version()),
 	}
 }
 
-// String renders the canonical single-line version banner used by --version.
-func (i Info) String() string {
-	return i.Version + " (commit " + i.Commit + ", built " + i.BuildDate +
-		", " + i.GoVersion + ", " + i.GOOS + "/" + i.GOARCH + ")"
-}
-
-// Validate reports whether the build metadata is internally consistent.
-// It is part of the --self-check contract: it must never fail for the
-// default development values, and must never pass with fabricated empties.
-func Validate() error {
-	i := Get()
-	if i.Version == "" {
-		return errors.New("buildinfo: version is empty")
-	}
-	if i.Commit == "" {
-		return errors.New("buildinfo: commit is empty")
-	}
-	if i.BuildDate == "" {
-		return errors.New("buildinfo: build date is empty")
-	}
-	if i.GoVersion == "" {
-		return errors.New("buildinfo: go version unavailable")
-	}
-	return nil
+// Line returns the single-line identity string used by --version.
+func Line() string {
+	i := Normalized()
+	return fmt.Sprintf("%s (commit %s, built %s by %s, %s)",
+		i.Version, i.Commit, i.Date, i.BuiltBy, i.GoVersion)
 }

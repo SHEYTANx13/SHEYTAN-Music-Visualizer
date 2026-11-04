@@ -1,86 +1,85 @@
-# Capture-Step.ps1 — first-byte command capture for SHEYTAN Music Visualizer
-# build and CI logs on Windows. Mirrors scripts/ci/capture.sh. Adapted from
-# the proven SHEYTAN-LA contract with two hardening changes:
-#   - a script-level exception can never be reported as PASS even when
-#     $LASTEXITCODE is 0 or unset;
-#   - output is written UTF-8 without BOM (comparisons/concatenation safe).
+# Capture-Step — Phase 1 command-capture helper (PowerShell side).
 #
-# Usage:
-#   ./scripts/ci/Capture-Step.ps1 -Job "windows" -Step "build" `
-#       -Log "ci-logs/windows/build.log" -Command { go build ./... }
-#
-# Optional environment: CAPTURE_INDEX — one line is appended per captured
-# command: JOB|STEP|log|EXIT|VERDICT|STARTED|ENDED
+# Dot-source this file, ensure $env:CI_LOG_FILE is set, then call:
+#   Capture-Step -Job <job> -Step <step> -Command { <native command> }
 #
 # Contract:
-#   - stdout + stderr captured from the first byte into the log.
-#   - $LASTEXITCODE saved IMMEDIATELY after the native command exits; it is
-#     not overwritten by Tee-Object, formatting or another command.
-#   - Structured STARTED / EXIT_CODE / ENDED records with the command text.
-#   - The script throws on FAIL so the step terminates; callers that must
-#     continue (independent diagnostic gates) catch, record, and return a
-#     non-zero aggregate themselves. Never swallow with `|| $true` semantics.
-param(
-  [Parameter(Mandatory = $true)][string]$Job,
-  [Parameter(Mandatory = $true)][string]$Step,
-  [Parameter(Mandatory = $true)][string]$Log,
-  [Parameter(Mandatory = $true)][scriptblock]$Command
-)
+#   - Capture native stdout AND stderr from the first byte into
+#     $env:CI_LOG_FILE (via Tee-Object -Append).
+#   - Save $LASTEXITCODE IMMEDIATELY after the native process exits,
+#     before formatting or another command can overwrite it.
+#   - Script-level PowerShell exceptions are recorded as
+#     "ERROR: PowerShell exception: ..." with exit code 1; an exception
+#     is never reported as PASS just because $LASTEXITCODE was unset.
+#   - Append a structured record: JOB, STEP, STARTED, WORKDIR, COMMAND,
+#     TOOL_CONTEXT, output, EXIT_CODE with PASS|FAIL verdict, ENDED.
+#   - Return the original exit code; never mask a non-zero status.
+#
+# Note: -Command MUST invoke native executables (go, git, gcc, ...).
+# For cmdlet-only blocks $LASTEXITCODE is not authoritative and the
+# caller should not use this helper.
+#
+# Encoding: UTF-8 without BOM is used consistently for the log
+# (PowerShell 7 default for Add-Content / Tee-Object).
 
-$ErrorActionPreference = 'Continue'
-$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+function Capture-Step {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Job,
+        [Parameter(Mandatory = $true)][string]$Step,
+        [Parameter(Mandatory = $true)][scriptblock]$Command,
+        [string]$ToolContext = "-"
+    )
+    if (-not $env:CI_LOG_FILE) {
+        throw "Capture-Step: `$env:CI_LOG_FILE must be set before the first call."
+    }
+    $workdir = (Get-Location).Path
+    $started = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
-$dir = Split-Path -Parent $Log
-if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    Add-Content -Path $env:CI_LOG_FILE -Value @(
+        ""
+        "===== COMMAND BEGIN ====="
+        "JOB: $Job"
+        "STEP: $Step"
+        "STARTED: $started"
+        "WORKDIR: $workdir"
+        "COMMAND: $Command"
+        "TOOL_CONTEXT: $ToolContext"
+        "--- OUTPUT (stdout+stderr from first byte) ---"
+    )
 
-$startUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-$cmdText = $Command.ToString().Trim()
+    $rc = $null
+    $exception = $null
+    try {
+        & $Command 2>&1 | Tee-Object -FilePath $env:CI_LOG_FILE -Append
+    }
+    catch {
+        $exception = $_
+    }
 
-@(
-  '=== COMMAND RECORD ==='
-  "JOB: $Job"
-  "STEP: $Step"
-  "STARTED: $startUtc"
-  "WORKDIR: $PWD"
-  "COMMAND: $cmdText"
-) | ForEach-Object { [IO.File]::AppendAllText($Log, $_ + [Environment]::NewLine, $utf8NoBom) }
+    # Save the native exit code immediately, before anything else can
+    # overwrite $LASTEXITCODE.
+    if ($null -ne $exception) {
+        Add-Content -Path $env:CI_LOG_FILE -Value ("ERROR: PowerShell exception: " + $exception.ToString())
+        $rc = 1
+    }
+    elseif ($null -ne $LASTEXITCODE) {
+        $rc = $LASTEXITCODE
+    }
+    else {
+        # No native process ran and no exception was thrown.
+        $rc = 0
+    }
 
-$threw = $false
-try {
-  & $Command 2>&1 | ForEach-Object { "$_" } | ForEach-Object {
-    [IO.File]::AppendAllText($Log, $_ + [Environment]::NewLine, $utf8NoBom)
-  }
-} catch {
-  $threw = $true
-  @(
-    "ERROR: $($_.Exception.Message)"
-    "ERRORTYPE: $($_.Exception.GetType().FullName)"
-    "TARGET: $($_.TargetObject)"
-  ) | ForEach-Object { [IO.File]::AppendAllText($Log, $_ + [Environment]::NewLine, $utf8NoBom) }
+    $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $verdict = if ($rc -eq 0) { "PASS" } else { "FAIL" }
+    Add-Content -Path $env:CI_LOG_FILE -Value @(
+        "--- END OUTPUT ---"
+        "EXIT_CODE: $rc $verdict"
+        "ENDED: $ended"
+        "===== COMMAND END ====="
+    )
+
+    $script:LastCaptureExit = $rc
+    return $rc
 }
-
-# Save the exit status of the last native command IMMEDIATELY.
-$code = 0
-if (Get-Variable -Name LASTEXITCODE -ErrorAction SilentlyContinue -ValueOnly) {
-  $code = $LASTEXITCODE
-}
-if ($threw -and $code -eq 0) { $code = 1 }  # an exception path is never PASS
-
-$endUtc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-$verdict = 'FAIL'
-if (($code -eq 0) -and (-not $threw)) { $verdict = 'PASS' }
-
-@(
-  "EXIT_CODE: $code $verdict"
-  "ENDED: $endUtc"
-  '=== END COMMAND RECORD ==='
-) | ForEach-Object { [IO.File]::AppendAllText($Log, $_ + [Environment]::NewLine, $utf8NoBom) }
-
-if ($env:CAPTURE_INDEX) {
-  [IO.File]::AppendAllText($env:CAPTURE_INDEX, "$Job|$Step|$Log|$code|$verdict|$startUtc|$endUtc" + [Environment]::NewLine, $utf8NoBom)
-}
-
-if ($code -ne 0) {
-  throw "step '$Step' failed with exit code $code (see $Log)"
-}
-exit $code

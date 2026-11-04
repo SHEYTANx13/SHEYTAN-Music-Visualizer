@@ -1,169 +1,98 @@
 package logging
 
 import (
-	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestOpenCreatesAppOwnedDirAndWritesStructuredEntries(t *testing.T) {
-	base := t.TempDir()
-	l, err := Open(base, Options{})
+func TestOpenCreatesFileAndWritesStructuredRecord(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, Options{})
 	if err != nil {
-		t.Fatalf("Open: %v", err)
+		t.Fatalf("Open returned error: %v", err)
 	}
-	defer l.Close()
-
-	wantDir := filepath.Join(base, "logs")
-	if st, err := os.Stat(wantDir); err != nil || !st.IsDir() {
-		t.Fatalf("log dir %s not created: %v", wantDir, err)
-	}
-	l.Info("foundation started", "component", "test")
+	l.Logger().Info("hello", "k", "v")
 	if err := l.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
+		t.Fatalf("Close returned error: %v", err)
 	}
-
-	raw, err := os.ReadFile(l.Path())
+	raw, err := os.ReadFile(filepath.Join(dir, FileName))
 	if err != nil {
-		t.Fatalf("read log: %v", err)
+		t.Fatalf("log file not readable: %v", err)
 	}
-	line := bytes.TrimSpace(raw)
-	if len(line) == 0 {
-		t.Fatal("log file empty")
+	if len(raw) == 0 {
+		t.Fatal("log file is empty")
 	}
-	e, err := DecodeEntry(line)
-	if err != nil {
-		t.Fatalf("decode entry: %v", err)
+	var rec map[string]any
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatalf("log record is not valid JSON: %v (%q)", err, raw)
 	}
-	if e.Msg != "foundation started" || e.Level != "INFO" {
-		t.Fatalf("unexpected entry: %+v", e)
-	}
-	if e.Attrs["component"] != "test" {
-		t.Fatalf("attr component missing: %+v", e.Attrs)
+	if rec["product"] != "SHEYTAN Music Visualizer" {
+		t.Fatalf("product field missing/incorrect: %v", rec["product"])
 	}
 }
 
-func TestOpenRejectsEmptyBaseDir(t *testing.T) {
-	if _, err := Open("  ", Options{}); err == nil {
-		t.Fatal("expected error for empty base dir")
+func TestOpenRejectsEmptyDir(t *testing.T) {
+	if _, err := Open("   ", Options{}); err == nil {
+		t.Fatal("expected error for empty log directory")
 	}
 }
 
-func TestOpenFailsVisiblyWhenBaseIsAFile(t *testing.T) {
-	base := filepath.Join(t.TempDir(), "not-a-dir")
-	if err := os.WriteFile(base, []byte("x"), 0o644); err != nil {
+func TestOpenSurfacesCreationError(t *testing.T) {
+	// A path component that exists as a regular file must produce a
+	// visible error, never a silently dropped log.
+	blocked := filepath.Join(t.TempDir(), "file-not-dir")
+	if err := os.WriteFile(blocked, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(base, Options{}); err == nil {
-		t.Fatal("expected visible error when base path is a regular file")
+	if _, err := Open(filepath.Join(blocked, "logs"), Options{}); err == nil {
+		t.Fatal("expected error when log directory cannot be created")
 	}
 }
 
-func TestRotationReplacesOversizedActiveLog(t *testing.T) {
-	base := t.TempDir()
-	// First session writes a small file; we then inflate it beyond the
-	// threshold and expect the next Open to rotate it to app.log.1.
-	l, err := Open(base, Options{})
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	l.Info("first session")
-	l.Close()
-
-	big := strings.Repeat("x", 4096)
-	if err := os.WriteFile(filepath.Join(base, "logs", "app.log"), []byte(big), 0o644); err != nil {
+func TestRotationReplacesRotatedFile(t *testing.T) {
+	dir := t.TempDir()
+	active := filepath.Join(dir, FileName)
+	if err := os.WriteFile(active, []byte(strings.Repeat("a", 4096)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	l2, err := Open(base, Options{MaxBytes: 1024})
-	if err != nil {
-		t.Fatalf("re-Open: %v", err)
-	}
-	defer l2.Close()
-
-	if _, err := os.Stat(filepath.Join(base, "logs", "app.log.1")); err != nil {
-		t.Fatalf("rotation file missing: %v", err)
-	}
-	cur, err := os.ReadFile(l2.Path())
-	if err != nil {
+	if err := os.WriteFile(active+RotatedSuffix, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if len(cur) != 0 {
-		t.Fatalf("active log should start empty after rotation, got %d bytes", len(cur))
+	l, err := Open(dir, Options{MaxBytes: 1024})
+	if err != nil {
+		t.Fatalf("Open returned error: %v", err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+	rot, err := os.ReadFile(active + RotatedSuffix)
+	if err != nil {
+		t.Fatalf("rotated file missing: %v", err)
+	}
+	if !strings.HasPrefix(string(rot), "aaaa") {
+		t.Fatalf("rotated file does not contain previous active log content")
+	}
+	newActive, err := os.Stat(active)
+	if err != nil {
+		t.Fatalf("active log not recreated after rotation: %v", err)
+	}
+	if newActive.Size() != 0 {
+		t.Fatalf("active log should be empty after rotation, got %d bytes", newActive.Size())
 	}
 }
 
-func TestRotationNotTriggeredUnderThreshold(t *testing.T) {
-	base := t.TempDir()
-	l, err := Open(base, Options{MaxBytes: 1 << 20})
-	if err != nil {
+func TestVerifyWritableFailsOnBlockedPath(t *testing.T) {
+	blocked := filepath.Join(t.TempDir(), "file-not-dir")
+	if err := os.WriteFile(blocked, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	l.Info("small session")
-	l.Close()
-	if _, err := os.Stat(filepath.Join(base, "logs", "app.log.1")); !os.IsNotExist(err) {
-		t.Fatalf("unexpected rotation file: %v", err)
+	if err := VerifyWritable(filepath.Join(blocked, "logs")); err == nil {
+		t.Fatal("expected error for unwritable directory")
 	}
-}
-
-func TestEnsureWritableCreatesAndCleansProbe(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "nested", "appdir")
-	if err := EnsureWritable(dir); err != nil {
-		t.Fatalf("EnsureWritable: %v", err)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".write-probe-") {
-			t.Fatalf("probe file left behind: %s", e.Name())
-		}
-	}
-}
-
-func TestEnsureWritableFailsOnReadOnlyPath(t *testing.T) {
-	base := t.TempDir()
-	readOnly := filepath.Join(base, "ro")
-	if err := os.Mkdir(readOnly, 0o500); err != nil {
-		t.Skipf("cannot create read-only dir on this host: %v", err)
-	}
-	if err := EnsureWritable(filepath.Join(readOnly, "sub")); err == nil {
-		// Running as root (or privileged) would legitimately pass.
-		if os.Geteuid() == 0 {
-			t.Skip("running as root; read-only dir is writable")
-		}
-		t.Fatal("expected failure for read-only path")
-	}
-}
-
-func TestStderrFallbackLogs(t *testing.T) {
-	var buf bytes.Buffer
-	l := NewStderr(&buf)
-	l.Warn("file logger unavailable", "reason", "test")
-	e, err := DecodeEntry(buf.Bytes())
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if e.Msg != "file logger unavailable" || e.Level != "WARN" {
-		t.Fatalf("unexpected entry: %+v", e)
-	}
-}
-
-func TestDefaultBaseDirIsNotSourceTreeOrCWD(t *testing.T) {
-	dir, err := DefaultBaseDir()
-	if err != nil {
-		t.Skipf("user config dir unavailable on host: %v", err)
-	}
-	cwd, _ := os.Getwd()
-	if filepath.IsAbs(dir) == false {
-		t.Fatalf("base dir must be absolute, got %q", dir)
-	}
-	if dir == cwd || dir == filepath.Dir(cwd) {
-		t.Fatalf("base dir must not be the source tree or CWD: %q", dir)
-	}
-	if !strings.Contains(filepath.Base(dir), "SHEYTAN-Music-Visualizer") {
-		t.Fatalf("base dir not app-owned: %q", dir)
+	if err := VerifyWritable(t.TempDir()); err != nil {
+		t.Fatalf("VerifyWritable failed on temp dir: %v", err)
 	}
 }

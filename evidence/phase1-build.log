@@ -1,1239 +1,1616 @@
-==============================================================================
-SHEYTAN MUSIC VISUALIZER — PHASE 1 LOCAL VERIFICATION TRANSCRIPT
-==============================================================================
-product: SHEYTAN Music Visualizer (SHEYTAN™)
-phase: Phase 1 — Foundation
-generated (UTC): 2026-11-04T13:03:13Z
-host: Linux x86_64, kernel 5.10.134-013.15.kangaroo.al8.x86_64
-go: go version go1.27.3 linux/amd64
-gcc: gcc (Debian 14.2.0-19) 14.2.0
-git: git version 2.47.3
-repo root: /home/z/my-project/SHEYTAN-Music-Visualizer
-branch: main
-HEAD: 29c30b72513ddb903332daec3c53fa72fdd02137
-worktree: 1 modified/untracked path(s) at assembly time
-capture job: package
-note: every command below was captured from the first byte with its real
-      exit code. Retries and earlier failures are preserved, never overwritten.
-note: the delivered source archive is rebuilt after this log is assembled;
-      final archive integrity and extracted-tree results are reported in the
-      handoff note (note.md) and ai-notes.md.
+==============================================================
+SHEYTAN MUSIC VISUALIZER — PHASE 1 LOCAL VERIFICATION (LINUX)
+Product:  SHEYTAN Music Visualizer (SHEYTAN™, licensor Parsaetak)
+Mode:     desktop
+Host:     Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
+Started:  2026-11-04T12:37:35Z
+==============================================================
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/01-gofmt.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: gofmt
-STARTED: 2026-11-04T12:52:29Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c unformatted=$(gofmt -l . ); if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: toolchain-report
+STARTED: 2026-11-04T12:37:35Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c go version; echo "GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=$(go env CGO_ENABLED) GOTOOLCHAIN=$(go env GOTOOLCHAIN)"; echo "GOMOD=$(go env GOMOD)"; gcc --version | head -1; pkg-config --version
+TOOL_CONTEXT: gate:toolchain
+--- OUTPUT (stdout+stderr from first byte) ---
+go version go1.27.3 linux/amd64
+GOOS=linux GOARCH=amd64 CGO_ENABLED=1 GOTOOLCHAIN=auto
+GOMOD=/home/z/my-project/work/SHEYTAN-Music-Visualizer/go.mod
+gcc (Debian 14.2.0-19) 14.2.0
+1.8.1
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:29Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: gofmt
-STARTED: 2026-11-04T12:53:59Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c unformatted=$(gofmt -l . ); if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:53:59Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: gofmt
-STARTED: 2026-11-04T12:55:01Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c unformatted=$(gofmt -l . ); if [ -n "$unformatted" ]; then echo "$unformatted"; exit 1; fi
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:01Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:37:35Z
+===== COMMAND END =====
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/02-tidy-drift.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tidy-drift
-STARTED: 2026-11-04T12:52:29Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: git diff --exit-code -- go.mod go.sum
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:29Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tidy-drift
-STARTED: 2026-11-04T12:53:59Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: git diff --exit-code -- go.mod go.sum
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:53:59Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tidy-drift
-STARTED: 2026-11-04T12:55:01Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: git diff --exit-code -- go.mod go.sum
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:01Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/02-tidy.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tidy
-STARTED: 2026-11-04T12:52:29Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go mod tidy
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:29Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tidy
-STARTED: 2026-11-04T12:53:59Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go mod tidy
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:53:59Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tidy
-STARTED: 2026-11-04T12:55:01Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go mod tidy
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:01Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/03-test.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tests
-STARTED: 2026-11-04T12:52:29Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go test ./...
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:29Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tests
-STARTED: 2026-11-04T12:53:59Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go test ./...
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:54:00Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: tests
-STARTED: 2026-11-04T12:55:01Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go test ./...
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:01Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/04-vet.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: vet
-STARTED: 2026-11-04T12:52:29Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go vet ./...
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:30Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: vet
-STARTED: 2026-11-04T12:54:00Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go vet ./...
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:54:00Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: vet
-STARTED: 2026-11-04T12:55:01Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go vet ./...
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:01Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/05-build-all.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: build-packages
-STARTED: 2026-11-04T12:52:30Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go build ./...
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:31Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: build-packages
-STARTED: 2026-11-04T12:54:00Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go build ./...
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:54:02Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: build-packages
-STARTED: 2026-11-04T12:55:01Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go build ./...
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:03Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/06-build-exe.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: native-executable
-STARTED: 2026-11-04T12:52:31Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go build -o /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 ./cmd/sheytan-music-visualizer
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:32Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: native-executable
-STARTED: 2026-11-04T12:54:02Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go build -o /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 ./cmd/sheytan-music-visualizer
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:54:02Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: native-executable
-STARTED: 2026-11-04T12:55:03Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go build -o /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 ./cmd/sheytan-music-visualizer
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:03Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/07-version.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: version
-STARTED: 2026-11-04T12:52:32Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 --version
-SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown, go1.27.3, linux/amd64)
-© 2024–2026 Parsaetak. All rights reserved. Parsaetak. SHEYTAN™ and the SHEYTAN logo are trademarks of Parsaetak. They identify SHEYTAN Music Visualizer and its distribution. No license grants any right to use the SHEYTAN name, logo or branding beyond what trademark law allows, and nothing implies endorsement of derived works.
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:32Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: version
-STARTED: 2026-11-04T12:54:02Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 --version
-SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown, go1.27.3, linux/amd64)
-© 2024–2026 Parsaetak. All rights reserved. Parsaetak. SHEYTAN™ and the SHEYTAN logo are trademarks of Parsaetak. They identify SHEYTAN Music Visualizer and its distribution. No license grants any right to use the SHEYTAN name, logo or branding beyond what trademark law allows, and nothing implies endorsement of derived works.
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:54:02Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: version
-STARTED: 2026-11-04T12:55:03Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 --version
-SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown, go1.27.3, linux/amd64)
-© 2024–2026 Parsaetak. All rights reserved. Parsaetak. SHEYTAN™ and the SHEYTAN logo are trademarks of Parsaetak. They identify SHEYTAN Music Visualizer and its distribution. No license grants any right to use the SHEYTAN name, logo or branding beyond what trademark law allows, and nothing implies endorsement of derived works.
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:03Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/08-self-check.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: self-check
-STARTED: 2026-11-04T12:52:32Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 --self-check
-PASS buildinfo
-PASS brand-identity
-PASS brand-legal
-PASS app-log-dir
-PASS app-log-write
-INFO log file: /home/z/.config/SHEYTAN-Music-Visualizer/logs/app.log
-SELF-CHECK RESULT: PASS
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:32Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: self-check
-STARTED: 2026-11-04T12:54:02Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 --self-check
-PASS buildinfo
-PASS brand-identity
-PASS brand-legal
-PASS app-log-dir
-PASS app-log-write
-INFO log file: /home/z/.config/SHEYTAN-Music-Visualizer/logs/app.log
-SELF-CHECK RESULT: PASS
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:54:02Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: self-check
-STARTED: 2026-11-04T12:55:03Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: /home/z/my-project/SHEYTAN-Music-Visualizer/dist/sheytan-music-visualizer-linux-x64 --self-check
-PASS buildinfo
-PASS brand-identity
-PASS brand-legal
-PASS app-log-dir
-PASS app-log-write
-INFO log file: /home/z/.config/SHEYTAN-Music-Visualizer/logs/app.log
-SELF-CHECK RESULT: PASS
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:03Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/09-collector-fixtures.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: linux
-STEP: collector-fixtures
-STARTED: 2026-11-04T12:52:32Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go test -v ./internal/cilogreport/
-=== RUN   TestAllJobsHaveLogsCompleteReport
---- PASS: TestAllJobsHaveLogsCompleteReport (0.00s)
-=== RUN   TestFailedCommandIndexedAndLogPreserved
---- PASS: TestFailedCommandIndexedAndLogPreserved (0.00s)
-=== RUN   TestWarningsIndexed
---- PASS: TestWarningsIndexed (0.00s)
-=== RUN   TestEmptyLogFileCapturedAndPreserved
---- PASS: TestEmptyLogFileCapturedAndPreserved (0.00s)
-=== RUN   TestMissingSourceFailsClosedAfterReport
---- PASS: TestMissingSourceFailsClosedAfterReport (0.00s)
-=== RUN   TestSkippedJobIsNeverStarted
---- PASS: TestSkippedJobIsNeverStarted (0.00s)
-=== RUN   TestSameBasenameInTwoNamespacesRetained
---- PASS: TestSameBasenameInTwoNamespacesRetained (0.00s)
-=== RUN   TestDeterministicFileOrder
---- PASS: TestDeterministicFileOrder (0.00s)
-=== RUN   TestRedRunDistinguishesFailedMissingSkipped
---- PASS: TestRedRunDistinguishesFailedMissingSkipped (0.00s)
-=== RUN   TestUnicodeAndSpacesPreserved
---- PASS: TestUnicodeAndSpacesPreserved (0.00s)
-=== RUN   TestManifestValidation
---- PASS: TestManifestValidation (0.00s)
-=== RUN   TestManifestStrictFields
---- PASS: TestManifestStrictFields (0.00s)
-PASS
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:52:32Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: collector-fixtures
-STARTED: 2026-11-04T12:54:02Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go test -v ./internal/cilogreport/
-=== RUN   TestAllJobsHaveLogsCompleteReport
---- PASS: TestAllJobsHaveLogsCompleteReport (0.00s)
-=== RUN   TestFailedCommandIndexedAndLogPreserved
---- PASS: TestFailedCommandIndexedAndLogPreserved (0.00s)
-=== RUN   TestWarningsIndexed
---- PASS: TestWarningsIndexed (0.00s)
-=== RUN   TestEmptyLogFileCapturedAndPreserved
---- PASS: TestEmptyLogFileCapturedAndPreserved (0.00s)
-=== RUN   TestMissingSourceFailsClosedAfterReport
---- PASS: TestMissingSourceFailsClosedAfterReport (0.00s)
-=== RUN   TestSkippedJobIsNeverStarted
---- PASS: TestSkippedJobIsNeverStarted (0.00s)
-=== RUN   TestSameBasenameInTwoNamespacesRetained
---- PASS: TestSameBasenameInTwoNamespacesRetained (0.00s)
-=== RUN   TestDeterministicFileOrder
---- PASS: TestDeterministicFileOrder (0.00s)
-=== RUN   TestRedRunDistinguishesFailedMissingSkipped
---- PASS: TestRedRunDistinguishesFailedMissingSkipped (0.00s)
-=== RUN   TestUnicodeAndSpacesPreserved
---- PASS: TestUnicodeAndSpacesPreserved (0.00s)
-=== RUN   TestManifestValidation
---- PASS: TestManifestValidation (0.00s)
-=== RUN   TestManifestStrictFields
---- PASS: TestManifestStrictFields (0.00s)
-PASS
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:54:02Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: linux
-STEP: collector-fixtures
-STARTED: 2026-11-04T12:55:03Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go test -v ./internal/cilogreport/
-=== RUN   TestAllJobsHaveLogsCompleteReport
---- PASS: TestAllJobsHaveLogsCompleteReport (0.00s)
-=== RUN   TestFailedCommandIndexedAndLogPreserved
---- PASS: TestFailedCommandIndexedAndLogPreserved (0.00s)
-=== RUN   TestWarningsIndexed
---- PASS: TestWarningsIndexed (0.00s)
-=== RUN   TestEmptyLogFileCapturedAndPreserved
---- PASS: TestEmptyLogFileCapturedAndPreserved (0.00s)
-=== RUN   TestMissingSourceFailsClosedAfterReport
---- PASS: TestMissingSourceFailsClosedAfterReport (0.00s)
-=== RUN   TestSkippedJobIsNeverStarted
---- PASS: TestSkippedJobIsNeverStarted (0.00s)
-=== RUN   TestSameBasenameInTwoNamespacesRetained
---- PASS: TestSameBasenameInTwoNamespacesRetained (0.00s)
-=== RUN   TestDeterministicFileOrder
---- PASS: TestDeterministicFileOrder (0.00s)
-=== RUN   TestRedRunDistinguishesFailedMissingSkipped
---- PASS: TestRedRunDistinguishesFailedMissingSkipped (0.00s)
-=== RUN   TestUnicodeAndSpacesPreserved
---- PASS: TestUnicodeAndSpacesPreserved (0.00s)
-=== RUN   TestManifestValidation
---- PASS: TestManifestValidation (0.00s)
-=== RUN   TestManifestStrictFields
---- PASS: TestManifestStrictFields (0.00s)
-PASS
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:03Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/summary-notes.log
-------------------------------------------------------------------------------
-FYNE_DEPS_PREFIX active: /home/z/fyne-deps
-=== SHEYTAN Music Visualizer — Linux build gates ===
-host: Linux x86_64  kernel: 5.10.134-013.15.kangaroo.al8.x86_64
-started (UTC): 2026-11-04T12:52:29Z
-FYNE_DEPS_PREFIX active: /home/z/fyne-deps
-=== SHEYTAN Music Visualizer — Linux build gates ===
-host: Linux x86_64  kernel: 5.10.134-013.15.kangaroo.al8.x86_64
-started (UTC): 2026-11-04T12:53:59Z
-FYNE_DEPS_PREFIX active: /home/z/fyne-deps
-=== SHEYTAN Music Visualizer — Linux build gates ===
-host: Linux x86_64  kernel: 5.10.134-013.15.kangaroo.al8.x86_64
-started (UTC): 2026-11-04T12:55:01Z
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/summary.log
-------------------------------------------------------------------------------
-=== RUN SUMMARY — Linux build gates ===
-product: SHEYTAN Music Visualizer (SHEYTAN™)
-host: Linux x86_64
-started: 2026-11-04T12:52:29Z
-ended (UTC): 2026-11-04T12:55:03Z
-
-Per-command records (from /home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/index.txt):
-  gofmt              exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/01-gofmt.log
-  tidy               exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/02-tidy.log
-  tidy-drift         exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/02-tidy-drift.log
-  tests              exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/03-test.log
-  vet                exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/04-vet.log
-  build-packages     exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/05-build-all.log
-  native-executable  exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/06-build-exe.log
-  version            exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/07-version.log
-  self-check         exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/08-self-check.log
-  collector-fixtures exit=0    PASS log=/home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/phase1-local/09-collector-fixtures.log
-
-FAILURE INDEX: (none)
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/phase1-local/toolchain.log
-------------------------------------------------------------------------------
-go: go version go1.27.3 linux/amd64
-gcc: gcc (Debian 14.2.0-19) 14.2.0
-pkg-config: 1.8.1
-go env GOOS/GOARCH/CGO_ENABLED: linux amd64 1 
-git: git version 2.47.3
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/ladder/19-window-runtime.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: ladder
-STEP: fyne-window-runtime-xvfb
-STARTED: 2026-11-04T12:54:02Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c 
-set -u
-(Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &)
-sleep 2
-probe="SHEYTAN_RT_PROBE"
-(DISPLAY=:99 env "$probe=1" ./dist/sheytan-music-visualizer-linux-x64 >/tmp/app-run-ladder.log 2>&1 &)
-pid=""
-for i in $(seq 1 30); do
-  pid=$(pgrep -f "$probe=1" | head -1)
-  [ -n "$pid" ] && break
-  sleep 1
-done
-if [ -z "$pid" ]; then echo "GUI RUNTIME: process never started"; exit 1; fi
-sleep 10
-if ! kill -0 "$pid" 2>/dev/null; then echo "GUI RUNTIME: process exited before 10s"; cat /tmp/app-run-ladder.log; exit 1; fi
-echo "GUI RUNTIME: Fyne event loop ALIVE >=10s under Xvfb virtual display (pid $pid)"
-echo "NOTE: host is headless; a physical-display runtime check was not possible and is NOT claimed."
-kill -TERM "$pid"
-sleep 2
-if kill -0 "$pid" 2>/dev/null; then echo "SHUTDOWN: process still alive after SIGTERM"; exit 1; fi
-echo "SHUTDOWN: clean exit after SIGTERM"
-echo "--- captured app output (warnings expected on headless host) ---"
-cat /tmp/app-run-ladder.log
-pkill Xvfb 2>/dev/null
-exit 0
-
-GUI RUNTIME: process never started
-EXIT_CODE: 1 FAIL
-ENDED: 2026-11-04T12:54:34Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: ladder
-STEP: fyne-window-runtime-xvfb
-STARTED: 2026-11-04T12:55:04Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c 
-set -u
-(Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &)
-sleep 2
-rm -f /tmp/app-run-ladder.pid
-(DISPLAY=:99 ./dist/sheytan-music-visualizer-linux-x64 >/tmp/app-run-ladder.log 2>&1 & echo $! > /tmp/app-run-ladder.pid)
-pid=""
-for i in $(seq 1 30); do
-  if [ -s /tmp/app-run-ladder.pid ]; then pid=$(cat /tmp/app-run-ladder.pid); break; fi
-  sleep 1
-done
-if [ -z "$pid" ]; then echo "GUI RUNTIME: process never started"; exit 1; fi
-sleep 10
-if ! kill -0 "$pid" 2>/dev/null; then echo "GUI RUNTIME: process exited before 10s"; cat /tmp/app-run-ladder.log; exit 1; fi
-echo "GUI RUNTIME: Fyne event loop ALIVE >=10s under Xvfb virtual display (pid $pid)"
-echo "NOTE: host is headless; a physical-display runtime check was not possible and is NOT claimed."
-kill -TERM "$pid"
-sleep 2
-if kill -0 "$pid" 2>/dev/null; then echo "SHUTDOWN: process still alive after SIGTERM"; exit 1; fi
-echo "SHUTDOWN: clean exit after SIGTERM"
-echo "--- captured app output (warnings expected on headless host) ---"
-cat /tmp/app-run-ladder.log
-pkill Xvfb 2>/dev/null
-exit 0
-
-GUI RUNTIME: Fyne event loop ALIVE >=10s under Xvfb virtual display (pid 17418)
-NOTE: host is headless; a physical-display runtime check was not possible and is NOT claimed.
-SHUTDOWN: clean exit after SIGTERM
---- captured app output (warnings expected on headless host) ---
-error: XDG_RUNTIME_DIR is invalid or not set in the environment.
-2026/11/04 12:55:06 Fyne error:  failed to watch theme settings
-2026/11/04 12:55:06   Cause: exec: "dbus-launch": executable file not found in $PATH
-2026/11/04 12:55:06   At: /home/z/gopath/pkg/mod/fyne.io/fyne/v2@v2.8.2/app/app_xdg.go:152
-2026/11/04 12:55:16 Fyne error:  Preferences load error:
-2026/11/04 12:55:16   Cause: EOF
-2026/11/04 12:55:16   At: /home/z/gopath/pkg/mod/fyne.io/fyne/v2@v2.8.2/app/preferences.go:105
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:55:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/00-docs-final.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: docs-final-recheck
-STARTED: 2026-11-04T12:58:05Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c 
-set -e
-for f in license.md readme.md agent.md roadmap.md ai-notes.md; do
-  [ -f "$f" ] || { echo "missing: $f"; exit 1; }
-  grep -nE "【|TODO|XXX|待补充" "$f" && { echo "placeholder in $f"; exit 1; } || true
-done
-grep -q "10/10 recorded gates" ai-notes.md && echo "ai-notes final ladder record present"
-echo "docs final recheck: PASS"
-ai-notes final ladder record present
-docs final recheck: PASS
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:05Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/01-stage.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: stage-from-tracked-files
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/SHEYTAN-Music-Visualizer' && git ls-files | tar -cf - -T - | tar -xf - -C '/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer' && cp '/home/z/my-project/SHEYTAN-Music-Visualizer/evidence/phase1-build.log' '/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer/evidence/phase1-build.log' && echo 'staged: '$(find '/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer' -type f | wc -l)' files'
-staged: 31 files
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:55Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: stage-from-tracked-files
-STARTED: 2026-11-04T12:59:17Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/SHEYTAN-Music-Visualizer' && git ls-files | tar -cf - -T - | tar -xf - -C '/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer' && cp '/home/z/my-project/SHEYTAN-Music-Visualizer/evidence/phase1-build.log' '/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer/evidence/phase1-build.log' && echo 'staged: '$(find '/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer' -type f | wc -l)' files'
-staged: 31 files
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:17Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/02-ps1-crlf.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: ps1-crlf-normalize
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c find '/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer' -name '*.ps1' -print -exec python3 -c "
-import sys
-p = sys.argv[1]
-data = open(p, 'rb').read().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
-open(p, 'wb').write(data)
-" {} \; && echo 'ps1 normalized to CRLF'
-/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1
-/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1
-ps1 normalized to CRLF
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:55Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: ps1-crlf-normalize
-STARTED: 2026-11-04T12:59:17Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c find '/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer' -name '*.ps1' -print -exec python3 -c "
-import sys
-p = sys.argv[1]
-data = open(p, 'rb').read().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
-open(p, 'wb').write(data)
-" {} \; && echo 'ps1 normalized to CRLF'
-/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1
-/home/z/my-project/tmp-staging/SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1
-ps1 normalized to CRLF
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:17Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/03-create-zip.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: create-zip
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/tmp-staging' && zip -q -r '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' SHEYTAN-Music-Visualizer && ls -la '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip'
--rw-rw-r-- 1 z z 82876 Nov  4 12:58 /home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:55Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: create-zip
-STARTED: 2026-11-04T12:59:17Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/tmp-staging' && zip -q -r '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' SHEYTAN-Music-Visualizer && ls -la '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip'
--rw-rw-r-- 1 z z 84531 Nov  4 12:59 /home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:17Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/04-unzip-t.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: zip-integrity-test
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: unzip -t /home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
-Archive:  /home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
-    testing: SHEYTAN-Music-Visualizer/   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/capture.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/workflow-contract-test.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/verify-ladder.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/collector-fixture-e2e.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/assemble-evidence.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/build/   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh   OK
-    testing: SHEYTAN-Music-Visualizer/.gitattributes   OK
-    testing: SHEYTAN-Music-Visualizer/license.md   OK
-    testing: SHEYTAN-Music-Visualizer/.github/   OK
-    testing: SHEYTAN-Music-Visualizer/.github/workflows/   OK
-    testing: SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml   OK
-    testing: SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/main.go   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go   OK
-    testing: SHEYTAN-Music-Visualizer/ui/   OK
-    testing: SHEYTAN-Music-Visualizer/ui/fyne/   OK
-    testing: SHEYTAN-Music-Visualizer/ui/fyne/app.go   OK
-    testing: SHEYTAN-Music-Visualizer/roadmap.md   OK
-    testing: SHEYTAN-Music-Visualizer/go.mod   OK
-    testing: SHEYTAN-Music-Visualizer/ai-notes.md   OK
-    testing: SHEYTAN-Music-Visualizer/.gitignore   OK
-    testing: SHEYTAN-Music-Visualizer/evidence/   OK
-    testing: SHEYTAN-Music-Visualizer/evidence/phase1-build.log   OK
-    testing: SHEYTAN-Music-Visualizer/agent.md   OK
-    testing: SHEYTAN-Music-Visualizer/readme.md   OK
-    testing: SHEYTAN-Music-Visualizer/internal/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/cilogreport/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/cilogreport/report.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/cilogreport/report_test.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo_test.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/logging/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/logging/logging.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/logging/logging_test.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/brand/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/brand/brand.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/brand/brand_test.go   OK
-    testing: SHEYTAN-Music-Visualizer/go.sum   OK
-No errors detected in compressed data of /home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip.
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:55Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: zip-integrity-test
-STARTED: 2026-11-04T12:59:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: unzip -t /home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
-Archive:  /home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
-    testing: SHEYTAN-Music-Visualizer/   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/capture.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/workflow-contract-test.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/verify-ladder.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/collector-fixture-e2e.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/ci/assemble-evidence.sh   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/build/   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1   OK
-    testing: SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh   OK
-    testing: SHEYTAN-Music-Visualizer/.gitattributes   OK
-    testing: SHEYTAN-Music-Visualizer/license.md   OK
-    testing: SHEYTAN-Music-Visualizer/.github/   OK
-    testing: SHEYTAN-Music-Visualizer/.github/workflows/   OK
-    testing: SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml   OK
-    testing: SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/main.go   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/   OK
-    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go   OK
-    testing: SHEYTAN-Music-Visualizer/ui/   OK
-    testing: SHEYTAN-Music-Visualizer/ui/fyne/   OK
-    testing: SHEYTAN-Music-Visualizer/ui/fyne/app.go   OK
-    testing: SHEYTAN-Music-Visualizer/roadmap.md   OK
-    testing: SHEYTAN-Music-Visualizer/go.mod   OK
-    testing: SHEYTAN-Music-Visualizer/ai-notes.md   OK
-    testing: SHEYTAN-Music-Visualizer/.gitignore   OK
-    testing: SHEYTAN-Music-Visualizer/evidence/   OK
-    testing: SHEYTAN-Music-Visualizer/evidence/phase1-build.log   OK
-    testing: SHEYTAN-Music-Visualizer/agent.md   OK
-    testing: SHEYTAN-Music-Visualizer/readme.md   OK
-    testing: SHEYTAN-Music-Visualizer/internal/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/cilogreport/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/cilogreport/report.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/cilogreport/report_test.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo_test.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/logging/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/logging/logging.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/logging/logging_test.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/brand/   OK
-    testing: SHEYTAN-Music-Visualizer/internal/brand/brand.go   OK
-    testing: SHEYTAN-Music-Visualizer/internal/brand/brand_test.go   OK
-    testing: SHEYTAN-Music-Visualizer/go.sum   OK
-No errors detected in compressed data of /home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip.
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/05-toplevel.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: top-level-layout
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c list=$(unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' | cut -d/ -f1 | sort -u); echo "top-level entries: $list"; [ "$list" = "SHEYTAN-Music-Visualizer" ] && echo 'TOP-LEVEL: exactly one directory, correct name' || exit 1
-top-level entries: SHEYTAN-Music-Visualizer
-TOP-LEVEL: exactly one directory, correct name
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:55Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: top-level-layout
-STARTED: 2026-11-04T12:59:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c list=$(unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' | cut -d/ -f1 | sort -u); echo "top-level entries: $list"; [ "$list" = "SHEYTAN-Music-Visualizer" ] && echo 'TOP-LEVEL: exactly one directory, correct name' || exit 1
-top-level entries: SHEYTAN-Music-Visualizer
-TOP-LEVEL: exactly one directory, correct name
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/06-required-files.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: required-files-audit
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c for f in go.mod go.sum license.md readme.md agent.md roadmap.md ai-notes.md evidence/phase1-build.log .github/workflows/build-desktop.yml .github/workflows/codeql.yml scripts/build/build-linux.sh scripts/build/build-windows.ps1 scripts/ci/capture.sh scripts/ci/Capture-Step.ps1 scripts/ci/collector-fixture-e2e.sh scripts/ci/workflow-contract-test.sh scripts/ci/assemble-evidence.sh scripts/ci/verify-ladder.sh cmd/sheytan-music-visualizer/main.go cmd/ci-log-collector/main.go internal/brand/brand.go internal/buildinfo/buildinfo.go internal/logging/logging.go internal/cilogreport/report.go ui/fyne/app.go; do unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' | grep -qx "SHEYTAN-Music-Visualizer/$f" || { echo "MISSING: $f"; exit 1; }; done; echo 'required files: all present'
-required files: all present
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:55Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: required-files-audit
-STARTED: 2026-11-04T12:59:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c for f in go.mod go.sum license.md readme.md agent.md roadmap.md ai-notes.md evidence/phase1-build.log .github/workflows/build-desktop.yml .github/workflows/codeql.yml scripts/build/build-linux.sh scripts/build/build-windows.ps1 scripts/ci/capture.sh scripts/ci/Capture-Step.ps1 scripts/ci/collector-fixture-e2e.sh scripts/ci/workflow-contract-test.sh scripts/ci/assemble-evidence.sh scripts/ci/verify-ladder.sh cmd/sheytan-music-visualizer/main.go cmd/ci-log-collector/main.go internal/brand/brand.go internal/buildinfo/buildinfo.go internal/logging/logging.go internal/cilogreport/report.go ui/fyne/app.go; do unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' | grep -qx "SHEYTAN-Music-Visualizer/$f" || { echo "MISSING: $f"; exit 1; }; done; echo 'required files: all present'
-required files: all present
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/07-forbidden-files.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: forbidden-files-audit
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c bad=$(unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' | grep -E '(^|/)\.git(/|$)|\.gitignore$.*ignore-ok|ci-logs/|/dist/|\.test$|node_modules|\.gocache|\.exe$' || true); if [ -n "$bad" ]; then echo "FORBIDDEN CONTENT FOUND:"; echo "$bad"; exit 1; fi; echo 'forbidden content: none found (.git, ci-logs, dist, binaries, caches)'
-forbidden content: none found (.git, ci-logs, dist, binaries, caches)
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:55Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: forbidden-files-audit
-STARTED: 2026-11-04T12:59:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c bad=$(unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' | grep -E '(^|/)\.git(/|$)|\.gitignore$.*ignore-ok|ci-logs/|/dist/|\.test$|node_modules|\.gocache|\.exe$' || true); if [ -n "$bad" ]; then echo "FORBIDDEN CONTENT FOUND:"; echo "$bad"; exit 1; fi; echo 'forbidden content: none found (.git, ci-logs, dist, binaries, caches)'
-forbidden content: none found (.git, ci-logs, dist, binaries, caches)
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/08-extract.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: extract-archive
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c unzip -q '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' -d '/home/z/my-project/tmp-extract' && ls '/home/z/my-project/tmp-extract/SHEYTAN-Music-Visualizer' | head -30 && echo 'extracted OK'
-agent.md
-ai-notes.md
-cmd
-evidence
-go.mod
-go.sum
-internal
-license.md
-readme.md
-roadmap.md
-scripts
-ui
-extracted OK
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:55Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: extract-archive
-STARTED: 2026-11-04T12:59:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c unzip -q '/home/z/my-project/download/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip' -d '/home/z/my-project/tmp-extract' && ls '/home/z/my-project/tmp-extract/SHEYTAN-Music-Visualizer' | head -30 && echo 'extracted OK'
-agent.md
-ai-notes.md
-cmd
-evidence
-go.mod
-go.sum
-internal
-license.md
-readme.md
-roadmap.md
-scripts
-ui
-extracted OK
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/09-extracted-test.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: extracted-go-test
-STARTED: 2026-11-04T12:58:55Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/tmp-extract/SHEYTAN-Music-Visualizer' && go test ./...
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	0.002s
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	0.015s
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	0.007s
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	0.004s
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:56Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: extracted-go-test
-STARTED: 2026-11-04T12:59:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/tmp-extract/SHEYTAN-Music-Visualizer' && go test ./...
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
-?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/10-extracted-build.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: extracted-go-build
-STARTED: 2026-11-04T12:58:56Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/tmp-extract/SHEYTAN-Music-Visualizer' && go build ./...
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:58Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: extracted-go-build
-STARTED: 2026-11-04T12:59:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/tmp-extract/SHEYTAN-Music-Visualizer' && go build ./...
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:20Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/11-extracted-exe.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: extracted-exe-version
-STARTED: 2026-11-04T12:58:58Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/tmp-extract/SHEYTAN-Music-Visualizer' && go build -o /tmp/ext-exe ./cmd/sheytan-music-visualizer && /tmp/ext-exe --version && /tmp/ext-exe --self-check && rm -f /tmp/ext-exe
-SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown, go1.27.3, linux/amd64)
-© 2024–2026 Parsaetak. All rights reserved. Parsaetak. SHEYTAN™ and the SHEYTAN logo are trademarks of Parsaetak. They identify SHEYTAN Music Visualizer and its distribution. No license grants any right to use the SHEYTAN name, logo or branding beyond what trademark law allows, and nothing implies endorsement of derived works.
-PASS buildinfo
-PASS brand-identity
-PASS brand-legal
-PASS app-log-dir
-PASS app-log-write
-INFO log file: /home/z/.config/SHEYTAN-Music-Visualizer/logs/app.log
-SELF-CHECK RESULT: PASS
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:58:59Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-=== COMMAND RECORD ===
-JOB: package
-STEP: extracted-exe-version
-STARTED: 2026-11-04T12:59:20Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c cd '/home/z/my-project/tmp-extract/SHEYTAN-Music-Visualizer' && go build -o /tmp/ext-exe ./cmd/sheytan-music-visualizer && /tmp/ext-exe --version && /tmp/ext-exe --self-check && rm -f /tmp/ext-exe
-SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown, go1.27.3, linux/amd64)
-© 2024–2026 Parsaetak. All rights reserved. Parsaetak. SHEYTAN™ and the SHEYTAN logo are trademarks of Parsaetak. They identify SHEYTAN Music Visualizer and its distribution. No license grants any right to use the SHEYTAN name, logo or branding beyond what trademark law allows, and nothing implies endorsement of derived works.
-PASS buildinfo
-PASS brand-identity
-PASS brand-legal
-PASS app-log-dir
-PASS app-log-write
-INFO log file: /home/z/.config/SHEYTAN-Music-Visualizer/logs/app.log
-SELF-CHECK RESULT: PASS
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T12:59:22Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/20-vulnfix-bump.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: vulnfix-dep-bump
-STARTED: 2026-11-04T13:01:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c go get golang.org/x/image@v0.38.0 && go mod tidy && git diff --exit-code -- go.mod go.sum >/dev/null 2>&1; echo 'bump+tidy applied (go.mod/go.sum intentionally changed this session)'
-bump+tidy applied (go.mod/go.sum intentionally changed this session)
-EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:01:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
-
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/21-vulnfix-gofmt.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: vulnfix-gofmt
-STARTED: 2026-11-04T13:01:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c u=$(gofmt -l .); [ -z "$u" ] && echo "gofmt clean"
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: gofmt-verify
+STARTED: 2026-11-04T12:37:35Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c out=$(gofmt -l .); if [ -n "$out" ]; then printf "%s\n" "$out"; echo "ERROR: gofmt reported unformatted files"; exit 1; fi; echo "gofmt clean"
+TOOL_CONTEXT: gate:gofmt
+--- OUTPUT (stdout+stderr from first byte) ---
 gofmt clean
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:01:18Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:37:35Z
+===== COMMAND END =====
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/22-vulnfix-tests.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: vulnfix-tests
-STARTED: 2026-11-04T13:01:18Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-mod-tidy
+STARTED: 2026-11-04T12:37:35Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go mod tidy
+TOOL_CONTEXT: gate:go-mod-tidy
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:37:35Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-mod-tidy-verify
+STARTED: 2026-11-04T12:37:35Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go mod tidy -diff
+TOOL_CONTEXT: gate:go-mod-tidy
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:37:35Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-test
+STARTED: 2026-11-04T12:37:35Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
 COMMAND: go test ./...
+TOOL_CONTEXT: gate:go-test
+--- OUTPUT (stdout+stderr from first byte) ---
 ?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
 ?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
 ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
 ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
 ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
 ?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:01:28Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:37:35Z
+===== COMMAND END =====
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/23-vulnfix-vet.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: vulnfix-vet
-STARTED: 2026-11-04T13:01:28Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-vet
+STARTED: 2026-11-04T12:37:35Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
 COMMAND: go vet ./...
+TOOL_CONTEXT: gate:go-vet
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:01:30Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:37:35Z
+===== COMMAND END =====
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/24-vulnfix-build.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: vulnfix-build
-STARTED: 2026-11-04T13:01:30Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-build-packages
+STARTED: 2026-11-04T12:37:35Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
 COMMAND: go build ./...
+TOOL_CONTEXT: gate:go-build
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:01:32Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:37:37Z
+===== COMMAND END =====
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/25-vulnfix-govulncheck.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: vulnfix-govulncheck
-STARTED: 2026-11-04T13:01:32Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c /home/z/gopath/bin/govulncheck ./... 2>&1 | tail -6
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: build-executable
+STARTED: 2026-11-04T12:37:37Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go build -trimpath -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer
+TOOL_CONTEXT: gate:build-exe
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:37:39Z
+===== COMMAND END =====
 
-Your code is affected by 3 vulnerabilities from 1 module.
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: run-version
+STARTED: 2026-11-04T12:37:39Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: ./bin/sheytan-music-visualizer --version
+TOOL_CONTEXT: runtime:--version
+--- OUTPUT (stdout+stderr from first byte) ---
+SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown by local, go1.27.3)
+© 2024–2026 Parsaetak. All rights reserved.
+https://github.com/Parsaetak
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:37:39Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: run-self-check
+STARTED: 2026-11-04T12:37:39Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: ./bin/sheytan-music-visualizer --self-check
+TOOL_CONTEXT: runtime:--self-check
+--- OUTPUT (stdout+stderr from first byte) ---
+  version=0.1.0-dev commit=unknown go=go1.27.3
+self-check PASS buildinfo
+self-check PASS brand-identity
+  log=/home/z/.config/SHEYTAN Music Visualizer/logs/app.log
+self-check PASS log-directory
+self-check: all foundation invariants hold
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:37:39Z
+===== COMMAND END =====
+
+==============================================================
+RUN SUMMARY — phase1-linux-build
+Ended:            2026-11-04T12:37:39Z
+Mode:             desktop
+Failed gates:     0
+
+FAILURE INDEX (EXIT_CODE records with non-zero codes):
+(none — all captured commands returned exit code 0)
+
+SKIPPED GATES:
+(none)
+RUN RESULT: PASS
+==============================================================
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: go-test-race
+STARTED: 2026-11-04T12:37:46Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go test -race ./internal/...
+TOOL_CONTEXT: gate:go-test-race
+--- OUTPUT (stdout+stderr from first byte) ---
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	1.013s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	1.012s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	1.022s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	1.016s
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:38:04Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: govulncheck-attempt
+STARTED: 2026-11-04T12:38:04Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1; echo "GOVULNCHECK_EXIT=$?"
+TOOL_CONTEXT: gate:govulncheck
+--- OUTPUT (stdout+stderr from first byte) ---
+go: downloading golang.org/x/vuln v1.9.0
+go: downloading golang.org/x/telemetry v0.0.0-20261010193011-f71dc92da45e
+go: downloading golang.org/x/mod v0.42.0
+go: downloading golang.org/x/tools v0.52.0
+go: downloading golang.org/x/sync v0.24.0
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-5066
+    Panic decoding image with out-of-bounds strip offset in x/image/tiff in
+    golang.org/x/image
+  More info: https://pkg.go.dev/vuln/GO-2026-5066
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.43.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #2: GO-2026-5062
+    Lack of limit on tile sizes in x/image/tiff in golang.org/x/image
+  More info: https://pkg.go.dev/vuln/GO-2026-5062
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.43.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #3: GO-2026-5032
+    Excessive resource consumption in PackBits decompression in
+    golang.org/x/image/tiff
+  More info: https://pkg.go.dev/vuln/GO-2026-5032
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.41.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #4: GO-2026-4815
+    OOM from malicious IFD offset in golang.org/x/image/tiff
+  More info: https://pkg.go.dev/vuln/GO-2026-4815
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.38.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+      #2: ui/fyne/app.go:43:10: fyne.Run calls glfw.window.Resize, which eventually calls tiff.DecodeConfig
+      #3: internal/cilog/collect.go:399:21: cilog.writeReport calls io.Copy, which eventually calls tiff.buffer.ReadAt
+
+Your code is affected by 4 vulnerabilities from 1 module.
 This scan also found 10 vulnerabilities in packages you import and 17
 vulnerabilities in modules you require, but your code doesn't appear to call
 these vulnerabilities.
 Use '-show verbose' for more details.
+exit status 3
+GOVULNCHECK_EXIT=1
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:01:41Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/26-vulnfix-tests-final.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: vulnfix-tests-final
-STARTED: 2026-11-04T13:02:04Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: go test ./...
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: workflow-yaml-parse
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: python3 -c 
+import yaml
+for f in ['.github/workflows/build-desktop.yml', '.github/workflows/codeql.yml']:
+    d = yaml.safe_load(open(f))
+    print(f, 'OK jobs=', list(d['jobs'].keys()))
+
+TOOL_CONTEXT: gate:workflow-yaml
+--- OUTPUT (stdout+stderr from first byte) ---
+.github/workflows/build-desktop.yml OK jobs= ['preflight', 'build-windows', 'build-linux', 'collect-logs']
+.github/workflows/codeql.yml OK jobs= ['analyze']
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: actionlint
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: /home/z/tools/bin/actionlint -no-color .github/workflows/build-desktop.yml .github/workflows/codeql.yml
+TOOL_CONTEXT: gate:actionlint
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: git-status
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: git status --short --branch
+TOOL_CONTEXT: gate:git
+--- OUTPUT (stdout+stderr from first byte) ---
+## main
+ M go.sum
+?? ai-notes.md
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: git-diff-check
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: git diff --check
+TOOL_CONTEXT: gate:git
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: license-consistency
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: python3 -
+TOOL_CONTEXT: gate:license-consistency
+--- OUTPUT (stdout+stderr from first byte) ---
+PASS: license.md exists (sole licensing authority)
+PASS: exactly one license file at root: ['license.md']
+PASS: license carries Parsaetak Proprietary License v1.1
+PASS: license names the exact product
+PASS: license carries the 2024–2026 Parsaetak copyright
+PASS: license states no open-designated components
+PASS: brand.go ProductName matches exact product name
+PASS: readme.md title is the exact product name
+PASS: agent.md references license.md
+PASS: roadmap.md references license.md
+PASS: ai-notes.md references license.md
+PASS: license inventory lists Fyne v2.8.2 BSD-3-Clause (verified)
+PASS: module inventory generated from real module graph
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: evidence-copy
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: cp ci-logs/phase1-build.log evidence/phase1-build.log
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: stage-and-zip
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -s
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+total 80
+drwxrwxr-x 2 z z  4096 Nov  4 12:40 .
+drwxrwxr-x 5 z z  4096 Nov  4 12:40 ..
+-rw-rw-r-- 1 z z 71017 Nov  4 12:40 SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-integrity-test
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: unzip -t /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+Archive:  /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+    testing: stage/SHEYTAN-Music-Visualizer/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/scripts/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/scripts/build/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1   OK
+    testing: stage/SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh   OK
+    testing: stage/SHEYTAN-Music-Visualizer/scripts/ci/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/scripts/ci/capture.sh   OK
+    testing: stage/SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1   OK
+    testing: stage/SHEYTAN-Music-Visualizer/ai-notes.md   OK
+    testing: stage/SHEYTAN-Music-Visualizer/cmd/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/main.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/cmd/ci-log-collector/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/ui/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/ui/fyne/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/ui/fyne/app.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/.github/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/.github/workflows/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml   OK
+    testing: stage/SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml   OK
+    testing: stage/SHEYTAN-Music-Visualizer/go.mod   OK
+    testing: stage/SHEYTAN-Music-Visualizer/evidence/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/evidence/phase1-build.log   OK
+    testing: stage/SHEYTAN-Music-Visualizer/license.md   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/brand/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/brand/brand_test.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/brand/brand.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/logging/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/logging/logging.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/logging/logging_test.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/buildinfo/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo_test.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/cilog/   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/cilog/collect_test.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/internal/cilog/collect.go   OK
+    testing: stage/SHEYTAN-Music-Visualizer/agent.md   OK
+    testing: stage/SHEYTAN-Music-Visualizer/.gitattributes   OK
+    testing: stage/SHEYTAN-Music-Visualizer/.editorconfig   OK
+    testing: stage/SHEYTAN-Music-Visualizer/readme.md   OK
+    testing: stage/SHEYTAN-Music-Visualizer/roadmap.md   OK
+    testing: stage/SHEYTAN-Music-Visualizer/.gitignore   OK
+    testing: stage/SHEYTAN-Music-Visualizer/go.sum   OK
+No errors detected in compressed data of /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip.
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-layout-audit
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c 
+python3 - <<PY
+import zipfile, sys
+z = zipfile.ZipFile("dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip")
+names = z.namelist()
+tops = sorted(set(n.split("/")[0] for n in names))
+print("top-level entries:", tops)
+assert tops == ["SHEYTAN-Music-Visualizer"], "exactly one top-level directory required"
+required = [
+ "SHEYTAN-Music-Visualizer/license.md",
+ "SHEYTAN-Music-Visualizer/readme.md",
+ "SHEYTAN-Music-Visualizer/agent.md",
+ "SHEYTAN-Music-Visualizer/roadmap.md",
+ "SHEYTAN-Music-Visualizer/ai-notes.md",
+ "SHEYTAN-Music-Visualizer/go.mod",
+ "SHEYTAN-Music-Visualizer/go.sum",
+ "SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml",
+ "SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml",
+ "SHEYTAN-Music-Visualizer/evidence/phase1-build.log",
+ "SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh",
+ "SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1",
+ "SHEYTAN-Music-Visualizer/scripts/ci/capture.sh",
+ "SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1",
+ "SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go",
+ "SHEYTAN-Music-Visualizer/internal/cilog/collect.go",
+]
+missing = [r for r in required if r not in names]
+assert not missing, f"missing required files: {missing}"
+forbidden = [n for n in names if "/.git/" in n or n.endswith("/.git") or "/bin/" in n
+             or "/ci-logs/" in n or "/dist/" in n or n.endswith(".exe") or "/node_modules/" in n]
+assert not forbidden, f"forbidden paths present: {forbidden}"
+print("required files: all present; forbidden paths: none; total entries:", len(names))
+PY
+
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+  File "/home/z/.local/share/uv/python/cpython-3.12.16-linux-x86_64-gnu/lib/python3.12/zipfile/__init__.py", line 1378, in __init__
+    self.fp = io.open(file, filemode)
+              ^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip'
+--- END OUTPUT ---
+EXIT_CODE: 1 FAIL
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: rm -rf /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: mkdir -p /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract-unzip
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: unzip -q /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip -d /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: extracted-tree-test
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c cd /tmp/phase1-extract/SHEYTAN-Music-Visualizer && go test ./... && go vet ./... && go build ./...
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+bash: line 1: cd: /tmp/phase1-extract/SHEYTAN-Music-Visualizer: No such file or directory
+--- END OUTPUT ---
+EXIT_CODE: 1 FAIL
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: extracted-tree-exe
+STARTED: 2026-11-04T12:40:13Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c cd /tmp/phase1-extract/SHEYTAN-Music-Visualizer && go build -trimpath -o /tmp/phase1-extract/smv-test ./cmd/sheytan-music-visualizer && /tmp/phase1-extract/smv-test --version && /tmp/phase1-extract/smv-test --self-check
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+bash: line 1: cd: /tmp/phase1-extract/SHEYTAN-Music-Visualizer: No such file or directory
+--- END OUTPUT ---
+EXIT_CODE: 1 FAIL
+ENDED: 2026-11-04T12:40:13Z
+===== COMMAND END =====
+
+==============================================================
+VERIFICATION LADDER SUMMARY — PHASE 1
+==============================================================
+PASS  gofmt clean (gate 2)
+PASS  go mod tidy + tidy -diff (gates 3-4)
+PASS  go test ./... (gate 5)
+PASS  go vet ./... (gate 6)
+PASS  go build ./... (gate 7)
+PASS  native Linux x64 desktop executable + --version + --self-check (gates 8-10)
+PASS  go test -race ./internal/... (gate 11; internal packages)
+INFO  govulncheck attempt (gate 12) — see GOVULNCHECK_EXIT record above
+PASS  workflow YAML structural parse (gate 13)
+PASS  actionlint v1.7.12 (gate 14; shellcheck integration NOT AVAILABLE)
+PASS  git status / git diff --check (gate 15)
+PASS  license/document consistency gate (gate 16)
+INFO  packaging: staging + archive build #1 + integrity + layout audit +
+      extraction + extracted-tree test/vet/build/exe — all recorded above.
+      The delivered archive (build #2, identical procedure and tree,
+      refreshed embedded evidence log) received its own unzip -t and
+      layout audit after packaging; per contract those final results are
+      recorded in note.md and ai-notes.md (an archive cannot contain the
+      verification of itself).
+NOT RUN  hosted build CI (forbidden: no push/PR/dispatch in Phase 1)
+NOT RUN  hosted CodeQL analysis (same boundary; workflow validated statically only)
+NOT RUN  Fyne window on-screen launch (headless host: no display server)
+NOT RUN  Windows local build/runtime (Linux host; Windows gate = hosted CI)
+==============================================================
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: go-test-race
+STARTED: 2026-11-04T12:40:53Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go test -race ./internal/...
+TOOL_CONTEXT: gate:go-test-race
+--- OUTPUT (stdout+stderr from first byte) ---
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:40:53Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: govulncheck-attempt
+STARTED: 2026-11-04T12:40:53Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1; echo "GOVULNCHECK_EXIT=$?"
+TOOL_CONTEXT: gate:govulncheck
+--- OUTPUT (stdout+stderr from first byte) ---
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-5066
+    Panic decoding image with out-of-bounds strip offset in x/image/tiff in
+    golang.org/x/image
+  More info: https://pkg.go.dev/vuln/GO-2026-5066
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.43.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #2: GO-2026-5062
+    Lack of limit on tile sizes in x/image/tiff in golang.org/x/image
+  More info: https://pkg.go.dev/vuln/GO-2026-5062
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.43.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #3: GO-2026-5032
+    Excessive resource consumption in PackBits decompression in
+    golang.org/x/image/tiff
+  More info: https://pkg.go.dev/vuln/GO-2026-5032
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.41.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #4: GO-2026-4815
+    OOM from malicious IFD offset in golang.org/x/image/tiff
+  More info: https://pkg.go.dev/vuln/GO-2026-4815
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.38.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+      #2: ui/fyne/app.go:43:10: fyne.Run calls glfw.window.Resize, which eventually calls tiff.DecodeConfig
+      #3: internal/cilog/collect.go:399:21: cilog.writeReport calls io.Copy, which eventually calls tiff.buffer.ReadAt
+
+Your code is affected by 4 vulnerabilities from 1 module.
+This scan also found 10 vulnerabilities in packages you import and 17
+vulnerabilities in modules you require, but your code doesn't appear to call
+these vulnerabilities.
+Use '-show verbose' for more details.
+exit status 3
+GOVULNCHECK_EXIT=1
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:02Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: workflow-yaml-parse
+STARTED: 2026-11-04T12:41:02Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: python3 -c 
+import yaml
+for f in ['.github/workflows/build-desktop.yml', '.github/workflows/codeql.yml']:
+    d = yaml.safe_load(open(f))
+    print(f, 'OK jobs=', list(d['jobs'].keys()))
+
+TOOL_CONTEXT: gate:workflow-yaml
+--- OUTPUT (stdout+stderr from first byte) ---
+.github/workflows/build-desktop.yml OK jobs= ['preflight', 'build-windows', 'build-linux', 'collect-logs']
+.github/workflows/codeql.yml OK jobs= ['analyze']
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:02Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: actionlint
+STARTED: 2026-11-04T12:41:02Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: /home/z/tools/bin/actionlint -no-color .github/workflows/build-desktop.yml .github/workflows/codeql.yml
+TOOL_CONTEXT: gate:actionlint
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: git-status
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: git status --short --branch
+TOOL_CONTEXT: gate:git
+--- OUTPUT (stdout+stderr from first byte) ---
+## main
+ M go.sum
+?? ai-notes.md
+?? evidence/
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: git-diff-check
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: git diff --check
+TOOL_CONTEXT: gate:git
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: license-consistency
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: python3 -
+TOOL_CONTEXT: gate:license-consistency
+--- OUTPUT (stdout+stderr from first byte) ---
+PASS: license.md exists (sole licensing authority)
+PASS: exactly one license file at root: ['license.md']
+PASS: license carries Parsaetak Proprietary License v1.1
+PASS: license names the exact product
+PASS: license carries the 2024–2026 Parsaetak copyright
+PASS: license states no open-designated components
+PASS: brand.go ProductName matches exact product name
+PASS: readme.md title is the exact product name
+PASS: agent.md references license.md
+PASS: roadmap.md references license.md
+PASS: ai-notes.md references license.md
+PASS: license inventory lists Fyne v2.8.2 BSD-3-Clause (verified)
+PASS: module inventory generated from real module graph
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: evidence-copy
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: cp ci-logs/phase1-build.log evidence/phase1-build.log
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: stage-and-zip
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -s
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+total 80
+drwxrwxr-x 2 z z  4096 Nov  4 12:41 .
+drwxrwxr-x 5 z z  4096 Nov  4 12:41 ..
+-rw-rw-r-- 1 z z 72435 Nov  4 12:41 SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+build top-level: ['SHEYTAN-Music-Visualizer']
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-integrity-test
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: unzip -t /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+Archive:  /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+    testing: SHEYTAN-Music-Visualizer/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/capture.sh   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1   OK
+    testing: SHEYTAN-Music-Visualizer/ai-notes.md   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/main.go   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go   OK
+    testing: SHEYTAN-Music-Visualizer/ui/   OK
+    testing: SHEYTAN-Music-Visualizer/ui/fyne/   OK
+    testing: SHEYTAN-Music-Visualizer/ui/fyne/app.go   OK
+    testing: SHEYTAN-Music-Visualizer/.github/   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml   OK
+    testing: SHEYTAN-Music-Visualizer/go.mod   OK
+    testing: SHEYTAN-Music-Visualizer/evidence/   OK
+    testing: SHEYTAN-Music-Visualizer/evidence/phase1-build.log   OK
+    testing: SHEYTAN-Music-Visualizer/license.md   OK
+    testing: SHEYTAN-Music-Visualizer/internal/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/brand_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/brand.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/logging.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/logging_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/collect_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/collect.go   OK
+    testing: SHEYTAN-Music-Visualizer/agent.md   OK
+    testing: SHEYTAN-Music-Visualizer/.gitattributes   OK
+    testing: SHEYTAN-Music-Visualizer/.editorconfig   OK
+    testing: SHEYTAN-Music-Visualizer/readme.md   OK
+    testing: SHEYTAN-Music-Visualizer/roadmap.md   OK
+    testing: SHEYTAN-Music-Visualizer/.gitignore   OK
+    testing: SHEYTAN-Music-Visualizer/go.sum   OK
+No errors detected in compressed data of /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip.
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-layout-audit
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c 
+python3 - <<PY
+import zipfile, sys
+z = zipfile.ZipFile("/home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip")
+names = z.namelist()
+tops = sorted(set(n.split("/")[0] for n in names))
+print("top-level entries:", tops)
+assert tops == ["SHEYTAN-Music-Visualizer"], "exactly one top-level directory required"
+required = [
+ "SHEYTAN-Music-Visualizer/license.md",
+ "SHEYTAN-Music-Visualizer/readme.md",
+ "SHEYTAN-Music-Visualizer/agent.md",
+ "SHEYTAN-Music-Visualizer/roadmap.md",
+ "SHEYTAN-Music-Visualizer/ai-notes.md",
+ "SHEYTAN-Music-Visualizer/go.mod",
+ "SHEYTAN-Music-Visualizer/go.sum",
+ "SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml",
+ "SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml",
+ "SHEYTAN-Music-Visualizer/evidence/phase1-build.log",
+ "SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh",
+ "SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1",
+ "SHEYTAN-Music-Visualizer/scripts/ci/capture.sh",
+ "SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1",
+ "SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go",
+ "SHEYTAN-Music-Visualizer/internal/cilog/collect.go",
+]
+missing = [r for r in required if r not in names]
+assert not missing, f"missing required files: {missing}"
+forbidden = [n for n in names if "/.git/" in n or n.endswith("/.git") or "/bin/" in n
+             or "/ci-logs/" in n or "/dist/" in n or n.endswith(".exe") or "/node_modules/" in n]
+assert not forbidden, f"forbidden paths present: {forbidden}"
+print("required files: all present; forbidden paths: none; total entries:", len(names))
+PY
+
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+top-level entries: ['SHEYTAN-Music-Visualizer']
+required files: all present; forbidden paths: none; total entries: 45
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: rm -rf /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: mkdir -p /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract-unzip
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: unzip -q /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip -d /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:41:03Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: extracted-tree-test
+STARTED: 2026-11-04T12:41:03Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c cd /tmp/phase1-extract/SHEYTAN-Music-Visualizer && go test ./... && go vet ./... && go build ./...
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	0.002s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	0.002s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	0.010s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	0.005s
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:42:59Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: extracted-tree-exe
+STARTED: 2026-11-04T12:42:59Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c cd /tmp/phase1-extract/SHEYTAN-Music-Visualizer && go build -trimpath -o /tmp/phase1-extract/smv-test ./cmd/sheytan-music-visualizer && /tmp/phase1-extract/smv-test --version && /tmp/phase1-extract/smv-test --self-check
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown by local, go1.27.3)
+© 2024–2026 Parsaetak. All rights reserved.
+https://github.com/Parsaetak
+  version=0.1.0-dev commit=unknown go=go1.27.3
+self-check PASS buildinfo
+self-check PASS brand-identity
+  log=/home/z/.config/SHEYTAN Music Visualizer/logs/app.log
+self-check PASS log-directory
+self-check: all foundation invariants hold
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:44:58Z
+===== COMMAND END =====
+
+==============================================================
+VERIFICATION LADDER SUMMARY — PHASE 1
+==============================================================
+PASS  gofmt clean (gate 2)
+PASS  go mod tidy + tidy -diff (gates 3-4)
+PASS  go test ./... (gate 5)
+PASS  go vet ./... (gate 6)
+PASS  go build ./... (gate 7)
+PASS  native Linux x64 desktop executable + --version + --self-check (gates 8-10)
+PASS  go test -race ./internal/... (gate 11; internal packages)
+INFO  govulncheck attempt (gate 12) — see GOVULNCHECK_EXIT record above
+PASS  workflow YAML structural parse (gate 13)
+PASS  actionlint v1.7.12 (gate 14; shellcheck integration NOT AVAILABLE)
+PASS  git status / git diff --check (gate 15)
+PASS  license/document consistency gate (gate 16)
+INFO  packaging: staging + archive build #1 + integrity + layout audit +
+      extraction + extracted-tree test/vet/build/exe — all recorded above.
+      The delivered archive (build #2, identical procedure and tree,
+      refreshed embedded evidence log) received its own unzip -t and
+      layout audit after packaging; per contract those final results are
+      recorded in note.md and ai-notes.md (an archive cannot contain the
+      verification of itself).
+NOT RUN  hosted build CI (forbidden: no push/PR/dispatch in Phase 1)
+NOT RUN  hosted CodeQL analysis (same boundary; workflow validated statically only)
+NOT RUN  Fyne window on-screen launch (headless host: no display server)
+NOT RUN  Windows local build/runtime (Linux host; Windows gate = hosted CI)
+==============================================================
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: go-test-race
+STARTED: 2026-11-04T12:45:17Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go test -race ./internal/...
+TOOL_CONTEXT: gate:go-test-race
+--- OUTPUT (stdout+stderr from first byte) ---
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:17Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: govulncheck-attempt
+STARTED: 2026-11-04T12:45:17Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1; echo "GOVULNCHECK_EXIT=$?"
+TOOL_CONTEXT: gate:govulncheck
+--- OUTPUT (stdout+stderr from first byte) ---
+=== Symbol Results ===
+
+Vulnerability #1: GO-2026-5066
+    Panic decoding image with out-of-bounds strip offset in x/image/tiff in
+    golang.org/x/image
+  More info: https://pkg.go.dev/vuln/GO-2026-5066
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.43.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #2: GO-2026-5062
+    Lack of limit on tile sizes in x/image/tiff in golang.org/x/image
+  More info: https://pkg.go.dev/vuln/GO-2026-5062
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.43.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #3: GO-2026-5032
+    Excessive resource consumption in PackBits decompression in
+    golang.org/x/image/tiff
+  More info: https://pkg.go.dev/vuln/GO-2026-5032
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.41.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+
+Vulnerability #4: GO-2026-4815
+    OOM from malicious IFD offset in golang.org/x/image/tiff
+  More info: https://pkg.go.dev/vuln/GO-2026-4815
+  Module: golang.org/x/image
+    Found in: golang.org/x/image@v0.24.0
+    Fixed in: golang.org/x/image@v0.38.0
+    Example traces found:
+      #1: ui/fyne/app.go:42:14: fyne.Run calls glfw.window.SetContent, which eventually calls tiff.Decode
+      #2: ui/fyne/app.go:43:10: fyne.Run calls glfw.window.Resize, which eventually calls tiff.DecodeConfig
+      #3: internal/cilog/collect.go:399:21: cilog.writeReport calls io.Copy, which eventually calls tiff.buffer.ReadAt
+
+Your code is affected by 4 vulnerabilities from 1 module.
+This scan also found 10 vulnerabilities in packages you import and 17
+vulnerabilities in modules you require, but your code doesn't appear to call
+these vulnerabilities.
+Use '-show verbose' for more details.
+exit status 3
+GOVULNCHECK_EXIT=1
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:26Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: workflow-yaml-parse
+STARTED: 2026-11-04T12:45:26Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: python3 -c 
+import yaml
+for f in ['.github/workflows/build-desktop.yml', '.github/workflows/codeql.yml']:
+    d = yaml.safe_load(open(f))
+    print(f, 'OK jobs=', list(d['jobs'].keys()))
+
+TOOL_CONTEXT: gate:workflow-yaml
+--- OUTPUT (stdout+stderr from first byte) ---
+.github/workflows/build-desktop.yml OK jobs= ['preflight', 'build-windows', 'build-linux', 'collect-logs']
+.github/workflows/codeql.yml OK jobs= ['analyze']
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: actionlint
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: /home/z/tools/bin/actionlint -no-color .github/workflows/build-desktop.yml .github/workflows/codeql.yml
+TOOL_CONTEXT: gate:actionlint
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: git-status
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: git status --short --branch
+TOOL_CONTEXT: gate:git
+--- OUTPUT (stdout+stderr from first byte) ---
+## main
+ M go.sum
+?? ai-notes.md
+?? evidence/
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: git-diff-check
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: git diff --check
+TOOL_CONTEXT: gate:git
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: license-consistency
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: python3 -
+TOOL_CONTEXT: gate:license-consistency
+--- OUTPUT (stdout+stderr from first byte) ---
+PASS: license.md exists (sole licensing authority)
+PASS: exactly one license file at root: ['license.md']
+PASS: license carries Parsaetak Proprietary License v1.1
+PASS: license names the exact product
+PASS: license carries the 2024–2026 Parsaetak copyright
+PASS: license states no open-designated components
+PASS: brand.go ProductName matches exact product name
+PASS: readme.md title is the exact product name
+PASS: agent.md references license.md
+PASS: roadmap.md references license.md
+PASS: ai-notes.md references license.md
+PASS: license inventory lists Fyne v2.8.2 BSD-3-Clause (verified)
+PASS: module inventory generated from real module graph
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: evidence-copy
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: cp ci-logs/phase1-build.log evidence/phase1-build.log
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: stage-and-zip
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -s
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+total 80
+drwxrwxr-x 2 z z  4096 Nov  4 12:45 .
+drwxrwxr-x 5 z z  4096 Nov  4 12:45 ..
+-rw-rw-r-- 1 z z 73149 Nov  4 12:45 SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+build top-level: ['SHEYTAN-Music-Visualizer']
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-integrity-test
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: unzip -t /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+Archive:  /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+    testing: SHEYTAN-Music-Visualizer/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/capture.sh   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1   OK
+    testing: SHEYTAN-Music-Visualizer/ai-notes.md   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/main.go   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go   OK
+    testing: SHEYTAN-Music-Visualizer/ui/   OK
+    testing: SHEYTAN-Music-Visualizer/ui/fyne/   OK
+    testing: SHEYTAN-Music-Visualizer/ui/fyne/app.go   OK
+    testing: SHEYTAN-Music-Visualizer/.github/   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml   OK
+    testing: SHEYTAN-Music-Visualizer/go.mod   OK
+    testing: SHEYTAN-Music-Visualizer/evidence/   OK
+    testing: SHEYTAN-Music-Visualizer/evidence/phase1-build.log   OK
+    testing: SHEYTAN-Music-Visualizer/license.md   OK
+    testing: SHEYTAN-Music-Visualizer/internal/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/brand_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/brand.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/logging.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/logging_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/collect_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/collect.go   OK
+    testing: SHEYTAN-Music-Visualizer/agent.md   OK
+    testing: SHEYTAN-Music-Visualizer/.gitattributes   OK
+    testing: SHEYTAN-Music-Visualizer/.editorconfig   OK
+    testing: SHEYTAN-Music-Visualizer/readme.md   OK
+    testing: SHEYTAN-Music-Visualizer/roadmap.md   OK
+    testing: SHEYTAN-Music-Visualizer/.gitignore   OK
+    testing: SHEYTAN-Music-Visualizer/go.sum   OK
+No errors detected in compressed data of /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip.
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-layout-audit
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c 
+python3 - <<PY
+import zipfile, sys
+z = zipfile.ZipFile("/home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip")
+names = z.namelist()
+tops = sorted(set(n.split("/")[0] for n in names))
+print("top-level entries:", tops)
+assert tops == ["SHEYTAN-Music-Visualizer"], "exactly one top-level directory required"
+required = [
+ "SHEYTAN-Music-Visualizer/license.md",
+ "SHEYTAN-Music-Visualizer/readme.md",
+ "SHEYTAN-Music-Visualizer/agent.md",
+ "SHEYTAN-Music-Visualizer/roadmap.md",
+ "SHEYTAN-Music-Visualizer/ai-notes.md",
+ "SHEYTAN-Music-Visualizer/go.mod",
+ "SHEYTAN-Music-Visualizer/go.sum",
+ "SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml",
+ "SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml",
+ "SHEYTAN-Music-Visualizer/evidence/phase1-build.log",
+ "SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh",
+ "SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1",
+ "SHEYTAN-Music-Visualizer/scripts/ci/capture.sh",
+ "SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1",
+ "SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go",
+ "SHEYTAN-Music-Visualizer/internal/cilog/collect.go",
+]
+missing = [r for r in required if r not in names]
+assert not missing, f"missing required files: {missing}"
+forbidden = [n for n in names if "/.git/" in n or n.endswith("/.git") or "/bin/" in n
+             or "/ci-logs/" in n or "/dist/" in n or n.endswith(".exe") or "/node_modules/" in n]
+assert not forbidden, f"forbidden paths present: {forbidden}"
+print("required files: all present; forbidden paths: none; total entries:", len(names))
+PY
+
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+top-level entries: ['SHEYTAN-Music-Visualizer']
+required files: all present; forbidden paths: none; total entries: 45
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: rm -rf /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: mkdir -p /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract-unzip
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: unzip -q /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip -d /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:27Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: extracted-tree-test
+STARTED: 2026-11-04T12:45:27Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c cd /tmp/phase1-extract/SHEYTAN-Music-Visualizer && go test ./... && go vet ./... && go build ./...
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
 ?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
 ?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
 ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
 ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
-ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilogreport	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
 ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
 ?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:02:13Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:45:29Z
+===== COMMAND END =====
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/27-vulnfix-build-final.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: vulnfix-build-final
-STARTED: 2026-11-04T13:02:13Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: extracted-tree-exe
+STARTED: 2026-11-04T12:45:29Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c cd /tmp/phase1-extract/SHEYTAN-Music-Visualizer && go build -trimpath -o /tmp/phase1-extract/smv-test ./cmd/sheytan-music-visualizer && /tmp/phase1-extract/smv-test --version && /tmp/phase1-extract/smv-test --self-check
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown by local, go1.27.3)
+© 2024–2026 Parsaetak. All rights reserved.
+https://github.com/Parsaetak
+  version=0.1.0-dev commit=unknown go=go1.27.3
+self-check PASS buildinfo
+self-check PASS brand-identity
+  log=/home/z/.config/SHEYTAN Music Visualizer/logs/app.log
+self-check PASS log-directory
+self-check: all foundation invariants hold
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:45:30Z
+===== COMMAND END =====
+
+==============================================================
+VERIFICATION LADDER SUMMARY — PHASE 1
+==============================================================
+PASS  gofmt clean (gate 2)
+PASS  go mod tidy + tidy -diff (gates 3-4)
+PASS  go test ./... (gate 5)
+PASS  go vet ./... (gate 6)
+PASS  go build ./... (gate 7)
+PASS  native Linux x64 desktop executable + --version + --self-check (gates 8-10)
+PASS  go test -race ./internal/... (gate 11; internal packages)
+INFO  govulncheck attempt (gate 12) — see GOVULNCHECK_EXIT record above
+PASS  workflow YAML structural parse (gate 13)
+PASS  actionlint v1.7.12 (gate 14; shellcheck integration NOT AVAILABLE)
+PASS  git status / git diff --check (gate 15)
+PASS  license/document consistency gate (gate 16)
+INFO  packaging: staging + archive build #1 + integrity + layout audit +
+      extraction + extracted-tree test/vet/build/exe — all recorded above.
+      The delivered archive (build #2, identical procedure and tree,
+      refreshed embedded evidence log) received its own unzip -t and
+      layout audit after packaging; per contract those final results are
+      recorded in note.md and ai-notes.md (an archive cannot contain the
+      verification of itself).
+NOT RUN  hosted build CI (forbidden: no push/PR/dispatch in Phase 1)
+NOT RUN  hosted CodeQL analysis (same boundary; workflow validated statically only)
+NOT RUN  Fyne window on-screen launch (headless host: no display server)
+NOT RUN  Windows local build/runtime (Linux host; Windows gate = hosted CI)
+==============================================================
+==============================================================
+SHEYTAN MUSIC VISUALIZER — PHASE 1 LOCAL VERIFICATION (LINUX)
+Product:  SHEYTAN Music Visualizer (SHEYTAN™, licensor Parsaetak)
+Mode:     desktop
+Host:     Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
+Started:  2026-11-04T12:49:58Z
+==============================================================
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: toolchain-report
+STARTED: 2026-11-04T12:49:58Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c go version; echo "GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=$(go env CGO_ENABLED) GOTOOLCHAIN=$(go env GOTOOLCHAIN)"; echo "GOMOD=$(go env GOMOD)"; gcc --version | head -1; pkg-config --version
+TOOL_CONTEXT: gate:toolchain
+--- OUTPUT (stdout+stderr from first byte) ---
+go version go1.27.3 linux/amd64
+GOOS=linux GOARCH=amd64 CGO_ENABLED=1 GOTOOLCHAIN=auto
+GOMOD=/home/z/my-project/work/SHEYTAN-Music-Visualizer/go.mod
+gcc (Debian 14.2.0-19) 14.2.0
+1.8.1
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:49:58Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: gofmt-verify
+STARTED: 2026-11-04T12:49:58Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c out=$(gofmt -l .); if [ -n "$out" ]; then printf "%s\n" "$out"; echo "ERROR: gofmt reported unformatted files"; exit 1; fi; echo "gofmt clean"
+TOOL_CONTEXT: gate:gofmt
+--- OUTPUT (stdout+stderr from first byte) ---
+gofmt clean
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:49:58Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-mod-tidy
+STARTED: 2026-11-04T12:49:58Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go mod tidy
+TOOL_CONTEXT: gate:go-mod-tidy
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:49:58Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-mod-tidy-verify
+STARTED: 2026-11-04T12:49:58Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go mod tidy -diff
+TOOL_CONTEXT: gate:go-mod-tidy
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:49:58Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-test
+STARTED: 2026-11-04T12:49:58Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go test ./...
+TOOL_CONTEXT: gate:go-test
+--- OUTPUT (stdout+stderr from first byte) ---
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:49:58Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-vet
+STARTED: 2026-11-04T12:49:58Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go vet ./...
+TOOL_CONTEXT: gate:go-vet
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:49:59Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: go-build-packages
+STARTED: 2026-11-04T12:49:59Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
 COMMAND: go build ./...
+TOOL_CONTEXT: gate:go-build
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:02:15Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:50:00Z
+===== COMMAND END =====
 
-------------------------------------------------------------------------------
-### LOG: ci-logs/package/28-govulncheck-final.log
-------------------------------------------------------------------------------
-=== COMMAND RECORD ===
-JOB: package
-STEP: govulncheck-final
-STARTED: 2026-11-04T13:02:15Z
-WORKDIR: /home/z/my-project/SHEYTAN-Music-Visualizer
-COMMAND: bash -c /home/z/gopath/bin/govulncheck ./...
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: build-executable
+STARTED: 2026-11-04T12:50:00Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go build -trimpath -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer
+TOOL_CONTEXT: gate:build-exe
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:01Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: run-version
+STARTED: 2026-11-04T12:50:01Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: ./bin/sheytan-music-visualizer --version
+TOOL_CONTEXT: runtime:--version
+--- OUTPUT (stdout+stderr from first byte) ---
+SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown by local, go1.27.3)
+© 2024–2026 Parsaetak. All rights reserved.
+https://github.com/Parsaetak
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:01Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-linux-build
+STEP: run-self-check
+STARTED: 2026-11-04T12:50:01Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: ./bin/sheytan-music-visualizer --self-check
+TOOL_CONTEXT: runtime:--self-check
+--- OUTPUT (stdout+stderr from first byte) ---
+  version=0.1.0-dev commit=unknown go=go1.27.3
+self-check PASS buildinfo
+self-check PASS brand-identity
+  log=/home/z/.config/SHEYTAN Music Visualizer/logs/app.log
+self-check PASS log-directory
+self-check: all foundation invariants hold
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:01Z
+===== COMMAND END =====
+
+==============================================================
+RUN SUMMARY — phase1-linux-build
+Ended:            2026-11-04T12:50:01Z
+Mode:             desktop
+Failed gates:     0
+
+FAILURE INDEX (EXIT_CODE records with non-zero codes):
+(none — all captured commands returned exit code 0)
+
+SKIPPED GATES:
+(none)
+RUN RESULT: PASS
+==============================================================
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: go-test-race
+STARTED: 2026-11-04T12:50:01Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: go test -race ./internal/...
+TOOL_CONTEXT: gate:go-test-race
+--- OUTPUT (stdout+stderr from first byte) ---
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:01Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: govulncheck-attempt
+STARTED: 2026-11-04T12:50:01Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c go run golang.org/x/vuln/cmd/govulncheck@latest ./... 2>&1; echo "GOVULNCHECK_EXIT=$?"
+TOOL_CONTEXT: gate:govulncheck
+--- OUTPUT (stdout+stderr from first byte) ---
 === Symbol Results ===
 
 No vulnerabilities found.
@@ -1243,48 +1620,347 @@ This scan also found 10 vulnerabilities in packages you import and 13
 vulnerabilities in modules you require, but your code doesn't appear to call
 these vulnerabilities.
 Use '-show verbose' for more details.
+GOVULNCHECK_EXIT=0
+--- END OUTPUT ---
 EXIT_CODE: 0 PASS
-ENDED: 2026-11-04T13:02:24Z
-TOOLCONTEXT: go go1.27.3; gcc 14; pkg-config 1.8.1
-=== END COMMAND RECORD ===
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
 
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: workflow-yaml-parse
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: python3 -c 
+import yaml
+for f in ['.github/workflows/build-desktop.yml', '.github/workflows/codeql.yml']:
+    d = yaml.safe_load(open(f))
+    print(f, 'OK jobs=', list(d['jobs'].keys()))
 
-==============================================================================
-RUN SUMMARY
-==============================================================================
-gofmt                              exit=0    PASS started=2026-11-04T12:55:01Z log=ci-logs/phase1-local/01-gofmt.log
-tidy                               exit=0    PASS started=2026-11-04T12:55:01Z log=ci-logs/phase1-local/02-tidy.log
-tidy-drift                         exit=0    PASS started=2026-11-04T12:55:01Z log=ci-logs/phase1-local/02-tidy-drift.log
-tests                              exit=0    PASS started=2026-11-04T12:55:01Z log=ci-logs/phase1-local/03-test.log
-vet                                exit=0    PASS started=2026-11-04T12:55:01Z log=ci-logs/phase1-local/04-vet.log
-build-packages                     exit=0    PASS started=2026-11-04T12:55:01Z log=ci-logs/phase1-local/05-build-all.log
-native-executable                  exit=0    PASS started=2026-11-04T12:55:03Z log=ci-logs/phase1-local/06-build-exe.log
-version                            exit=0    PASS started=2026-11-04T12:55:03Z log=ci-logs/phase1-local/07-version.log
-self-check                         exit=0    PASS started=2026-11-04T12:55:03Z log=ci-logs/phase1-local/08-self-check.log
-collector-fixtures                 exit=0    PASS started=2026-11-04T12:55:03Z log=ci-logs/phase1-local/09-collector-fixtures.log
-build-gates-linux                  exit=0    PASS started=2026-11-04T12:55:01Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/10-build-gates.log
-collector-e2e                      exit=0    PASS started=2026-11-04T12:55:03Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/11-collector-e2e.log
-actionlint                         exit=0    PASS started=2026-11-04T12:55:03Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/12-actionlint.log
-yaml-parse                         exit=0    PASS started=2026-11-04T12:55:03Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/13-yaml-parse.log
-workflow-contracts                 exit=0    PASS started=2026-11-04T12:55:04Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/14-workflow-contracts.log
-license-consistency                exit=0    PASS started=2026-11-04T12:55:04Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/15-license-consistency.log
-docs-consistency                   exit=0    PASS started=2026-11-04T12:55:04Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/16-docs-consistency.log
-git-diff-check                     exit=0    PASS started=2026-11-04T12:55:04Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/17-git-diff-check.log
-git-status                         exit=0    PASS started=2026-11-04T12:55:04Z log=ci-logs/ladder//home/z/my-project/SHEYTAN-Music-Visualizer/ci-logs/ladder/18-git-status.log
-fyne-window-runtime-xvfb           exit=0    PASS started=2026-11-04T12:55:04Z log=ci-logs/ladder/19-window-runtime.log
-stage-from-tracked-files           exit=0    PASS started=2026-11-04T12:59:17Z log=ci-logs/package/01-stage.log
-ps1-crlf-normalize                 exit=0    PASS started=2026-11-04T12:59:17Z log=ci-logs/package/02-ps1-crlf.log
-create-zip                         exit=0    PASS started=2026-11-04T12:59:17Z log=ci-logs/package/03-create-zip.log
-zip-integrity-test                 exit=0    PASS started=2026-11-04T12:59:18Z log=ci-logs/package/04-unzip-t.log
-top-level-layout                   exit=0    PASS started=2026-11-04T12:59:18Z log=ci-logs/package/05-toplevel.log
-required-files-audit               exit=0    PASS started=2026-11-04T12:59:18Z log=ci-logs/package/06-required-files.log
-forbidden-files-audit              exit=0    PASS started=2026-11-04T12:59:18Z log=ci-logs/package/07-forbidden-files.log
-extract-archive                    exit=0    PASS started=2026-11-04T12:59:18Z log=ci-logs/package/08-extract.log
-extracted-go-test                  exit=0    PASS started=2026-11-04T12:59:18Z log=ci-logs/package/09-extracted-test.log
-extracted-go-build                 exit=0    PASS started=2026-11-04T12:59:18Z log=ci-logs/package/10-extracted-build.log
-extracted-exe-version              exit=0    PASS started=2026-11-04T12:59:20Z log=ci-logs/package/11-extracted-exe.log
+TOOL_CONTEXT: gate:workflow-yaml
+--- OUTPUT (stdout+stderr from first byte) ---
+.github/workflows/build-desktop.yml OK jobs= ['preflight', 'build-windows', 'build-linux', 'collect-logs']
+.github/workflows/codeql.yml OK jobs= ['analyze']
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
 
-captured command records: 31
-failed command records:   0
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: actionlint
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: /home/z/tools/bin/actionlint -no-color .github/workflows/build-desktop.yml .github/workflows/codeql.yml
+TOOL_CONTEXT: gate:actionlint
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
 
-END OF PHASE 1 VERIFICATION TRANSCRIPT
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: git-status
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: git status --short --branch
+TOOL_CONTEXT: gate:git
+--- OUTPUT (stdout+stderr from first byte) ---
+## main
+ M go.mod
+ M go.sum
+ M license.md
+?? ai-notes.md
+?? evidence/
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: git-diff-check
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: git diff --check
+TOOL_CONTEXT: gate:git
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: license-consistency
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: python3 -
+TOOL_CONTEXT: gate:license-consistency
+--- OUTPUT (stdout+stderr from first byte) ---
+PASS: license.md exists (sole licensing authority)
+PASS: exactly one license file at root: ['license.md']
+PASS: license carries Parsaetak Proprietary License v1.1
+PASS: license names the exact product
+PASS: license carries the 2024–2026 Parsaetak copyright
+PASS: license states no open-designated components
+PASS: brand.go ProductName matches exact product name
+PASS: readme.md title is the exact product name
+PASS: agent.md references license.md
+PASS: roadmap.md references license.md
+PASS: ai-notes.md references license.md
+PASS: license inventory lists Fyne v2.8.2 BSD-3-Clause (verified)
+PASS: module inventory generated from real module graph
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: evidence-copy
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: cp ci-logs/phase1-build.log evidence/phase1-build.log
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: stage-and-zip
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -s
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+total 84
+drwxrwxr-x 2 z z  4096 Nov  4 12:50 .
+drwxrwxr-x 5 z z  4096 Nov  4 12:50 ..
+-rw-rw-r-- 1 z z 75013 Nov  4 12:50 SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+build top-level: ['SHEYTAN-Music-Visualizer']
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-integrity-test
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: unzip -t /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+Archive:  /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip
+    testing: SHEYTAN-Music-Visualizer/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/capture.sh   OK
+    testing: SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1   OK
+    testing: SHEYTAN-Music-Visualizer/ai-notes.md   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer/main.go   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/   OK
+    testing: SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go   OK
+    testing: SHEYTAN-Music-Visualizer/ui/   OK
+    testing: SHEYTAN-Music-Visualizer/ui/fyne/   OK
+    testing: SHEYTAN-Music-Visualizer/ui/fyne/app.go   OK
+    testing: SHEYTAN-Music-Visualizer/.github/   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml   OK
+    testing: SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml   OK
+    testing: SHEYTAN-Music-Visualizer/go.mod   OK
+    testing: SHEYTAN-Music-Visualizer/evidence/   OK
+    testing: SHEYTAN-Music-Visualizer/evidence/phase1-build.log   OK
+    testing: SHEYTAN-Music-Visualizer/license.md   OK
+    testing: SHEYTAN-Music-Visualizer/internal/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/brand_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/brand/brand.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/logging.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/logging/logging_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/buildinfo/buildinfo.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/collect_test.go   OK
+    testing: SHEYTAN-Music-Visualizer/internal/cilog/collect.go   OK
+    testing: SHEYTAN-Music-Visualizer/agent.md   OK
+    testing: SHEYTAN-Music-Visualizer/.gitattributes   OK
+    testing: SHEYTAN-Music-Visualizer/.editorconfig   OK
+    testing: SHEYTAN-Music-Visualizer/readme.md   OK
+    testing: SHEYTAN-Music-Visualizer/roadmap.md   OK
+    testing: SHEYTAN-Music-Visualizer/.gitignore   OK
+    testing: SHEYTAN-Music-Visualizer/go.sum   OK
+No errors detected in compressed data of /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip.
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-layout-audit
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c 
+python3 - <<PY
+import zipfile, sys
+z = zipfile.ZipFile("/home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip")
+names = z.namelist()
+tops = sorted(set(n.split("/")[0] for n in names))
+print("top-level entries:", tops)
+assert tops == ["SHEYTAN-Music-Visualizer"], "exactly one top-level directory required"
+required = [
+ "SHEYTAN-Music-Visualizer/license.md",
+ "SHEYTAN-Music-Visualizer/readme.md",
+ "SHEYTAN-Music-Visualizer/agent.md",
+ "SHEYTAN-Music-Visualizer/roadmap.md",
+ "SHEYTAN-Music-Visualizer/ai-notes.md",
+ "SHEYTAN-Music-Visualizer/go.mod",
+ "SHEYTAN-Music-Visualizer/go.sum",
+ "SHEYTAN-Music-Visualizer/.github/workflows/build-desktop.yml",
+ "SHEYTAN-Music-Visualizer/.github/workflows/codeql.yml",
+ "SHEYTAN-Music-Visualizer/evidence/phase1-build.log",
+ "SHEYTAN-Music-Visualizer/scripts/build/build-linux.sh",
+ "SHEYTAN-Music-Visualizer/scripts/build/build-windows.ps1",
+ "SHEYTAN-Music-Visualizer/scripts/ci/capture.sh",
+ "SHEYTAN-Music-Visualizer/scripts/ci/Capture-Step.ps1",
+ "SHEYTAN-Music-Visualizer/cmd/ci-log-collector/main.go",
+ "SHEYTAN-Music-Visualizer/internal/cilog/collect.go",
+]
+missing = [r for r in required if r not in names]
+assert not missing, f"missing required files: {missing}"
+forbidden = [n for n in names if "/.git/" in n or n.endswith("/.git") or "/bin/" in n
+             or "/ci-logs/" in n or "/dist/" in n or n.endswith(".exe") or "/node_modules/" in n]
+assert not forbidden, f"forbidden paths present: {forbidden}"
+print("required files: all present; forbidden paths: none; total entries:", len(names))
+PY
+
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+top-level entries: ['SHEYTAN-Music-Visualizer']
+required files: all present; forbidden paths: none; total entries: 45
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: rm -rf /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: mkdir -p /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: zip-extract-unzip
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: unzip -q /home/z/my-project/work/dist-zip/SHEYTAN-Music-Visualizer-PHASE1-SOURCE.zip -d /tmp/phase1-extract
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:10Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: extracted-tree-test
+STARTED: 2026-11-04T12:50:10Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c cd /tmp/phase1-extract/SHEYTAN-Music-Visualizer && go test ./... && go vet ./... && go build ./...
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:12Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase1-package
+STEP: extracted-tree-exe
+STARTED: 2026-11-04T12:50:12Z
+WORKDIR: /home/z/my-project/work/SHEYTAN-Music-Visualizer
+COMMAND: bash -c cd /tmp/phase1-extract/SHEYTAN-Music-Visualizer && go build -trimpath -o /tmp/phase1-extract/smv-test ./cmd/sheytan-music-visualizer && /tmp/phase1-extract/smv-test --version && /tmp/phase1-extract/smv-test --self-check
+TOOL_CONTEXT: -
+--- OUTPUT (stdout+stderr from first byte) ---
+SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown by local, go1.27.3)
+© 2024–2026 Parsaetak. All rights reserved.
+https://github.com/Parsaetak
+  version=0.1.0-dev commit=unknown go=go1.27.3
+self-check PASS buildinfo
+self-check PASS brand-identity
+  log=/home/z/.config/SHEYTAN Music Visualizer/logs/app.log
+self-check PASS log-directory
+self-check: all foundation invariants hold
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-04T12:50:14Z
+===== COMMAND END =====
+
+==============================================================
+VERIFICATION LADDER SUMMARY — PHASE 1
+==============================================================
+PASS  gofmt clean (gate 2)
+PASS  go mod tidy + tidy -diff (gates 3-4)
+PASS  go test ./... (gate 5)
+PASS  go vet ./... (gate 6)
+PASS  go build ./... (gate 7)
+PASS  native Linux x64 desktop executable + --version + --self-check (gates 8-10)
+PASS  go test -race ./internal/... (gate 11; internal packages)
+INFO  govulncheck attempt (gate 12) — see GOVULNCHECK_EXIT record above
+PASS  workflow YAML structural parse (gate 13)
+PASS  actionlint v1.7.12 (gate 14; shellcheck integration NOT AVAILABLE)
+PASS  git status / git diff --check (gate 15)
+PASS  license/document consistency gate (gate 16)
+INFO  packaging: staging + archive build #1 + integrity + layout audit +
+      extraction + extracted-tree test/vet/build/exe — all recorded above.
+      The delivered archive (build #2, identical procedure and tree,
+      refreshed embedded evidence log) received its own unzip -t and
+      layout audit after packaging; per contract those final results are
+      recorded in note.md and ai-notes.md (an archive cannot contain the
+      verification of itself).
+NOT RUN  hosted build CI (forbidden: no push/PR/dispatch in Phase 1)
+NOT RUN  hosted CodeQL analysis (same boundary; workflow validated statically only)
+NOT RUN  Fyne window on-screen launch (headless host: no display server)
+NOT RUN  Windows local build/runtime (Linux host; Windows gate = hosted CI)
+==============================================================

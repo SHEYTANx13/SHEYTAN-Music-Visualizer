@@ -1,23 +1,10 @@
-# codeql.yml — CodeQL security analysis for SHEYTAN Music Visualizer.
-#
-# Phase 1 contract:
-#   - Languages: `go` and `actions` only — no invented analysis of code that
-#     does not exist in this repository.
-#   - Go uses build-mode: manual so the exact Fyne/CGO compile command and
-#     native prerequisites are controlled; `actions` uses build-mode: none.
-#   - fail-fast: false so one analysis cannot suppress the other.
-#   - Least privilege: workflow contents: read; the analyze job receives the
-#     security-events: write it needs plus actions: read and contents: read.
-#   - This file being present and locally validated is NOT evidence that a
-#     CodeQL scan ran. Hosted status is reported separately (NOT RUN /
-#     NOT OBSERVED) in ai-notes.md and the Phase 1 handoff note.
-#
-# Log hygiene: setup/build diagnostics are captured into ci-logs/codeql/ and
-# uploaded with a distinct artifact name (codeql-logs-part). This workflow is
-# a separate run from build-desktop.yml; its logs are never part of that
-# workflow's consolidated report.
+name: codeql
 
-name: CodeQL
+# CodeQL security analysis for SHEYTAN Music Visualizer (Phase 1).
+# Languages: go (manual build with real Fyne prerequisites) and actions
+# (build-mode: none). This is a SEPARATE workflow run from build-desktop;
+# its logs use a distinct artifact name and are not inputs to the
+# build-desktop log collector.
 
 on:
   push:
@@ -25,7 +12,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 3 * * 1' # weekly, Monday 03:00 UTC
+    - cron: '17 3 * * 1' # weekly, Monday 03:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -33,7 +20,7 @@ permissions:
 
 jobs:
   analyze:
-    name: Analyze (${{ matrix.language }}, ${{ matrix.build-mode }})
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -49,35 +36,38 @@ jobs:
           - language: actions
             build-mode: none
     steps:
-      - name: Checkout (pinned, no persisted credentials)
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: "Set up Go (single version authority: go.mod toolchain)"
+      - name: Setup Go (go matrix only)
         if: matrix.language == 'go'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
 
-      - name: Install Fyne native build prerequisites (go leg)
+      - name: Install Fyne native prerequisites (go matrix only)
         if: matrix.language == 'go'
         run: |
-          set -e
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            gcc pkg-config \
-            libgl1-mesa-dev libegl1-mesa-dev \
-            libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev \
-            libxi-dev libxxf86vm-dev \
-            libwayland-dev libxkbcommon-dev xorg-dev
+          set -o pipefail
+          mkdir -p ci-logs
+          {
+            echo "=== apt-get update ==="
+            sudo apt-get update
+            echo "=== apt-get install Fyne prerequisites ==="
+            sudo apt-get install -y --no-install-recommends \
+              gcc pkg-config \
+              libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
+              libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev \
+              libwayland-dev libxkbcommon-dev xorg-dev
+          } 2>&1 | tee ci-logs/codeql-prereq.log
 
-      - name: Quality gate — go vet (untraced, before CodeQL init)
+      - name: go vet quality gate (before tracing, go matrix only)
         if: matrix.language == 'go'
         run: |
-          set -eo pipefail
-          go vet ./... 2>&1 | tee -a ci-logs-codeql-vet.log
+          set -o pipefail
+          go vet ./... 2>&1 | tee ci-logs/codeql-go-vet.log
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
@@ -85,40 +75,22 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
 
-      - name: Manual traced build (go leg — real Fyne compile under tracing)
+      - name: Manual traced build (go matrix only)
         if: matrix.language == 'go' && matrix.build-mode == 'manual'
         run: |
-          set -eo pipefail
-          go build ./... 2>&1 | tee -a ci-logs-codeql-build.log
+          set -o pipefail
+          go build ./... 2>&1 | tee ci-logs/codeql-go-build.log
 
-      - name: Analyze
+      - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          category: "/language:${{ matrix.language }}"
+          category: '/language:${{ matrix.language }}'
 
-      - name: Upload CodeQL setup/build diagnostics
-        if: always()
-        run: |
-          mkdir -p ci-logs/codeql
-          {
-            echo "=== CodeQL leg: ${{ matrix.language }} / ${{ matrix.build-mode }} ==="
-            echo "runner: $(uname -s -m)"
-            if [ "${{ matrix.language }}" = "go" ]; then
-              echo "go: $(go version 2>&1)"
-              echo "gcc: $(gcc --version 2>&1 | head -1)"
-            fi
-            echo "--- vet log ---"
-            cat ci-logs-codeql-vet.log 2>/dev/null || true
-            echo "--- build log ---"
-            cat ci-logs-codeql-build.log 2>/dev/null || true
-          } > ci-logs/codeql/${{ matrix.language }}-setup.log 2>&1
-          cat ci-logs/codeql/${{ matrix.language }}-setup.log
-
-      - name: Upload CodeQL log part
+      - name: Upload CodeQL log part (distinct artifact; separate workflow)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: codeql-logs-part
-          path: ci-logs/codeql/
-          if-no-files-found: warn
-          overwrite: true
+          path: |
+            ci-logs/**
+          if-no-files-found: ignore

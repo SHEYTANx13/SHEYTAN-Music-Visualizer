@@ -1,95 +1,119 @@
-// Package brand is the single source of truth for SHEYTAN Music Visualizer
-// product identity: exact product name, trademark, licensor/signer
-// attribution, application identifier, the black/red hellish palette tokens,
-// and the canonical legal footer text.
+// Package brand is the single source of truth for the SHEYTAN Music
+// Visualizer product identity: exact names, trademark position, licensor
+// attribution, application identifier, theme tokens and the legal footer.
 //
-// No other file in the product may hardcode these values. Documentation may
-// naturally display the full product name, but identity constants used by
-// code must come from this package.
+// Product and marketing strings must not be re-declared elsewhere in
+// first-party code; import this package instead. Documentation files may
+// naturally display the full product name.
 package brand
 
-// Product identity — fixed requirements (Phase 1 mission contract).
+// Identity constants. Do not edit values without updating license.md,
+// readme.md and ai-notes.md together.
 const (
-	// ProductName is the exact product name. Do not reword it.
+	// ProductName is the exact product name.
 	ProductName = "SHEYTAN Music Visualizer"
 
-	// BrandTag is the trademark tag used beside the product name.
+	// BrandTag is the brand mark used next to the product name.
 	BrandTag = "SHEYTAN™"
 
-	// Publisher is the licensor/copyright holder attribution.
+	// Publisher is the licensor / copyright holder attribution.
 	Publisher = "Parsaetak"
 
-	// Author is the author/signer attribution where required.
+	// Author is the signer attribution used where a personal name is
+	// required (e.g. build signatures, legal notices).
 	Author = "Parsa Tak"
 
-	// AppIdentifier is the Fyne application identifier. It is provisional
-	// until the final distribution channel is decided in Phase 2; the
-	// decision is recorded in ai-notes.md.
-	AppIdentifier = "com.parsaetak.sheytan-music-visualizer"
+	// AppID is the application identifier for desktop integration.
+	AppID = "com.parsaetak.sheytan-music-visualizer"
 
-	// AppDirName is the app-owned directory name used under the user
-	// config/data directory for local application state and logs.
-	AppDirName = "SHEYTAN-Music-Visualizer"
+	// ModulePath is the Go module path. It is provisional: no GitHub
+	// remote exists for this repository as of Phase 1. See ai-notes.md.
+	ModulePath = "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer"
 
-	// CopyrightRange is the canonical copyright range statement.
-	CopyrightRange = "© 2024–2026 Parsaetak. All rights reserved."
+	// Copyright is the canonical copyright line.
+	Copyright = "© 2024–2026 Parsaetak. All rights reserved."
 
-	// LicenseDocument is the canonical licensing authority file.
-	LicenseDocument = "license.md"
+	// TrademarkStatement must not imply that the software is open source
+	// or that third parties are licensed to reuse SHEYTAN branding.
+	TrademarkStatement = "SHEYTAN™, SHEYTAN Music Visualizer and the SHEYTAN logo are trademarks of Parsaetak. " +
+		"They identify the Software and its distribution; no license grants any right to use the SHEYTAN name, " +
+		"logo or branding beyond what trademark law allows, and nothing here implies that the Software is " +
+		"open source or that third parties are licensed to reuse SHEYTAN branding."
 
-	// LicenseName is the license governing all first-party material.
-	LicenseName = "Parsaetak Proprietary License v1.1"
+	// LicenseFile is the sole licensing authority document.
+	LicenseFile = "license.md"
 
-	// ContactURL is the licensor contact/source URL.
-	ContactURL = "https://github.com/Parsaetak"
+	// SourceURL is the canonical contact / source URL.
+	SourceURL = "https://github.com/Parsaetak"
 
-	// TrademarkStatement is the exact trademark position for this product.
-	// It must not imply the software is open source or that third parties
-	// are licensed to reuse SHEYTAN branding.
-	TrademarkStatement = "SHEYTAN™ and the SHEYTAN logo are trademarks of Parsaetak. " +
-		"They identify " + ProductName + " and its distribution. No license grants any right " +
-		"to use the SHEYTAN name, logo or branding beyond what trademark law allows, and " +
-		"nothing implies endorsement of derived works."
-
-	// LegalFooter is the canonical one-line legal footer.
-	LegalFooter = CopyrightRange + " " + Publisher + ". " + TrademarkStatement
-
-	// PhaseCurrent identifies the current delivery phase.
-	PhaseCurrent = "Phase 1 — Foundation"
-
-	// PhasePlaceholder is the exact placeholder text shown in the minimal
-	// Phase 1 window. Phase 2 replaces this surface with the studio UI.
-	PhasePlaceholder = "Phase 1 foundation build. The studio (library, preview, visualizers, export) arrives in Phase 2 — see roadmap.md."
+	// LogDirName is the directory name used inside the user config
+	// directory for application-owned data.
+	LogDirName = "SHEYTAN Music Visualizer"
 )
 
-// Palette holds the black/red hellish identity tokens. These are identity
-// tokens for documentation and future UI work; Phase 1 does not build the
-// visual theme. Black dominates; red is the accent — premium, cinematic,
-// restrained.
-type Palette struct {
-	Obsidian        string // app background
-	DeepCharcoal    string // surface
-	VolcanicSurface string // volcanic surface
-	DarkBlood       string // primary crimson
-	InfernalRed     string // primary action
-	EmberHighlight  string // ember highlight
-	HotEmberAccent  string // hot ember accent, used sparingly
-	PrimaryText     string // primary text
-	SecondaryText   string // secondary text
-	Divider         string // dividers / subtle border
+// WindowTitle returns the exact Fyne window title for the product.
+func WindowTitle() string {
+	return ProductName
 }
 
-// Theme is the single palette authority. Phase 2 UI code must consume these
-// tokens instead of introducing new ad-hoc colors.
-var Theme = Palette{
-	Obsidian:        "#080808",
-	DeepCharcoal:    "#111111",
-	VolcanicSurface: "#190909",
-	DarkBlood:       "#9F0B18",
-	InfernalRed:     "#D51D2A",
-	EmberHighlight:  "#FF453A",
-	HotEmberAccent:  "#FF7043",
-	PrimaryText:     "#F2EEEE",
-	SecondaryText:   "#A9A0A0",
-	Divider:         "#342020",
+// LegalFooter returns the compact legal footer shown in the Phase 1
+// placeholder window and used in CLI outputs.
+func LegalFooter() string {
+	return Copyright + " " + TrademarkStatement
+}
+
+// Theme direction: black and red — hellish / infernal. Black dominates;
+// red is the accent. The direction is premium, cinematic, restrained,
+// dark, powerful, precise and professional. Avoid excessive flames,
+// skulls, glow, gradients or saturated red surfaces.
+//
+// These are identity tokens for documentation and future Phase 2 UI
+// work. Phase 1 does not build the visual design.
+const (
+	// ColorObsidian is the app background.
+	ColorObsidian = "#080808"
+
+	// ColorDeepCharcoal is the deep charcoal surface.
+	ColorDeepCharcoal = "#111111"
+
+	// ColorVolcanicSurface is the volcanic surface.
+	ColorVolcanicSurface = "#190909"
+
+	// ColorDarkBlood is the primary crimson.
+	ColorDarkBlood = "#9F0B18"
+
+	// ColorInfernalRed is the primary action red.
+	ColorInfernalRed = "#D51D2A"
+
+	// ColorEmberHighlight is the ember highlight.
+	ColorEmberHighlight = "#FF453A"
+
+	// ColorHotEmberAccent is used sparingly.
+	ColorHotEmberAccent = "#FF7043"
+
+	// ColorPrimaryText is the primary text color.
+	ColorPrimaryText = "#F2EEEE"
+
+	// ColorSecondaryText is the secondary text color.
+	ColorSecondaryText = "#A9A0A0"
+
+	// ColorDivider is the divider / subtle border color.
+	ColorDivider = "#342020"
+)
+
+// Palette returns the identity theme tokens in a stable order for
+// diagnostics and tests.
+func Palette() map[string]string {
+	return map[string]string{
+		"obsidian.background":   ColorObsidian,
+		"surface.deepCharcoal":  ColorDeepCharcoal,
+		"surface.volcanic":      ColorVolcanicSurface,
+		"accent.darkBlood":      ColorDarkBlood,
+		"accent.infernalRed":    ColorInfernalRed,
+		"accent.emberHighlight": ColorEmberHighlight,
+		"accent.hotEmber":       ColorHotEmberAccent,
+		"text.primary":          ColorPrimaryText,
+		"text.secondary":        ColorSecondaryText,
+		"border.divider":        ColorDivider,
+	}
 }

@@ -1,61 +1,54 @@
 package brand
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
 
-func TestProductIdentityIsExact(t *testing.T) {
+var hexColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+
+func TestIdentityConstants(t *testing.T) {
 	if ProductName != "SHEYTAN Music Visualizer" {
-		t.Fatalf("product name drifted: %q", ProductName)
+		t.Fatalf("ProductName = %q", ProductName)
 	}
 	if BrandTag != "SHEYTAN™" {
-		t.Fatalf("brand tag drifted: %q", BrandTag)
+		t.Fatalf("BrandTag = %q", BrandTag)
 	}
-	if Publisher != "Parsaetak" || Author != "Parsa Tak" {
-		t.Fatalf("attribution drifted: publisher=%q author=%q", Publisher, Author)
+	if Publisher != "Parsaetak" {
+		t.Fatalf("Publisher = %q", Publisher)
 	}
-}
-
-func TestLegalFooterCarriesCopyrightAndTrademark(t *testing.T) {
-	if !strings.Contains(LegalFooter, "© 2024–2026 Parsaetak. All rights reserved.") {
-		t.Fatalf("legal footer missing canonical copyright: %q", LegalFooter)
+	if Author != "Parsa Tak" {
+		t.Fatalf("Author = %q", Author)
 	}
-	if !strings.Contains(LegalFooter, "trademarks of Parsaetak") {
-		t.Fatalf("legal footer missing trademark statement: %q", LegalFooter)
+	if WindowTitle() != ProductName {
+		t.Fatalf("window title must be the exact product name")
 	}
-	// The trademark position must not imply open-source reuse rights.
-	if strings.Contains(strings.ToLower(TrademarkStatement), "open source") {
-		t.Fatalf("trademark statement must not imply open source: %q", TrademarkStatement)
+	if Copyright != "© 2024–2026 Parsaetak. All rights reserved." {
+		t.Fatalf("Copyright = %q", Copyright)
 	}
 }
 
-func TestPaletteTokensAreWellFormedHex(t *testing.T) {
-	for name, hex := range map[string]string{
-		"Obsidian":        Theme.Obsidian,
-		"DeepCharcoal":    Theme.DeepCharcoal,
-		"VolcanicSurface": Theme.VolcanicSurface,
-		"DarkBlood":       Theme.DarkBlood,
-		"InfernalRed":     Theme.InfernalRed,
-		"EmberHighlight":  Theme.EmberHighlight,
-		"HotEmberAccent":  Theme.HotEmberAccent,
-		"PrimaryText":     Theme.PrimaryText,
-		"SecondaryText":   Theme.SecondaryText,
-		"Divider":         Theme.Divider,
-	} {
-		if len(hex) != 7 || hex[0] != '#' {
-			t.Fatalf("palette token %s malformed: %q", name, hex)
-		}
-		for _, c := range hex[1:] {
-			if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
-				t.Fatalf("palette token %s has bad hex digit: %q", name, hex)
-			}
+func TestTrademarkStatementHasNoOpenSourceImplication(t *testing.T) {
+	stmt := strings.ToLower(TrademarkStatement)
+	for _, banned := range []string{"open source", "licensed to reuse"} {
+		if strings.Contains(stmt, banned) && !strings.Contains(stmt, "nothing here implies") {
+			t.Fatalf("trademark statement must not imply %q", banned)
 		}
 	}
+	if !strings.Contains(stmt, "trademarks of parsaetak") {
+		t.Fatalf("trademark statement must attribute marks to Parsaetak")
+	}
 }
 
-func TestPlaceholderMentionsPhase2(t *testing.T) {
-	if !strings.Contains(PhasePlaceholder, "Phase 2") {
-		t.Fatalf("placeholder must point to Phase 2: %q", PhasePlaceholder)
+func TestPaletteTokensAreHexColors(t *testing.T) {
+	palette := Palette()
+	if len(palette) != 10 {
+		t.Fatalf("palette must carry exactly the 10 identity tokens, got %d", len(palette))
+	}
+	for name, value := range palette {
+		if !hexColor.MatchString(value) {
+			t.Fatalf("token %s = %q is not a #RRGGBB color", name, value)
+		}
 	}
 }

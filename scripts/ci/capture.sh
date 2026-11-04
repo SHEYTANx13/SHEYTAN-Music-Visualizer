@@ -1,72 +1,65 @@
 #!/usr/bin/env bash
-# capture.sh — first-byte command capture for SHEYTAN Music Visualizer
-# build and CI logs. Adapted from the proven SHEYTAN-LA contract.
-#
-# Usage:
-#   capture.sh <job> <step-name> <logfile> -- <command...>
-#
-# Optional environment:
-#   CAPTURE_INDEX  path of a summary index file; one line is appended per
-#                  captured command: JOB|STEP|logfile|EXIT|VERDICT|STARTED|ENDED
+# ci_capture — Phase 1 command-capture helper (Bash side).
 #
 # Contract:
-#   - stdout AND stderr are captured from the first byte (tee, pipefail).
-#   - The original exit code is preserved and propagated — never swallowed.
-#   - A structured record block is appended to the log file:
-#       STARTED / EXIT_CODE <n> PASS|FAIL / ENDED, plus command + workdir.
-#   - The caller's `set -e` still fires on FAIL because this helper exits
-#     with the command's own status. Never wrap the captured command in
-#     `|| true`; record the failure and return a non-zero aggregate instead.
-set -uo pipefail
+#   - Capture stdout AND stderr from the first byte into $CI_LOG_FILE.
+#   - Preserve the ORIGINAL command exit code (never the exit code of
+#     tee or of the capture machinery) and return it to the caller.
+#   - Append a structured command record: JOB, STEP, STARTED, WORKDIR,
+#     COMMAND, TOOL_CONTEXT, output, EXIT_CODE with PASS|FAIL verdict,
+#     ENDED.
+#   - The caller decides whether to continue after a failure; this
+#     helper never masks a non-zero status (no `|| true` inside).
+#
+# Usage:
+#   export CI_LOG_FILE=/abs/path/phase1-build.log   # before first call
+#   ci_capture <JOB> <STEP> <command> [args...]
+#   rc=$?   # original command exit code
+#
+# Optional: export CI_TOOL_CONTEXT="go1.27.3 / gcc 14.2" before a call
+# to embed tool context in the record.
 
-job="${1:?capture.sh: job name required}"
-step="${2:?capture.sh: step name required}"
-logfile="${3:?capture.sh: log path required}"
-shift 3
-[ "${1:-}" = "--" ] && shift
-[ $# -gt 0 ] || { echo "capture.sh: no command given" >&2; exit 64; }
+ci_capture() {
+  if [ "$#" -lt 3 ]; then
+    echo "ci_capture: usage: ci_capture <JOB> <STEP> <command> [args...]" >&2
+    CI_CAPTURE_EXIT=2
+    return 2
+  fi
+  if [ -z "${CI_LOG_FILE:-}" ]; then
+    echo "ci_capture: CI_LOG_FILE must be set to the run log path" >&2
+    CI_CAPTURE_EXIT=2
+    return 2
+  fi
+  local job="$1" step="$2"
+  shift 2
+  local workdir started ended rc verdict
+  workdir="$(pwd)"
+  started="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  {
+    printf '\n===== COMMAND BEGIN =====\n'
+    printf 'JOB: %s\n' "$job"
+    printf 'STEP: %s\n' "$step"
+    printf 'STARTED: %s\n' "$started"
+    printf 'WORKDIR: %s\n' "$workdir"
+    printf 'COMMAND: %s\n' "$*"
+    printf 'TOOL_CONTEXT: %s\n' "${CI_TOOL_CONTEXT:--}"
+    printf -- '--- OUTPUT (stdout+stderr from first byte) ---\n'
+  } >>"$CI_LOG_FILE"
 
-mkdir -p "$(dirname "$logfile")"
+  set -o pipefail
+  "$@" 2>&1 | tee -a "$CI_LOG_FILE"
+  rc=${PIPESTATUS[0]}
+  set +o pipefail
 
-start_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-{
-  echo "=== COMMAND RECORD ==="
-  echo "JOB: $job"
-  echo "STEP: $step"
-  echo "STARTED: $start_utc"
-  echo "WORKDIR: $PWD"
-  echo "COMMAND: $*"
-} >>"$logfile"
+  ended="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  if [ "$rc" -eq 0 ]; then verdict="PASS"; else verdict="FAIL"; fi
+  {
+    printf -- '--- END OUTPUT ---\n'
+    printf 'EXIT_CODE: %d %s\n' "$rc" "$verdict"
+    printf 'ENDED: %s\n' "$ended"
+    printf '===== COMMAND END =====\n'
+  } >>"$CI_LOG_FILE"
 
-"$@" > >(tee -a "$logfile") 2> >(tee -a "$logfile" >&2)
-status=$?
-
-end_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-ver=""
-if command -v go >/dev/null 2>&1; then
-  ver="go $(go version 2>/dev/null | awk '{print $3}')"
-fi
-if command -v gcc >/dev/null 2>&1; then
-  ver="$ver; gcc $(gcc -dumpversion 2>/dev/null)"
-fi
-if command -v pkg-config >/dev/null 2>&1; then
-  ver="$ver; pkg-config $(pkg-config --version 2>/dev/null)"
-fi
-[ -n "$ver" ] || ver="system tools"
-
-verdict="FAIL"
-[ "$status" -eq 0 ] && verdict="PASS"
-
-{
-  echo "EXIT_CODE: $status $verdict"
-  echo "ENDED: $end_utc"
-  echo "TOOLCONTEXT: $ver"
-  echo "=== END COMMAND RECORD ==="
-} >>"$logfile"
-
-if [ -n "${CAPTURE_INDEX:-}" ]; then
-  echo "$job|$step|$logfile|$status|$verdict|$start_utc|$end_utc" >>"$CAPTURE_INDEX"
-fi
-
-exit $status
+  CI_CAPTURE_EXIT="$rc"
+  return "$rc"
+}
