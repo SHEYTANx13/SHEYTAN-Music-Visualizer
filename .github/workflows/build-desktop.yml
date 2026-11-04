@@ -1,13 +1,31 @@
-name: build-desktop
-
-# Phase 1 build/CI workflow — NOT a release pipeline.
-# Triggers: push to main, pull requests to main, manual dispatch.
-# No automatic release/tag publication in Phase 1.
+# build-desktop.yml — CI/build workflow for SHEYTAN Music Visualizer.
 #
-# Concurrency policy: intentionally omitted. Aggressive cancellation of
-# in-progress runs would risk cancelling the collect-logs job before it
-# preserves the consolidated evidence; queued-run semantics with per-run
-# artifact namespaces keep artifacts unambiguous. Recorded in ai-notes.md.
+# Phase 1 contract: this is a CI build workflow, NOT a release pipeline.
+# No automatic release/tag publication, no signing, no installers.
+#
+# Job topology:
+#   preflight      ubuntu-24.04 — toolchain report, gofmt, tidy, tests, vet,
+#                  package build, collector fixtures (compile prerequisites
+#                  installed for the Fyne/CGO packages).
+#   build-windows  windows-latest — UCRT64 MinGW-w64 toolchain, Windows x64
+#                  app executable, --version/--self-check, portable ZIP.
+#   build-linux    ubuntu-24.04 — Fyne native prerequisites, Linux x64 app
+#                  executable, --version/--self-check, portable archive.
+#   collect-logs   ubuntu-24.04 — if: always(); downloads namespaced log
+#                  parts WITHOUT flattening, builds the deterministic
+#                  consolidated report via cmd/ci-log-collector, uploads it
+#                  even on red runs, then fails closed on missing sources.
+#
+# Concurrency decision: no automatic cancellation of in-progress runs.
+# Cancelling a run would truncate its logs and prevent collect-logs from
+# preserving complete evidence for that commit; queued superseding runs are
+# preferred over killing evidence. Recorded per the Phase 1 contract §7.1.
+#
+# Artifact names are stable across reruns; log-part artifacts are re-uploaded
+# with overwrite: true (supported by upload-artifact v7). Run ID and attempt
+# are recorded inside the consolidated report metadata.
+
+name: Build Desktop
 
 on:
   push:
@@ -19,325 +37,323 @@ on:
 permissions:
   contents: read
 
+env:
+  APP_NAME: sheytan-music-visualizer
+
 jobs:
+  # ------------------------------------------------------------------
   preflight:
-    name: preflight (ubuntu-24.04)
+    name: Preflight (Ubuntu x64 gates)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Checkout
+      - name: Checkout (pinned, no persisted credentials)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Setup Go (go.mod toolchain is the version authority)
+      - name: "Set up Go (single version authority: go.mod toolchain)"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: Install Fyne native prerequisites
+      - name: Install Fyne native build prerequisites
         run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          {
-            echo "=== apt-get update ==="
-            sudo apt-get update
-            echo "=== apt-get install Fyne prerequisites ==="
-            sudo apt-get install -y --no-install-recommends \
-              gcc pkg-config \
-              libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
-              libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev \
-              libwayland-dev libxkbcommon-dev xorg-dev
-          } 2>&1 | tee ci-logs/prereq.log
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config \
+            libgl1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+            libxi-dev libxxf86vm-dev \
+            libwayland-dev libxkbcommon-dev xorg-dev
 
-      - name: Preflight gates (gofmt, tidy, test, vet, build)
+      - name: Run local build gates (logs land in ci-logs/preflight/)
+        env:
+          CI_JOB_NAME: preflight
         run: |
-          set -o pipefail
-          bash scripts/build/build-linux.sh --mode preflight 2>&1 | tee ci-logs/preflight-build.log
-          rc=${PIPESTATUS[0]}
-          cp ci-logs/phase1-build.log ci-logs/preflight-run.log 2>/dev/null || true
-          exit "$rc"
+          mkdir -p ci-logs/preflight
+          ./scripts/build/build-linux.sh
 
       - name: Upload preflight log part
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: preflight-logs-part
-          path: |
-            ci-logs/**
+          path: ci-logs/preflight/
           if-no-files-found: error
+          overwrite: true
 
+  # ------------------------------------------------------------------
   build-windows:
-    name: build-windows (windows-latest, x64, UCRT64)
-    needs: preflight
+    name: Windows x64 (UCRT64)
     runs-on: windows-latest
-    timeout-minutes: 30
+    needs: [preflight]
+    timeout-minutes: 40
     steps:
-      - name: Checkout
+      - name: Checkout (pinned, no persisted credentials)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Setup Go (go.mod toolchain is the version authority)
+      - name: "Set up Go (single version authority: go.mod toolchain)"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: Setup MSYS2 UCRT64
-        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2 (pinned upstream commit, 2026-09-27)
+      - name: Set up MSYS2 UCRT64 (never deprecated MINGW64)
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2 series (verified v2.33.0)
         with:
           msystem: UCRT64
           update: false
           release: true
-          path-type: inherit
           install: >-
             mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-pkg-config
 
-      - name: Verify UCRT64 toolchain
+      - name: Confirm UCRT64 compiler selection
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
-          {
-            Write-Output "=== gcc ==="
-            Get-Command gcc | Format-List Name, Source
-            gcc --version | Select-Object -First 1
-            Write-Output "=== pkg-config ==="
-            pkg-config --version
-            Write-Output "=== go env ==="
-            go version
-            go env GOOS GOARCH CGO_ENABLED GOTOOLCHAIN
-          } 2>&1 | Tee-Object -FilePath ci-logs/windows-compiler.log
+          New-Item -ItemType Directory -Force -Path ci-logs/windows | Out-Null
+          $ucrt64 = Join-Path $env:RUNNER_TEMP 'msys64\ucrt64\bin'
+          Write-Host "UCRT64 bin: $ucrt64"
+          if (-not (Test-Path $ucrt64)) { Write-Error "UCRT64 bin directory not found: $ucrt64"; exit 1 }
+          & (Join-Path $ucrt64 'gcc.exe') --version
+          & (Join-Path $ucrt64 'pkg-config.exe') --version
 
-      - name: Build and verify Windows x64 desktop app
+      - name: Run Windows build gates
         shell: pwsh
-        env:
-          CGO_ENABLED: '1'
-          GOOS: windows
-          GOARCH: amd64
+        run: ./scripts/build/build-windows.ps1 -Msys2Bin (Join-Path $env:RUNNER_TEMP 'msys64\ucrt64\bin')
+
+      - name: Stage portable app folder (no installer, no signing in Phase 1)
+        shell: pwsh
         run: |
-          ./scripts/build/build-windows.ps1
-          $rc = $LASTEXITCODE
-          Copy-Item ci-logs/phase1-build.log ci-logs/windows-run.log
-          exit $rc
+          $ErrorActionPreference = 'Stop'
+          $stage = 'dist\sheytan-music-visualizer-windows-x64-portable'
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item 'dist\sheytan-music-visualizer-windows-x64.exe' $stage
+          Copy-Item 'license.md','readme.md' $stage
+          Get-ChildItem $stage | Format-Table Name,Length
+
+      - name: Validate executable format and ZIP contents
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'dist\sheytan-music-visualizer-windows-x64.exe'
+          $item = Get-Item $exe
+          if ($item.Length -lt 5MB) { Write-Error "unexpected small executable: $($_)"; exit 1 }
+          $fs = [IO.File]::OpenRead($item.FullName)
+          $magic = New-Object byte[] 2
+          [void]$fs.Read($magic, 0, 2); $fs.Close()
+          if ([Text.Encoding]::ASCII.GetString($magic) -ne 'MZ') { Write-Error 'not a PE executable'; exit 1 }
+          Compress-Archive -Path 'dist\sheytan-music-visualizer-windows-x64-portable\*' -DestinationPath 'dist\sheytan-music-visualizer-windows-x64-portable.zip' -Force
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path 'dist\sheytan-music-visualizer-windows-x64-portable.zip'))
+          Write-Host "ZIP entries: $($zip.Entries.Count)"
+          if ($zip.Entries.Count -lt 3) { $zip.Dispose(); Write-Error 'portable ZIP unexpectedly small'; exit 1 }
+          $zip.Dispose()
+
+      - name: Upload Windows x64 CI build artifact (not a release)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sheytan-music-visualizer-windows-x64-ci
+          path: dist/sheytan-music-visualizer-windows-x64-portable.zip
+          if-no-files-found: warn
+          overwrite: true
 
       - name: Upload Windows log part
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-logs-part
-          path: |
-            ci-logs/**
+          path: ci-logs/windows/
           if-no-files-found: error
+          overwrite: true
 
-      - name: Check Windows portable build exists before upload
-        shell: pwsh
-        id: winbuild
-        run: |
-          $zip = "dist/SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
-          if (-not (Test-Path $zip)) {
-            Write-Output "ERROR: portable build ZIP not found: $zip"
-            exit 1
-          }
-          $size = (Get-Item $zip).Length
-          Write-Output "portable ZIP size: $size bytes"
-          if ($size -lt 1048576) {
-            Write-Output "ERROR: portable ZIP implausibly small ($size bytes)"
-            exit 1
-          }
-
-      - name: Upload Windows x64 build artifact (CI artifact, not a release)
-        if: success()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-x64-portable-build
-          path: dist/SHEYTAN-Music-Visualizer-windows-x64-portable.zip
-          if-no-files-found: error
-
+  # ------------------------------------------------------------------
   build-linux:
-    name: build-linux (ubuntu-24.04, x64)
-    needs: preflight
+    name: Linux x64 (Fyne native)
     runs-on: ubuntu-24.04
+    needs: [preflight]
     timeout-minutes: 25
     steps:
-      - name: Checkout
+      - name: Checkout (pinned, no persisted credentials)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Setup Go (go.mod toolchain is the version authority)
+      - name: "Set up Go (single version authority: go.mod toolchain)"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: Install Fyne native prerequisites
+      - name: Install Fyne native build prerequisites
         run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          {
-            echo "=== apt-get update ==="
-            sudo apt-get update
-            echo "=== apt-get install Fyne prerequisites ==="
-            sudo apt-get install -y --no-install-recommends \
-              gcc pkg-config \
-              libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
-              libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev \
-              libwayland-dev libxkbcommon-dev xorg-dev
-            echo "=== pkg-config modules ==="
-            pkg-config --modversion gl egl x11 xrandr xinerama xcursor xi xxf86vm wayland-client xkbcommon
-          } 2>&1 | tee ci-logs/linux-compiler.log
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config zip \
+            libgl1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+            libxi-dev libxxf86vm-dev \
+            libwayland-dev libxkbcommon-dev xorg-dev
 
-      - name: Build and verify Linux x64 desktop app
+      - name: Run Linux build gates (logs land in ci-logs/linux/)
+        env:
+          CI_JOB_NAME: linux
         run: |
-          set -o pipefail
-          bash scripts/build/build-linux.sh --mode desktop 2>&1 | tee ci-logs/linux-build.log
-          rc=${PIPESTATUS[0]}
-          cp ci-logs/phase1-build.log ci-logs/linux-run.log
-          exit "$rc"
+          mkdir -p ci-logs/linux
+          ./scripts/build/build-linux.sh
+
+      - name: Stage portable app folder
+        run: |
+          set -e
+          mkdir -p dist/sheytan-music-visualizer-linux-x64-portable
+          cp dist/sheytan-music-visualizer-linux-x64 dist/sheytan-music-visualizer-linux-x64-portable/
+          cp license.md readme.md dist/sheytan-music-visualizer-linux-x64-portable/
+          head -c4 dist/sheytan-music-visualizer-linux-x64 | od -An -tx1 | grep -q "7f 45 4c 46"
+          (cd dist/sheytan-music-visualizer-linux-x64-portable && zip -q -r ../sheytan-music-visualizer-linux-x64-portable.zip .)
+          unzip -l dist/sheytan-music-visualizer-linux-x64-portable.zip
+
+      - name: Upload Linux x64 CI build artifact (not a release)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sheytan-music-visualizer-linux-x64-ci
+          path: dist/sheytan-music-visualizer-linux-x64-portable.zip
+          if-no-files-found: warn
+          overwrite: true
 
       - name: Upload Linux log part
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-logs-part
-          path: |
-            ci-logs/**
+          path: ci-logs/linux/
           if-no-files-found: error
+          overwrite: true
 
-      - name: Check Linux build exists before upload
-        run: |
-          test -s bin/sheytan-music-visualizer || { echo "ERROR: linux executable missing or empty"; exit 1; }
-          ls -l bin/sheytan-music-visualizer
-
-      - name: Upload Linux x64 build artifact (CI artifact, not a release)
-        if: success()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: linux-x64-portable-build
-          path: bin/sheytan-music-visualizer
-          if-no-files-found: error
-
+  # ------------------------------------------------------------------
   collect-logs:
-    name: collect-logs (consolidated evidence)
+    name: Consolidate run log (green and red runs)
+    runs-on: ubuntu-24.04
     needs: [preflight, build-windows, build-linux]
     if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Checkout (collector source)
+      - name: Checkout (pinned, no persisted credentials)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Setup Go
+      - name: Set up Go (needed to build the collector)
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: Download log parts (namespaced, never flattened)
-        id: download
+      # Download WITHOUT merging: each artifact extracts into its own
+      # namespace directory (merge-multiple: false is the documented
+      # default and is stated explicitly here). Two jobs may ship
+      # same-named files without collision. Download problems are
+      # preserved as metadata, not allowed to abort report generation.
+      - name: Download namespaced log parts
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: ci-parts
           merge-multiple: false
 
-      - name: Write run manifest
-        env:
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-          COMMIT_SHA: ${{ github.sha }}
-          REF: ${{ github.ref }}
-          EVENT: ${{ github.event_name }}
-          # The run start timestamp is left empty: github.run_started_at
-          # exists in the live GitHub context but is rejected by the
-          # actionlint schema gate, and the gate must stay clean. The
-          # consolidated report carries its own accurate generation time.
-          STARTED_AT: ""
-          RUNNER_OS_LABEL: ${{ runner.os }}
-          RESULT_PREFLIGHT: ${{ needs.preflight.result }}
-          RESULT_WINDOWS: ${{ needs.build-windows.result }}
-          RESULT_LINUX: ${{ needs.build-linux.result }}
+      - name: Preserve download diagnostics
+        if: always()
         run: |
-          mkdir -p ci-parts
+          mkdir -p ci-logs/collect
           {
-            echo "=== download step outcome: ${{ steps.download.outcome }} conclusion: ${{ steps.download.conclusion }} ==="
-            ls -laR ci-parts || true
-          } | tee ci-parts/download-diagnostics.txt || true
-          cat > ci-parts/manifest.json <<MANIFEST
+            echo "=== download diagnostics ==="
+            echo "expected parts: preflight-logs-part windows-logs-part linux-logs-part"
+            echo "--- ci-parts tree ---"
+            find ci-parts -maxdepth 2 -print 2>&1 || true
+          } > ci-logs/collect/download-diagnostics.log 2>&1
+          cat ci-logs/collect/download-diagnostics.log
+
+      - name: Write run manifest
+        if: always()
+        run: |
+          cat > run-manifest.json <<EOF
           {
-            "product": "SHEYTAN Music Visualizer",
-            "workflow": "build-desktop.yml",
-            "run_id": "${RUN_ID}",
-            "attempt": "${RUN_ATTEMPT}",
-            "commit_sha": "${COMMIT_SHA}",
-            "ref": "${REF}",
-            "event": "${EVENT}",
-            "start_time_utc": "${STARTED_AT}",
-            "runner_os": "${RUNNER_OS_LABEL}",
+            "product": "SHEYTAN Music Visualizer (SHEYTAN™)",
+            "workflow_file": ".github/workflows/build-desktop.yml",
+            "run_id": "${GITHUB_RUN_ID}",
+            "attempt": "${GITHUB_RUN_ATTEMPT}",
+            "commit": "${GITHUB_SHA}",
+            "ref": "${GITHUB_REF}",
+            "event": "${GITHUB_EVENT_NAME}",
+            "runner_os": "ubuntu-24.04",
             "jobs": [
-              {"name": "preflight",     "result": "${RESULT_PREFLIGHT}", "artifact": "preflight-logs-part"},
-              {"name": "build-windows", "result": "${RESULT_WINDOWS}",   "artifact": "windows-logs-part"},
-              {"name": "build-linux",   "result": "${RESULT_LINUX}",     "artifact": "linux-logs-part"}
+              {"name": "preflight", "result": "${{ needs.preflight.result }}", "expected_artifacts": ["preflight-logs-part"]},
+              {"name": "build-windows", "result": "${{ needs.build-windows.result }}", "expected_artifacts": ["windows-logs-part"]},
+              {"name": "build-linux", "result": "${{ needs.build-linux.result }}", "expected_artifacts": ["linux-logs-part"]}
             ]
           }
-          MANIFEST
-          cat ci-parts/manifest.json
+          EOF
+          cat run-manifest.json
 
-      - name: Build collector binary
-        id: build_collector
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector 2>&1 | tee ci-logs/collector-build.log
-          rc=${PIPESTATUS[0]}
-          echo "$rc" > collector-build.rc
-          exit "$rc"
-
-      - name: Run collector (report is written even when coverage is incomplete)
-        id: run_collector
-        continue-on-error: true
+      - name: Run collector (report is written before any failure is raised)
+        if: always()
+        id: collector
         run: |
           set +e
-          mkdir -p ci-logs
-          if [ ! -x bin/ci-log-collector ]; then
-            {
-              echo "EMERGENCY FALLBACK CONSOLIDATED REPORT"
-              echo "The collector binary could not be built/run; this run must be treated as INCOMPLETE."
-              echo "Collector build exit code: $(cat collector-build.rc 2>/dev/null || echo UNKNOWN)"
-              echo "Download step outcome: ${{ steps.download.outcome }} / conclusion: ${{ steps.download.conclusion }}"
-              echo "--- download diagnostics ---"
-              cat ci-parts/download-diagnostics.txt 2>/dev/null || echo "(diagnostics unavailable)"
-              echo "--- parts root listing ---"
-              ls -laR ci-parts 2>/dev/null || echo "(parts root unavailable)"
-            } > ci-logs/emergency-consolidated-report.txt
-            echo "1" > collector.rc
-            echo "collector did not run; emergency report written"
-            exit 0
+          COLLECTOR_CMD="./ci-log-collector -manifest run-manifest.json -parts-root ci-parts -report consolidated-run-log.txt"
+          go build -o ci-log-collector ./cmd/ci-log-collector > ci-logs/collect/collector-build.log 2>&1
+          buildrc=$?
+          rc=2
+          if [ "$buildrc" -eq 0 ]; then
+            $COLLECTOR_CMD > ci-logs/collect/collector-run.log 2>&1
+            rc=$?
           fi
-          ./bin/ci-log-collector \
-            --report ci-logs/consolidated-run-report.txt \
-            --parts-root ci-parts \
-            --manifest ci-parts/manifest.json
-          echo "$?" > collector.rc
-          echo "collector exit code: $(cat collector.rc)"
+          if [ "$rc" -eq 2 ]; then
+            # Emergency fallback report: preserve run metadata, the exact
+            # collector command, its exit code and output, and the download
+            # diagnostics. This fallback is uploaded like the normal report
+            # and the run is marked INCOMPLETE.
+            {
+              echo "=== EMERGENCY FALLBACK REPORT (collector could not produce the consolidated report) ==="
+              echo "product: SHEYTAN Music Visualizer (SHEYTAN™)"
+              echo "workflow: .github/workflows/build-desktop.yml"
+              echo "run_id: ${GITHUB_RUN_ID}  attempt: ${GITHUB_RUN_ATTEMPT}"
+              echo "commit: ${GITHUB_SHA}  ref: ${GITHUB_REF}  event: ${GITHUB_EVENT_NAME}"
+              echo "collector command: $COLLECTOR_CMD"
+              echo "collector exit code: 2 (internal failure) — coverage: INCOMPLETE"
+              echo "--- collector build output ---"
+              cat ci-logs/collect/collector-build.log 2>/dev/null
+              echo "--- collector run output ---"
+              cat ci-logs/collect/collector-run.log 2>/dev/null
+              echo "--- download diagnostics ---"
+              cat ci-logs/collect/download-diagnostics.log 2>/dev/null
+            } > consolidated-run-log.txt 2>&1
+          fi
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload consolidated report artifact
+      - name: Upload consolidated report (always, even when incomplete)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: consolidated-run-log
-          path: |
-            ci-logs/consolidated-run-report.txt
-            ci-logs/emergency-consolidated-report.txt
+          path: consolidated-run-log.txt
           if-no-files-found: error
+          overwrite: true
 
-      - name: Fail closed after the report upload attempt
+      - name: Enforce coverage (fail closed after the upload attempt)
+        if: always()
         run: |
-          rc="$(cat collector.rc)"
+          rc="$(sed -n 's/^rc=//p' <<< "${{ steps.collector.outputs.rc }}")"
+          rc="${rc:-2}"
           echo "collector exit code: $rc"
-          if [ "$rc" != "0" ]; then
-            echo "Consolidated log coverage is INCOMPLETE or collection failed; failing this job after the report upload."
+          if [ "$rc" -ne 0 ]; then
+            echo "Log coverage INCOMPLETE or collector failed — failing the run (missing evidence is never converted into success)."
+            exit "$rc"
           fi
-          exit "$rc"
+          echo "Log coverage COMPLETE."

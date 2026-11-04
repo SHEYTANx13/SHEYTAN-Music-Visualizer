@@ -1,169 +1,143 @@
-# agent.md — Operating Manual for Coding Agents
+# agent.md — operating manual for AI coding agents
 
-SHEYTAN Music Visualizer · SHEYTAN™ · Licensor: Parsaetak
+This repository is worked on by AI agents under human direction. This file
+is the durable operating manual: it tells a future agent session how to
+work here without rediscovering rules, architecture or evidence standards.
 
-This is the durable operating manual for any coding agent (human or AI)
-working in this repository. It complements — and never overrides — the
-current user prompt.
+## 1. Authority order
 
-## 1. Authority and reading order
+1. **The current human prompt has absolute precedence** over this file,
+   over `ai-notes.md`, and over anything written in a previous session.
+2. `ai-notes.md` — the live record of what was actually done. **Read it
+   first, immediately after the current user prompt.** Then read only the
+   files relevant to the task; do not reread the whole tree without reason.
+3. `roadmap.md` is the phase-status authority. `license.md` is the sole
+   licensing authority. `readme.md` is user-facing product truth.
+4. Where documents conflict, the authority order above decides, and the
+   losing document gets corrected in the same session.
 
-1. **The current human prompt has absolute precedence** over this document,
-   `ai-notes.md`, and any prior note. Repo docs describe standing rules;
-   the prompt defines the current mission.
-2. After reading the prompt, read **`ai-notes.md` first** — it records the
-   actual state of the work, the last session's evidence, and unresolved
-   decisions. Then read only the files relevant to the task; avoid
-   rereading the whole tree without reason.
-3. Authority map (one source of truth each):
-   - Licensing/legal: `license.md` (sole authority)
-   - User-facing product truth + quickstart: `readme.md`
-   - Product plan and phase statuses: `roadmap.md`
-   - Durable AI work record: `ai-notes.md`
-   - Product name / trademark / palette tokens: `internal/brand/brand.go`
-   - Version/build metadata: `internal/buildinfo/buildinfo.go`
-   - App log location and policy: `internal/logging/logging.go`
-   - CI log capture/consolidation contract: `scripts/ci/` +
-     `internal/cilog` + `.github/workflows/build-desktop.yml`
-   Never duplicate these authorities; import the Go packages or link the
-   documents instead.
+## 2. Phase boundary (do not quietly expand it)
 
-## 2. Phase boundary
+- **Phase 1 (complete):** foundation — identity, logging, buildinfo, minimal
+  Fyne window, build scripts, Windows/Linux CI definitions, CodeQL
+  definition, log capture/consolidation subsystem, root documentation.
+- **Phase 2 (not started):** studio UI/UX, media foundation, playback,
+  DSP/song analysis, Song DNA, visualizer engines, GPU backend research and
+  proof, export pipeline, presets/projects, hardening.
+- Never implement Phase 2 features in a Phase 1 session, and never mark a
+  Phase 2 item `DELIVERED`. Status vocabulary is exactly: `PLANNED`,
+  `IN PROGRESS`, `DELIVERED`, `BLOCKED`, `DEFERRED`. `DELIVERED` requires
+  code + tests/CI evidence.
 
-- **Phase 1 (done)**: foundation — buildable Go + Fyne skeleton with a
-  placeholder window, identity/buildinfo/logging authorities, build
-  scripts, CI workflows, log capture/consolidation, root documents.
-- **Phase 2 (not started)**: studio UI/UX, media import, playback sync,
-  DSP analysis, Song DNA, visualizer engines, GPU backend, export
-  pipeline, presets/projects, quality/security hardening (see
-  `roadmap.md`).
-- Never quietly expand Phase 1 scope into Phase 2, and never mark a
-  Phase 2 feature `DELIVERED` in Phase 1 documents.
+## 3. Non-negotiable engineering principles
 
-## 3. Engineering invariants
-
-- **Go-first, local-first.** First-party application logic, engines and
-  orchestration are Go, running locally. No cloud rendering, no hosted
-  project state, no mandatory account, no telemetry. Do not introduce
-  Python, Node.js, Electron, React, web UIs, Qt/QML or C++ product
-  engines.
-- **Fyne owns the desktop UI only** — it must never become the export
-  renderer or media pipeline. UI thread ownership: never mutate Fyne
-  widgets from goroutines; use Fyne's documented UI-thread mechanism.
-- **GPU acceleration is a Phase 2 requirement with a proof gate.** Never
-  claim acceleration, never fake GPU telemetry, never label CPU output as
-  GPU. Detection ≠ execution.
-- **No silent fallbacks.** Errors are surfaced, not swallowed. Bounded
-  operations, explicit context cancellation, real exit-code propagation.
-  No sleep-based correctness, no blind retry storms, no disabled tests to
-  force green, no weakened checks to make a run pass.
+- **Local-first, Go-first.** All first-party application engines are Go.
+  No cloud rendering, no remote project state, no mandatory accounts, no
+  telemetry, no Python/Node/Electron/Qt/web stack as product runtime.
+  Documented OS/driver APIs through maintained Go bindings are allowed.
+- **Fyne is the UI shell, never the media renderer.** Phase 2 must keep the
+  Fyne UI separate from the deterministic render subsystem so preview and
+  export share one render model.
+- **GPU acceleration must be proven, not assumed.** Distinguish `detected`,
+  `available`, `selected`, `executed`, `verified`. A detected adapter is not
+  execution proof. Benchmark against the CPU fallback; never invent
+  speedups; never fake GPU telemetry.
+- **No fake evidence.** Never state `green`, `fixed`, `verified`, `tested`,
+  `complete`, or `working` without matching captured output. Never weaken a
+  check to make a run pass; never disable a test to force green.
+- **No sleep-based correctness, no blind retries, no retry storms, no
+  ignored errors, no silent fallbacks.** Use explicit context cancellation,
+  bounded operations, and real exit-code propagation.
 - **Preserve user work.** Never run `git reset --hard`, `git clean -fdx`,
-  force-push or destructive cleanup. Modify only what the mission
+  force-push, or destructive cleanup. Modify or add only what the mission
   requires; merge carefully and record decisions.
-- **Secrets and media**: never log secrets, credentials, tokens, media
-  bytes or audio contents; never put secrets in workflow variables or
-  command arguments. GitHub secret masking is not a substitute.
 
-## 4. Evidence classes — never inflate
+## 4. Single sources of truth
 
-There are four distinct evidence classes. One never substitutes for
-another:
+| Authority | File |
+|---|---|
+| Product name, trademark, palette, legal footer, app ID | `internal/brand/brand.go` |
+| Version / commit / build date | `internal/buildinfo/buildinfo.go` (linker flags; no second version constant) |
+| Log directory policy, rotation, redaction rules | `internal/logging/logging.go` |
+| Licensing | `license.md` |
+| Phase status | `roadmap.md` |
+| Agent work record | `ai-notes.md` |
+| CI workflow contracts | `.github/workflows/*.yml` |
 
-| Class | What it proves | Example |
-|---|---|---|
-| Static inspection | structure/syntax only | YAML parse, reading code |
-| Local compile/test | the code builds and unit tests pass on this host | `go test ./...` |
-| Hosted CI | the workflows ran on GitHub runners | an observed Actions run |
-| Physical hardware | real user-device behavior | Windows laptop, real GPU |
+Docs may display the product name naturally, but code must consume the
+brand package — no re-hardcoded identity strings.
 
-Status vocabulary: `PLANNED`, `IN PROGRESS`, `DELIVERED`, `BLOCKED`,
-`DEFERRED` — and for checks: `PASS`, `FAIL`, `NOT RUN`, `NOT AVAILABLE`,
-`BLOCKED`, `NOT OBSERVED`. Never write `green`, `fixed`, `verified`,
-`tested`, `complete` or `working` without matching evidence. Never claim
-zero security alerts without an observed complete analysis result.
+## 5. Evidence classes — never inflate one into another
 
-## 5. Required verification ladder
+1. **Static inspection** — file exists, YAML parses, actionlint passes.
+2. **Local build/test** — commands executed on the actual host with captured
+   output and real exit codes.
+3. **Hosted CI** — a GitHub Actions run that actually executed.
+4. **Physical hardware** — real Windows desktop, real GPU, real display.
 
-Run the shortest honest ladder that covers changed code, and capture
-every command (see §6). On Linux:
+A workflow file is not a CI run. A YAML parse is not execution. A local
+build is not a physical-hardware result. When hosted CI has not run, report
+`HOSTED CI: NOT RUN` (or `NOT OBSERVED` when a run may exist but cannot be
+inspected) and move on. Never ask the user for CI results, screenshots, run
+IDs, logs, or credentials; never make delivery conditional on hosted CI.
 
-```bash
-gofmt -l .                                   # no files listed
-go mod tidy && go mod tidy -diff             # no diff after final tidy
-go test ./...                                # all packages pass
-go vet ./...                                 # clean
-go build ./...                               # packages compile
-go build -trimpath -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer
-./bin/sheytan-music-visualizer --version     # prints product + build metadata
-./bin/sheytan-music-visualizer --self-check  # foundation invariants, exit 0
-go test ./internal/cilog/ -run . -count=1    # collector fixtures (included in ./...)
-```
+## 6. Required verification ladder
 
-Or run the packaged script that does all of the above with full capture:
+Run every change through the gates in `scripts/build/build-linux.sh`
+(Linux/CI) or `scripts/build/build-windows.ps1` (Windows):
 
-```bash
-scripts/build/build-linux.sh --mode desktop     # or --mode preflight
-./scripts/build/build-windows.ps1               # on Windows (PowerShell 7, UCRT64)
-```
+1. `gofmt -l .` — no output allowed.
+2. `go mod tidy` — no diff in `go.mod`/`go.sum` afterwards.
+3. `go test ./...`
+4. `go vet ./...`
+5. `go build ./...`
+6. Build the actual desktop executable for the host (native CGO/Fyne).
+7. `--version` and `--self-check` runtime checks.
+8. `go test -v ./internal/cilogreport/` (collector fixtures) and
+   `./scripts/ci/collector-fixture-e2e.sh` (CLI end-to-end).
+9. Workflow validation: `actionlint` + YAML parse +
+   `scripts/ci/workflow-contract-test.sh`.
+10. `git diff --check`, `git status` — no unrelated changes.
+11. Package/zip validation when delivering archives.
 
-Workflow validation: `actionlint` (if installed; record NOT AVAILABLE
-otherwise) plus a YAML structural parse; a YAML parse is not workflow
-execution.
+**Every command must be captured into a complete log** (stdout AND stderr
+from the first byte, real exit code, timestamps, tool versions) using
+`scripts/ci/capture.sh` (Bash) or `scripts/ci/Capture-Step.ps1`
+(PowerShell). The consolidated evidence transcript lives at
+`evidence/phase1-build.log` (later phases: `evidence/phaseN-build.log`).
 
-If a hard gate fails: diagnose the first failing command, fix the root
-cause, re-run the smallest affected gate, then the complete ladder. Do not
-delete the failing test or turn the error into a warning.
+## 7. Logging hygiene
 
-## 6. Log capture rules (every build command)
-
-- Every build/verification command must run under the capture helpers
-  (`scripts/ci/capture.sh` on Bash, `scripts/ci/Capture-Step.ps1` on
-  PowerShell) or an equivalent that:
-  - captures stdout AND stderr from the first byte;
-  - preserves the command's ORIGINAL exit code through `tee`/`Tee-Object`
-    (`PIPESTATUS[0]` / immediate `$LASTEXITCODE`);
-  - appends a structured record (JOB, STEP, STARTED, WORKDIR, COMMAND,
-    TOOL_CONTEXT, output, `EXIT_CODE: <n> PASS|FAIL`, ENDED);
-  - returns the original non-zero exit code (no `|| true`).
-- Independent gates keep running after a failure; dependent gates are
-  recorded `SKIPPED`, never as passed.
-- CI jobs upload log parts with `if: always()`; `collect-logs` downloads
-  them namespaced (never flattened), builds one deterministic
-  consolidated report via `cmd/ci-log-collector`, uploads it even when
-  coverage is INCOMPLETE, and only then fails the job (`MISSING LOG
-  SOURCE` ≠ `SKIPPED`/`NEVER_STARTED`).
-
-## 7. Remote-mutation prohibition
-
-No `git push`, pull request, tag, release, workflow dispatch, or any other
-remote mutation unless the current human prompt explicitly authorizes it.
-Creating and locally validating workflow files is the deliverable; hosted
-runs are not required for handoff. When no hosted run exists, report
-`HOSTED CI: NOT RUN` (use `NOT OBSERVED` only when a run may exist but
-cannot be inspected). Never ask the user for CI results, screenshots, run
-IDs, logs or credentials; never make delivery conditional on hosted CI.
+- Never log secrets, credentials, tokens, audio/media bytes, or unnecessary
+  full user paths. Never dump whole environments into logs.
+- Application logs go to the app-owned user config directory only — never
+  the source tree, never the CWD (enforced by `internal/logging` + tests).
+- GitHub secret masking is a last resort, not a design.
 
 ## 8. Documentation ownership
 
-- The agent owns keeping the five root documents truthful and consistent
-  with the code after each change.
-- `ai-notes.md` records **actual work only** — with command/output
-  evidence for every claim. Do not rewrite completed facts as intentions
-  or vice versa. No filler progress notes.
-- Dates use exact ISO format (`2026-11-04`). No invented version numbers,
-  release history, or badges (badges only when a real repository URL
-  exists).
+The agent owns documentation updates: after real work, update
+`ai-notes.md` with what actually happened (commands, exit codes, evidence,
+failures, decisions). Do not rewrite completed facts as intentions or vice
+versa; do not write filler progress notes; never write a success claim
+without an evidence reference. Keep `readme.md` current product truth and
+`roadmap.md` the phase authority when scope changes.
 
-## 9. Handoff contract (end of every mission)
+## 9. Remote operations are forbidden without explicit authorization
 
-The next session must be able to continue without rediscovering anything.
-Leave behind:
+No push, no pull request, no tag, no release, no `workflow_dispatch`, no
+remote mutation of any kind unless the human explicitly authorizes that
+operation in the current prompt. Read-only inspection of already-existing
+hosted runs is allowed when naturally available.
 
-1. What is done, with evidence references (log paths, commands, exit
-   codes).
-2. What is NOT done — explicitly, including any Phase 2 temptation you
-   resisted.
-3. Known risks, unresolved architecture choices, and the exact reasons.
-4. Tests run, failures and their evidence (first failing command, log
-   path, fixed or unresolved).
-5. The next narrow mission, in execution order.
+## 10. Handoff contract (end of every session)
+
+`ai-notes.md` must end with, and the next session must expect:
+
+- Environment (OS/toolchain) and repo state (branch, HEAD, dirty/clean).
+- What was created/changed and why.
+- Exact commands run with exit codes; where the full log lives.
+- All failures and whether they were fixed or unresolved.
+- Hosted CI / CodeQL status (`NOT RUN` / `NOT OBSERVED` / observed facts).
+- Phase 2 starting point: the next narrow mission, unresolved technical
+  decisions, and open research gates (see roadmap.md §Research questions).

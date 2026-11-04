@@ -1,97 +1,124 @@
-# For most projects, this workflow file will not need changing; you simply need
-# to commit it to your repository.
+# codeql.yml — CodeQL security analysis for SHEYTAN Music Visualizer.
 #
-# You may wish to alter this file to override the set of languages analyzed,
-# or to provide custom queries or build logic.
+# Phase 1 contract:
+#   - Languages: `go` and `actions` only — no invented analysis of code that
+#     does not exist in this repository.
+#   - Go uses build-mode: manual so the exact Fyne/CGO compile command and
+#     native prerequisites are controlled; `actions` uses build-mode: none.
+#   - fail-fast: false so one analysis cannot suppress the other.
+#   - Least privilege: workflow contents: read; the analyze job receives the
+#     security-events: write it needs plus actions: read and contents: read.
+#   - This file being present and locally validated is NOT evidence that a
+#     CodeQL scan ran. Hosted status is reported separately (NOT RUN /
+#     NOT OBSERVED) in ai-notes.md and the Phase 1 handoff note.
 #
-# ******** NOTE ********
-# We have attempted to detect the languages in your repository. Please check
-# the `language` matrix defined below to confirm you have the correct set of
-# supported CodeQL languages.
-#
-name: "CodeQL Advanced"
+# Log hygiene: setup/build diagnostics are captured into ci-logs/codeql/ and
+# uploaded with a distinct artifact name (codeql-logs-part). This workflow is
+# a separate run from build-desktop.yml; its logs are never part of that
+# workflow's consolidated report.
+
+name: CodeQL
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
   schedule:
-    - cron: '35 7 * * 4'
+    - cron: '0 3 * * 1' # weekly, Monday 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   analyze:
-    name: Analyze (${{ matrix.language }})
-    # Runner size impacts CodeQL analysis time. To learn more, please see:
-    #   - https://gh.io/recommended-hardware-resources-for-running-codeql
-    #   - https://gh.io/supported-runners-and-hardware-resources
-    #   - https://gh.io/using-larger-runners (GitHub.com only)
-    # Consider using larger runners or machines with greater resources for possible analysis time improvements.
-    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    name: Analyze (${{ matrix.language }}, ${{ matrix.build-mode }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     permissions:
-      # required for all workflows
-      security-events: write
-
-      # required to fetch internal or private CodeQL packs
-      packages: read
-
-      # only required for workflows in private repositories
       actions: read
       contents: read
-
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
         include:
-        # CodeQL supports the following values keywords for 'language': 'actions', 'c-cpp', 'csharp', 'go', 'java-kotlin', 'javascript-typescript', 'python', 'ruby', 'rust', 'swift'
-        # Use `c-cpp` to analyze code written in C, C++ or both
-        # Use 'java-kotlin' to analyze code written in Java, Kotlin or both
-        # Use 'javascript-typescript' to analyze code written in JavaScript, TypeScript or both
-        # To learn more about changing the languages that are analyzed or customizing the build mode for your analysis,
-        # see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning.
-        # If you are analyzing a compiled language, you can modify the 'build-mode' for that language to customize how
-        # your codebase is analyzed, see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages
+          - language: go
+            build-mode: manual
+          - language: actions
+            build-mode: none
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v7
+      - name: Checkout (pinned, no persisted credentials)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-    # Add any setup steps before running the `github/codeql-action/init` action.
-    # This includes steps like installing compilers or runtimes (`actions/setup-node`
-    # or others). This is typically only required for manual builds.
-    # - name: Setup runtime (example)
-    #   uses: actions/setup-example@v1
+      - name: "Set up Go (single version authority: go.mod toolchain)"
+        if: matrix.language == 'go'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
 
-    # Initializes the CodeQL tools for scanning.
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4
-      with:
-        languages: ${{ matrix.language }}
-        build-mode: ${{ matrix.build-mode }}
-        # If you wish to specify custom queries, you can do so here or in a config file.
-        # By default, queries listed here will override any specified in a config file.
-        # Prefix the list here with "+" to use these queries and those in the config file.
+      - name: Install Fyne native build prerequisites (go leg)
+        if: matrix.language == 'go'
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config \
+            libgl1-mesa-dev libegl1-mesa-dev \
+            libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev \
+            libxi-dev libxxf86vm-dev \
+            libwayland-dev libxkbcommon-dev xorg-dev
 
-        # For more details on CodeQL's query packs, refer to: https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning#using-queries-in-ql-packs
-        # queries: security-extended,security-and-quality
+      - name: Quality gate — go vet (untraced, before CodeQL init)
+        if: matrix.language == 'go'
+        run: |
+          set -eo pipefail
+          go vet ./... 2>&1 | tee -a ci-logs-codeql-vet.log
 
-    # If the analyze step fails for one of the languages you are analyzing with
-    # "We were unable to automatically build your code", modify the matrix above
-    # to set the build mode to "manual" for that language. Then modify this step
-    # to build your code.
-    # ℹ️ Command-line programs to run using the OS shell.
-    # 📚 See https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#jobsjob_idstepsrun
-    - name: Run manual build steps
-      if: matrix.build-mode == 'manual'
-      shell: bash
-      run: |
-        echo 'If you are using a "manual" build mode for one or more of the' \
-          'languages you are analyzing, replace this with the commands to build' \
-          'your code, for example:'
-        echo '  make bootstrap'
-        echo '  make release'
-        exit 1
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4
-      with:
-        category: "/language:${{matrix.language}}"
+      - name: Manual traced build (go leg — real Fyne compile under tracing)
+        if: matrix.language == 'go' && matrix.build-mode == 'manual'
+        run: |
+          set -eo pipefail
+          go build ./... 2>&1 | tee -a ci-logs-codeql-build.log
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: "/language:${{ matrix.language }}"
+
+      - name: Upload CodeQL setup/build diagnostics
+        if: always()
+        run: |
+          mkdir -p ci-logs/codeql
+          {
+            echo "=== CodeQL leg: ${{ matrix.language }} / ${{ matrix.build-mode }} ==="
+            echo "runner: $(uname -s -m)"
+            if [ "${{ matrix.language }}" = "go" ]; then
+              echo "go: $(go version 2>&1)"
+              echo "gcc: $(gcc --version 2>&1 | head -1)"
+            fi
+            echo "--- vet log ---"
+            cat ci-logs-codeql-vet.log 2>/dev/null || true
+            echo "--- build log ---"
+            cat ci-logs-codeql-build.log 2>/dev/null || true
+          } > ci-logs/codeql/${{ matrix.language }}-setup.log 2>&1
+          cat ci-logs/codeql/${{ matrix.language }}-setup.log
+
+      - name: Upload CodeQL log part
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-logs-part
+          path: ci-logs/codeql/
+          if-no-files-found: warn
+          overwrite: true

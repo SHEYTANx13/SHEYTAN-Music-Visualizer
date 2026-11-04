@@ -1,149 +1,163 @@
 # SHEYTAN Music Visualizer
 
-**SHEYTAN™** · Licensor: Parsaetak · © 2024–2026 Parsaetak. All rights reserved.
+**SHEYTAN™** — a local-first desktop studio for music-reactive visuals.
 
-SHEYTAN Music Visualizer is a **local-first desktop studio** that analyzes a
-song and generates a unique, music-reactive visual identity from its
-frequency, rhythm, dynamics and musical structure — and eventually exports
-synchronized MP4 music videos up to 3840×2160 (4K). Nothing runs in the
-cloud: analysis, rendering and export happen on your machine.
+SHEYTAN Music Visualizer will analyze each song and generate a unique visual
+identity from its frequency, rhythm, dynamics and musical structure. You
+customize the scene, and the studio exports a synchronized MP4 music video —
+up to 3840×2160 (4K). Everything runs locally: no cloud rendering, no
+accounts, no telemetry.
 
-> Phase 1 status: this repository is the **foundation build**. It compiles,
-> starts a minimal placeholder window, and proves the build/CI/log-capture
-> pipeline. No media, visualizer, GPU or export functionality exists yet —
-> see [roadmap.md](roadmap.md) for the staged plan.
+> Current state: **Phase 1 — Foundation.** This repository contains the
+> buildable Go/Fyne application skeleton, documentation, CI pipelines and the
+> log-capture subsystem. It does **not** yet import audio, play music,
+> visualize anything, or export video. See [Status](#status) and
+> [roadmap.md](roadmap.md).
 
 ---
 
 ## Visual identity
 
-The design direction is **black and red — hellish / infernal**, executed in a
-premium, cinematic, restrained way: black dominates, red is the accent, and
-no skulls, glow storms or saturated surfaces. The identity tokens are defined
-once in `internal/brand/brand.go` (obsidian background `#080808`, volcanic
-surfaces, dark-blood crimson `#9F0B18`, infernal action red `#D51D2A`, ember
-highlights). Phase 1 only records these rules; the visual design itself is a
-Phase 2 deliverable.
+Black and red — hellish, infernal, **restrained**. Obsidian backgrounds
+(`#080808`), deep charcoal surfaces, volcanic dark-red accents
+(`#9F0B18`, `#D51D2A`), ember highlights used sparingly (`#FF453A`). Premium,
+cinematic, precise. Black dominates; red is the accent — no flames, no
+skulls, no glow saturation. The full token set lives in
+`internal/brand/brand.go`; the Phase 1 UI deliberately does not implement the
+theme yet.
 
 ## Technology
 
-| Aspect | Value |
+- **Go** — all first-party application logic, analysis orchestration, render
+  scheduling, project state, diagnostics and export coordination (planned for
+  Phase 2; Phase 1 ships the foundation packages).
+- **Fyne** — the native desktop shell. Fyne owns windows and UI only; it is
+  never the media renderer.
+- **Local-only** — audio analysis, rendering and export run on your machine.
+  No telemetry, no outbound runtime network activity.
+- **Windows x64 first**, with Linux x64 as a required CI build target.
+- **GPU acceleration** is a Phase 2 goal with a proof gate and CPU fallback —
+  never assumed, never faked (see [roadmap.md](roadmap.md)).
+
+## Architecture (overview)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Fyne desktop shell (window, panels, transport, inspector)  │   planned
+├────────────────────────────────────────────────────────────┤
+│ Application core: project model, analysis coordination,    │
+│ deterministic frame timeline, render scheduling, config,   │   planned
+│ diagnostics, export orchestration                          │
+├──────────────────┬───────────────────┬─────────────────────┤
+│ Audio analysis   │ Visual render     │ Export pipeline     │
+│ FFT/STFT, bands, │ engines, GPU      │ deterministic       │   planned
+│ onsets, tempo    │ backend + CPU     │ offline frames →    │
+│ (deterministic)  │ fallback          │ H.264/AAC MP4       │
+└──────────────────┴───────────────────┴─────────────────────┘
+        Phase 1 delivers only: identity constants, build info,
+        structured local logging, minimal window, CI + log capture.
+```
+
+Planned areas are explicitly marked. The full staged plan with acceptance
+gates is [roadmap.md](roadmap.md).
+
+## Status — Phase 1 (delivered foundation)
+
+| Area | State |
 |---|---|
-| Implementation language | Go (1.27 toolchain line, per `go.mod`) |
-| Desktop framework | Fyne v2.8.x (`fyne.io/fyne/v2`) |
-| Initial target | Windows x64 (Linux x64 is a required CI build target) |
-| Product principle | Local-only: no cloud rendering, no accounts, no telemetry |
-| Future goal | Real GPU acceleration for rendering, with a tested CPU fallback |
-
-## Architecture (current and planned)
-
-- **Go application core** — owns lifecycle, project model, analysis
-  coordination, render scheduling, configuration, diagnostics and (future)
-  export orchestration. First-party logic stays Go-only and local.
-- **Fyne desktop shell** — owns the native desktop window/UI only; it is not
-  the media renderer. *(Only a minimal placeholder window exists today.)*
-- **Audio analysis / DSP** — *(planned, Phase 2)* deterministic FFT/STFT,
-  band energies, onset and tempo estimation behind narrow Go interfaces.
-- **Deterministic visual rendering** — *(planned, Phase 2)* one shared
-  render model for UI preview and exported frames; the preview is never the
-  source of truth for export.
-- **GPU backend** — *(planned, Phase 2)* Direct3D 12 / WGPU research with a
-  mandatory proof gate (adapter + workload + readback evidence) and a CPU
-  fallback. Phase 1 claims no acceleration.
-- **Local video encoding** — *(planned, Phase 2)* MP4/H.264/AAC export up to
-  4K with duration sync and cancellation.
-
-## Phase 1 — what actually exists
-
-| Area | Status |
-|---|---|
-| Minimal Go + Fyne app: window title, placeholder, `--version`, `--self-check` | DELIVERED |
-| Central brand identity + build metadata authorities (`internal/brand`, `internal/buildinfo`) | DELIVERED |
-| Local structured logging with bounded rotation (`internal/logging`) | DELIVERED |
-| CI log capture + consolidated report collector with fixture tests (`internal/cilog`, `cmd/ci-log-collector`) | DELIVERED |
-| Build scripts (Windows PowerShell, Linux Bash) with first-byte capture | DELIVERED |
-| GitHub Actions: `build-desktop.yml` (Windows x64 UCRT64 + Linux x64) and `codeql.yml` (Go + Actions) | DELIVERED (workflow definitions, locally validated; hosted runs: NOT RUN) |
-| Import, playback, FFT, BPM detection, visualizer presets, GPU, MP4 export, studio UI | PLANNED — Phase 2, not implemented |
+| Five root documents (`license.md`, `readme.md`, `agent.md`, `roadmap.md`, `ai-notes.md`) | DELIVERED |
+| Go module, brand identity authority, build metadata authority | DELIVERED |
+| Structured local logging (`log/slog`, bounded rotation, app-owned dir) | DELIVERED |
+| Minimal Fyne window with exact product title and Phase 1 placeholder | DELIVERED |
+| `--version` and `--self-check` CLI | DELIVERED |
+| `cmd/ci-log-collector` consolidated run-log builder + fixture tests | DELIVERED |
+| Windows/Linux build scripts with first-byte log capture | DELIVERED |
+| `.github/workflows/build-desktop.yml` (preflight, Windows UCRT64, Linux, log consolidation) | DELIVERED (definition; hosted runs: NOT RUN) |
+| `.github/workflows/codeql.yml` (Go + Actions, manual Go build mode) | DELIVERED (definition; hosted runs: NOT RUN) |
+| Audio import/playback, DSP, visualizers, GPU, MP4 export, studio UI | PLANNED — Phase 2, not started |
 
 ## Repository map
 
-```text
-.github/workflows/    build-desktop.yml, codeql.yml
-cmd/
-  sheytan-music-visualizer/   desktop app entry point (--version, --self-check)
-  ci-log-collector/           consolidated run-log collector (stdlib only)
-internal/
-  brand/          single source of truth: names, trademark, palette tokens
-  buildinfo/      single version/build metadata authority
-  logging/        local structured logging (slog, bounded rotation)
-  cilog/          consolidated CI report engine + fixture tests
-ui/fyne/          minimal Fyne launch surface (Phase 1 placeholder)
-scripts/
-  build/          build-linux.sh, build-windows.ps1
-  ci/             capture.sh (Bash), Capture-Step.ps1 (PowerShell)
-evidence/         phase1-build.log (packaged local verification transcript)
-license.md        sole licensing authority (Parsaetak Proprietary License v1.1)
-roadmap.md        full product plan and phase boundary
-agent.md          operating manual for coding agents
-ai-notes.md       durable AI engineering record
+```
+.github/workflows/     build-desktop.yml, codeql.yml
+cmd/sheytan-music-visualizer/   desktop app entry point
+cmd/ci-log-collector/           consolidated CI log builder (stdlib-only)
+internal/brand/        single source of product identity + palette
+internal/buildinfo/    single version/build metadata authority
+internal/logging/      structured local file logging (slog)
+internal/cilogreport/  consolidated CI report engine + tests
+ui/fyne/               minimal Phase 1 window
+scripts/build/         build-windows.ps1, build-linux.sh
+scripts/ci/            capture.sh, Capture-Step.ps1, collector E2E, contract test
+evidence/              phase1-build.log (captured local verification transcript)
+license.md  readme.md  agent.md  roadmap.md  ai-notes.md
 ```
 
-## Build prerequisites
+## Building
 
-- **Go** at the `go.mod` toolchain (1.27 line). The desktop build uses CGO.
-- **Linux**: `gcc`, `pkg-config` and the Fyne native libraries
-  (`libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev
-  libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libwayland-dev
-  libxkbcommon-dev xorg-dev` on Ubuntu 24.04).
-- **Windows**: MSYS2 **UCRT64** toolchain (not the deprecated MINGW64):
-  `mingw-w64-ucrt-x86_64-gcc` and `mingw-w64-ucrt-x86_64-pkgconf`, with
-  `CGO_ENABLED=1 GOOS=windows GOARCH=amd64`.
+Prerequisites:
 
-## Build and verify
+- **Go 1.27** (module pins `toolchain go1.27.3` — the single version
+  authority).
+- **Windows:** MSYS2 **UCRT64** toolchain (`mingw-w64-ucrt-x86_64-gcc`) on
+  PATH. Deprecated MINGW64 is not supported.
+- **Linux:** CGO prerequisites for Fyne — `gcc`, `pkg-config`, and the
+  X11/OpenGL/Wayland development libraries listed in
+  `.github/workflows/build-desktop.yml`.
 
-Linux (Bash):
-
-```bash
-scripts/build/build-linux.sh --mode desktop   # gates + exe + --version + --self-check
-scripts/build/build-linux.sh --mode preflight # static gates only
-```
-
-Windows (PowerShell 7+, UCRT64 tools on PATH):
+### Windows (PowerShell)
 
 ```powershell
-./scripts/build/build-windows.ps1
+git clone <repository-url>   # remote to be provisioned; see ai-notes.md
+cd SHEYTAN-Music-Visualizer
+./scripts/build/build-windows.ps1 -Msys2Bin "<msys2-root>\ucrt64\bin"
 ```
 
-Every command's stdout/stderr is captured from the first byte into
-`ci-logs/phase1-build.log` with structured records and true exit codes; the
-script exits non-zero if any required gate fails.
+The script runs gofmt verification, `go mod tidy`, `go test ./...`,
+`go vet ./...`, `go build ./...`, builds
+`dist\sheytan-music-visualizer-windows-x64.exe`, runs `--version` and
+`--self-check`, and writes full first-byte logs to `ci-logs\windows\`.
 
-## Run
+### Linux (Bash)
 
 ```bash
-go run ./cmd/sheytan-music-visualizer --version      # product + build metadata
-go run ./cmd/sheytan-music-visualizer --self-check   # foundation invariants, no window
-go run ./cmd/sheytan-music-visualizer                # minimal Phase 1 placeholder window
+./scripts/build/build-linux.sh
+```
+
+Same gate ladder on Linux, logs in `ci-logs/linux/`, binary at
+`dist/sheytan-music-visualizer-linux-x64`.
+
+### Quick runtime checks
+
+```bash
+./dist/sheytan-music-visualizer-linux-x64 --version      # identity banner
+./dist/sheytan-music-visualizer-linux-x64 --self-check   # foundation invariants, no window
+./dist/sheytan-music-visualizer-linux-x64                # minimal Phase 1 window
 ```
 
 ## Logs
 
-- **Application logs** (runtime): written by the app to
-  `<user-config-dir>/SHEYTAN Music Visualizer/logs/app.log` (on Windows:
-  `%AppData%\SHEYTAN Music Visualizer\logs\app.log`; on Linux:
-  `$XDG_CONFIG_HOME` or `~/.config/...`). Rotation keeps one bounded backup;
-  `SHEYTAN_LOG_DIR` overrides the directory explicitly.
-- **Build/CI logs**: each build script writes `ci-logs/phase1-build.log`;
-  CI runs upload per-job log parts and one consolidated report produced by
-  `cmd/ci-log-collector` (see `agent.md` for the evidence rules).
-- The packaged Phase 1 verification transcript lives at
-  `evidence/phase1-build.log`.
+- **Application logs:** `<UserConfigDir>/SHEYTAN-Music-Visualizer/logs/`
+  (Windows: `%AppData%\SHEYTAN-Music-Visualizer\logs\`; Linux:
+  `~/.config/SHEYTAN-Music-Visualizer/logs/`). Structured JSON via `log/slog`,
+  size-bounded with one rotation generation. Logs never contain audio
+  contents, media bytes or credentials.
+- **Build/CI logs:** per-step logs under `ci-logs/`; hosted CI runs publish
+  one consolidated plain-text report (the `consolidated-run-log` artifact)
+  built by `cmd/ci-log-collector` — including on failed runs, with
+  `MISSING LOG SOURCE` and `NEVER_STARTED` states distinguished.
+
+## CI
+
+Workflow definitions live in `.github/workflows/`: `build-desktop.yml`
+(Go/Fyne builds on Windows x64 UCRT64 + Linux x64, with consolidated log
+collection) and `codeql.yml` (Go + Actions analysis, manual Go build mode).
+All actions are pinned to full commit SHAs. No hosted run has been triggered
+from this repository yet; status is reported honestly as NOT RUN in
+`ai-notes.md` — workflow files are not CI evidence.
 
 ## License
 
-Proprietary — see [license.md](license.md) (Parsaetak Proprietary License
-v1.1). SHEYTAN™ is a trademark of Parsaetak; third-party dependencies remain
-under their own licenses as inventoried there.
-
-No CI badges are shown because no public repository URL exists yet; badges
-will be added when the remote is established.
+Proprietary — Parsaetak Proprietary License v1.1. See [license.md](license.md)
+(the sole licensing authority, including the third-party attribution
+inventory). SHEYTAN™ and the SHEYTAN logo are trademarks of Parsaetak.

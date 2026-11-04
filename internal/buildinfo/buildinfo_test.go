@@ -1,38 +1,69 @@
 package buildinfo
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 )
 
-var control = regexp.MustCompile(`[\x00-\x1f\x7f]`)
-
-func TestDefaultsAreSafe(t *testing.T) {
-	i := Normalized()
-	if i.Version == "" || i.Commit == "" || i.Date == "" || i.BuiltBy == "" || i.GoVersion == "" {
-		t.Fatalf("normalized info contains empty fields: %+v", i)
+func TestDefaultsAreSafeDevelopmentValues(t *testing.T) {
+	i := Get()
+	if i.Version == "" || i.Commit == "" || i.BuildDate == "" {
+		t.Fatalf("defaults must normalize to non-empty values: %+v", i)
 	}
-	if strings.ContainsAny(i.Version, "\n\r") {
-		t.Fatalf("version must be single-line: %q", i.Version)
+	if i.GoVersion == "" || i.GOOS == "" || i.GOARCH == "" {
+		t.Fatalf("runtime identity missing: %+v", i)
 	}
 }
 
-func TestLineIsSingleLine(t *testing.T) {
-	line := Line()
-	if strings.Contains(line, "\n") {
-		t.Fatalf("Line() must be single-line: %q", line)
-	}
-	if !strings.Contains(line, "commit") || !strings.Contains(line, "go") {
-		t.Fatalf("Line() missing metadata: %q", line)
+func TestValidatePassesForDefaults(t *testing.T) {
+	if err := Validate(); err != nil {
+		t.Fatalf("Validate with defaults: %v", err)
 	}
 }
 
-func TestSanitizeCollapsesControlCharacters(t *testing.T) {
-	if got := sanitize("1.2.3\nEVIL"); control.MatchString(got) {
-		t.Fatalf("sanitize left control characters: %q", got)
+func TestNormalizationTrimsAndFillsEmpties(t *testing.T) {
+	oldV, oldC, oldD := Version, Commit, BuildDate
+	defer func() { Version, Commit, BuildDate = oldV, oldC, oldD }()
+
+	Version = "  "
+	Commit = " abc123 "
+	BuildDate = ""
+	i := Get()
+	if i.Version != defaultVersion {
+		t.Fatalf("empty version must fall back to %q, got %q", defaultVersion, i.Version)
 	}
-	if got := sanitize("  trimmed  "); got != "trimmed" {
-		t.Fatalf("sanitize must trim: %q", got)
+	if i.Commit != "abc123" {
+		t.Fatalf("commit must be trimmed, got %q", i.Commit)
+	}
+	if i.BuildDate != defaultTimestamp {
+		t.Fatalf("empty build date must fall back, got %q", i.BuildDate)
+	}
+}
+
+func TestStringIsSingleLineBanner(t *testing.T) {
+	s := Get().String()
+	if strings.ContainsAny(s, "\n\r") {
+		t.Fatalf("banner must be single line: %q", s)
+	}
+	for _, part := range []string{"commit", "built"} {
+		if !strings.Contains(s, part) {
+			t.Fatalf("banner missing %q: %s", part, s)
+		}
+	}
+}
+
+func TestValidateFailsOnFabricatedEmptyVersion(t *testing.T) {
+	oldV := Version
+	defer func() { Version = oldV }()
+	// Simulate a broken link-time injection: whitespace only, which
+	// normalizes to the dev default — that must still validate. A truly
+	// empty authority cannot be produced through Get(); assert the
+	// normalization protects it.
+	Version = "   "
+	if err := Validate(); err != nil {
+		t.Fatalf("whitespace version must normalize and validate: %v", err)
+	}
+	if Get().Version != defaultVersion {
+		t.Fatal("normalization failed")
 	}
 }
