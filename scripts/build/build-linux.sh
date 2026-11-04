@@ -5,11 +5,14 @@
 #   scripts/build/build-linux.sh [--mode preflight|desktop]
 #
 # Modes:
-#   preflight  Static gates only: toolchain report, gofmt, tidy, tests,
-#              vet, package build. Used by the CI preflight job.
-#   desktop    All preflight gates plus the native Linux x64 desktop
-#              executable, --version/--self-check runtime checks, race
-#              tests, govulncheck and the export/GPU/audio validation
+#   preflight  CHEAP static gates only: toolchain report, gofmt,
+#              go mod tidy -diff, go mod verify. The CI preflight job
+#              uses this mode; tests, vet and builds belong to the
+#              platform build jobs (run exactly once there).
+#   desktop    Full verification: static gates plus tests, vet, package
+#              build, the native Linux x64 desktop executable,
+#              --version/--self-check runtime checks, race tests,
+#              govulncheck and the export/GPU/audio validation
 #              fixtures. Default.
 #
 # Contract:
@@ -86,14 +89,35 @@ CI_TOOL_CONTEXT="gate:toolchain" ci_capture "$JOB" toolchain-report bash -c 'go 
 CI_TOOL_CONTEXT="gate:gofmt" ci_capture "$JOB" gofmt-verify bash -c 'out=$(gofmt -l .); if [ -n "$out" ]; then printf "%s\n" "$out"; echo "ERROR: gofmt reported unformatted files"; exit 1; fi; echo "gofmt clean"' ||
   fail_gate gofmt-verify
 
-CI_TOOL_CONTEXT="gate:go-mod-tidy" ci_capture "$JOB" go-mod-tidy go mod tidy ||
-  fail_gate go-mod-tidy
-
+# Read-only module hygiene: go mod tidy -diff never mutates the
+# checked-out tree (the mutating `go mod tidy` gate was removed).
 CI_TOOL_CONTEXT="gate:go-mod-tidy" ci_capture "$JOB" go-mod-tidy-verify go mod tidy -diff ||
   fail_gate go-mod-tidy-verify
 
 CI_TOOL_CONTEXT="gate:go-mod-verify" ci_capture "$JOB" go-mod-verify go mod verify ||
   fail_gate go-mod-verify
+
+if [ "$MODE" = "preflight" ]; then
+  note ""
+  note "Preflight mode requested: tests, vet, builds and runtime checks belong to the platform build jobs."
+  note ""
+  note "RUN SUMMARY — $JOB"
+  note "Ended:            $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  note "Mode:             $MODE"
+  note "Failed gates:     $FAILURES"
+  if [ -n "$FAILED_GATES" ]; then note "Failed gate list:$FAILED_GATES"; fi
+  note ""
+  note "FAILURE INDEX (EXIT_CODE records with non-zero codes):"
+  if grep -n 'EXIT_CODE: [1-9][0-9]* FAIL' "$CI_LOG_FILE" >/dev/null 2>&1; then
+    grep -n 'EXIT_CODE: [1-9][0-9]* FAIL' "$CI_LOG_FILE"
+  else
+    note "(none — all captured commands returned exit code 0)"
+  fi
+  if [ "$FAILURES" -eq 0 ]; then note "RUN RESULT: PASS"; else note "RUN RESULT: FAIL"; fi
+  note "=============================================================="
+  if [ "$FAILURES" -eq 0 ]; then exit 0; fi
+  exit 1
+fi
 
 CI_TOOL_CONTEXT="gate:go-test" ci_capture "$JOB" go-test go test $GO_TAGS ./... ||
   fail_gate go-test
@@ -104,17 +128,18 @@ CI_TOOL_CONTEXT="gate:go-vet" ci_capture "$JOB" go-vet go vet $GO_TAGS ./... ||
 CI_TOOL_CONTEXT="gate:go-build" ci_capture "$JOB" go-build-packages go build $GO_TAGS ./... ||
   fail_gate go-build-packages
 
-if [ "$MODE" = "preflight" ]; then
-  note ""
-  note "Preflight mode requested: desktop executable and runtime checks are NOT part of this run."
-fi
-
 # ---- desktop executable + runtime checks (mode: desktop) -------------------
 EXE_OK=0
 if [ "$MODE" = "desktop" ]; then
+  BI=github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo
   LDFLAGS=()
-  if [ -n "${SHEYTAN_BUILD_VERSION:-}" ]; then
-    LDFLAGS=(-ldflags "-X github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo.version=${SHEYTAN_BUILD_VERSION}")
+  LDVALS=()
+  [ -n "${SHEYTAN_BUILD_VERSION:-}" ] && LDVALS+=("-X ${BI}.version=${SHEYTAN_BUILD_VERSION}")
+  [ -n "${SHEYTAN_BUILD_COMMIT:-}" ]  && LDVALS+=("-X ${BI}.commit=${SHEYTAN_BUILD_COMMIT}")
+  [ -n "${SHEYTAN_BUILD_DATE:-}" ]    && LDVALS+=("-X ${BI}.date=${SHEYTAN_BUILD_DATE}")
+  [ -n "${SHEYTAN_BUILT_BY:-}" ]      && LDVALS+=("-X ${BI}.builtBy=${SHEYTAN_BUILT_BY}")
+  if [ "${#LDVALS[@]}" -gt 0 ]; then
+    LDFLAGS=(-ldflags "${LDVALS[*]}")
   fi
   if CI_TOOL_CONTEXT="gate:build-exe" ci_capture "$JOB" build-executable go build -trimpath $GO_TAGS "${LDFLAGS[@]+"${LDFLAGS[@]}"}" -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer; then
     EXE_OK=1

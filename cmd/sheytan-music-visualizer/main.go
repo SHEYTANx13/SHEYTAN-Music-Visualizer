@@ -53,7 +53,9 @@ func run(args []string, out, errW io.Writer) int {
 	switch {
 	case *showVersion:
 		fmt.Fprintf(out, "%s %s\n", brand.ProductName, buildinfo.Line())
-		fmt.Fprintf(out, "%s\n%s\n", brand.Copyright, brand.SourceURL)
+		for _, line := range brand.AttributionBlock() {
+			fmt.Fprintln(out, line)
+		}
 		return 0
 	case *selfCheckFlag:
 		return selfCheck(out, errW)
@@ -203,7 +205,10 @@ func checkVisualizerConfig(out io.Writer) error {
 }
 
 // checkRendererSelect verifies an honest renderer can be selected and
-// renders one deterministic frame (CPU renderer always works).
+// renders one deterministic frame (CPU renderer always works). The
+// output reports the backend, the GPU evidence state, the backend API,
+// the adapter identity and — when the GPU path is unavailable — the
+// exact reason, never a bare silent CPU selection.
 func checkRendererSelect(out io.Writer) error {
 	r, info := render.SelectRenderer()
 	defer r.Close()
@@ -218,8 +223,11 @@ func checkRendererSelect(out io.Writer) error {
 	if img == nil || img.Bounds().Empty() {
 		return fmt.Errorf("empty frame")
 	}
-	fmt.Fprintf(out, "  backend=%s gpu=%s api=%s adapter=%s\n",
-		info.Backend, info.GpuState, info.BackendAPI, info.Adapter)
+	fmt.Fprintf(out, "  backend=%s gpu=%s api=%s adapter=%s devtype=%s\n",
+		info.Backend, info.GpuState, info.BackendAPI, info.Adapter, info.DeviceType)
+	if info.Detail != "" {
+		fmt.Fprintf(out, "  renderer detail: %s\n", info.Detail)
+	}
 	return nil
 }
 

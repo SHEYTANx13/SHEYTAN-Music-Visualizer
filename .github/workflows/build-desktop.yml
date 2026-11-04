@@ -1,13 +1,26 @@
 name: build-desktop
 
-# Phase 1 build/CI workflow — NOT a release pipeline.
+# Desktop build/verification workflow — NOT a release pipeline.
 # Triggers: push to main, pull requests to main, manual dispatch.
-# No automatic release/tag publication in Phase 1.
+# No automatic release/tag publication.
 #
-# Concurrency policy: intentionally omitted. Aggressive cancellation of
-# in-progress runs would risk cancelling the collect-logs job before it
-# preserves the consolidated evidence; queued-run semantics with per-run
-# artifact namespaces keep artifacts unambiguous. Recorded in ai-notes.md.
+# Concurrency policy: queued, not cancelled. Cancelling an in-progress
+# run risks killing the collect-logs job before it preserves the
+# consolidated evidence (log.txt); per-run artifact namespaces keep
+# queued runs unambiguous. Recorded in ai-notes.md.
+#
+# Final user-facing diagnostics artifact: exactly ONE artifact named
+# `log.txt` containing exactly one file named `log.txt`. The per-job
+# `*-logs-part` artifacts are internal; the collect-logs job deletes
+# them after validating the final file (needs `actions: write`,
+# scoped to that job only — the reason is the single-artifact
+# requirement, not a way to hide failures: the final job conclusion is
+# still derived from the real build/CodeQL job results).
+#
+# CodeQL runs as a reusable workflow called below, so same-commit
+# CodeQL evidence is part of the same run and its result feeds the
+# manifest. codeql.yml keeps its own schedule/dispatch triggers for
+# standalone security scanning.
 
 on:
   push:
@@ -16,14 +29,22 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
   preflight:
+    # Cheap validation/metadata step. It must NOT repeat the expensive
+    # work of the platform jobs: no native package setup, no tests, no
+    # package builds — those run exactly once in build-linux and
+    # build-windows.
     name: preflight (ubuntu-24.04)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,29 +55,15 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
-      - name: Install Fyne native prerequisites
+      - name: Preflight gates (gofmt, tidy -diff, mod verify)
         run: |
           set -o pipefail
           mkdir -p ci-logs
-          {
-            echo "=== apt-get update ==="
-            sudo apt-get update
-            echo "=== apt-get install Fyne prerequisites ==="
-            sudo apt-get install -y --no-install-recommends \
-              gcc pkg-config \
-              libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
-              libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev \
-              libwayland-dev libxkbcommon-dev xorg-dev
-          } 2>&1 | tee ci-logs/prereq.log
-
-      - name: Preflight gates (gofmt, tidy, test, vet, build)
-        run: |
-          set -o pipefail
           bash scripts/build/build-linux.sh --mode preflight 2>&1 | tee ci-logs/preflight-build.log
-          rc=${PIPESTATUS[0]}
-          cp ci-logs/phase1-build.log ci-logs/preflight-run.log 2>/dev/null || true
-          exit "$rc"
+          exit "${PIPESTATUS[0]}"
 
       - name: Upload preflight log part
         if: always()
@@ -71,7 +78,7 @@ jobs:
     name: build-windows (windows-latest, x64, UCRT64)
     needs: preflight
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,32 +89,110 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: Setup MSYS2 UCRT64
+        id: msys2
         uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2 (pinned upstream commit, 2026-09-27)
         with:
           msystem: UCRT64
           update: false
           release: true
-          path-type: inherit
+          path-type: minimal
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
 
-      - name: Verify UCRT64 toolchain
+      # The setup-msys2 action scopes PATH changes to `shell: msys2`
+      # steps; normal pwsh steps would otherwise resolve the runner's
+      # preinstalled C:\mingw64 gcc and Strawberry pkg-config 0.26.
+      # Prepend the UCRT64 bin directory to the runner PATH so the
+      # intended toolchain is first for every following step.
+      - name: Activate UCRT64 toolchain on the runner PATH
+        shell: pwsh
+        run: |
+          $ucrt = Join-Path "${{ steps.msys2.outputs.msys2-location }}" 'ucrt64\bin'
+          if (-not (Test-Path (Join-Path $ucrt 'gcc.exe'))) {
+            Write-Output "ERROR: UCRT64 gcc.exe not found under $ucrt"
+            exit 1
+          }
+          $env:PATH = "$ucrt;$env:PATH"
+          Add-Content -Path $env:GITHUB_PATH -Value $ucrt
+          Write-Output "UCRT64 bin prepended to PATH: $ucrt"
+
+      # Hard toolchain gate: identity of the FIRST compiler on PATH,
+      # not merely its existence. Fails fast on the stale C:\mingw64 /
+      # Strawberry toolchains, with the full evidence in the log part.
+      - name: Verify UCRT64 toolchain (identity gate)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          $ucrt = Join-Path "${{ steps.msys2.outputs.msys2-location }}" 'ucrt64\bin'
+          $fail = $false
           {
-            Write-Output "=== gcc ==="
-            Get-Command gcc | Format-List Name, Source
-            gcc --version | Select-Object -First 1
-            Write-Output "=== pkg-config ==="
-            pkg-config --version
-            Write-Output "=== go env ==="
+            Write-Output "=== expected UCRT64 bin ==="
+            Write-Output $ucrt
+            Write-Output "=== gcc identity ==="
+            $gcc = Get-Command gcc -ErrorAction SilentlyContinue
+            if ($null -eq $gcc) {
+              Write-Output "ERROR: gcc not found on PATH"
+              $script:fail = $true
+            } else {
+              Write-Output "gcc source: $($gcc.Source)"
+              if (-not ($gcc.Source -like "$ucrt*")) {
+                Write-Output "ERROR: first gcc on PATH is NOT the UCRT64 toolchain (stale shadowing toolchain detected)"
+                $script:fail = $true
+              }
+              gcc --version | Select-Object -First 1
+              Write-Output "gcc -dumpmachine: $(gcc -dumpmachine)"
+              if ((gcc -dumpmachine) -ne 'x86_64-w64-mingw32') {
+                Write-Output "ERROR: unexpected gcc -dumpmachine (want x86_64-w64-mingw32)"
+                $script:fail = $true
+              }
+              $defines = 'int main(void){return 0;}' | gcc -E -dM -xc -
+              if (-not ($defines | Select-String -SimpleMatch '_UCRT')) {
+                Write-Output "ERROR: compiler does not define _UCRT (not a UCRT64 toolchain)"
+                $script:fail = $true
+              } else {
+                Write-Output "UCRT runtime confirmed (_UCRT defined)"
+              }
+            }
+            Write-Output "=== pkg-config identity ==="
+            $pc = Get-Command pkg-config -ErrorAction SilentlyContinue
+            if ($null -eq $pc) {
+              Write-Output "ERROR: pkg-config not found on PATH"
+              $script:fail = $true
+            } else {
+              Write-Output "pkg-config source: $($pc.Source)"
+              if (-not ($pc.Source -like "$ucrt*")) {
+                Write-Output "ERROR: pkg-config is not the UCRT64 pkgconf"
+                $script:fail = $true
+              }
+              $ver = (pkg-config --version)
+              Write-Output "pkg-config version: $ver"
+              $majors = $ver.Split('.')
+              if ([int]$majors[0] -lt 1 -or ([int]$majors[0] -eq 1 -and [int]$majors[1] -lt 8)) {
+                Write-Output "ERROR: pkg-config too old (want >= 1.8 from UCRT64 pkgconf)"
+                $script:fail = $true
+              }
+            }
+            Write-Output "=== go identity ==="
             go version
             go env GOOS GOARCH CGO_ENABLED GOTOOLCHAIN
           } 2>&1 | Tee-Object -FilePath ci-logs/windows-compiler.log
+          if ($fail) {
+            Write-Output "ERROR: UCRT64 toolchain identity gate FAILED (see ci-logs/windows-compiler.log)"
+            exit 1
+          }
+          Write-Output "UCRT64 toolchain identity gate PASSED"
+
+      - name: Record build date
+        id: meta
+        shell: pwsh
+        run: |
+          $d = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          "build_date=$d" >> $env:GITHUB_OUTPUT
 
       - name: Build and verify Windows x64 desktop app
         shell: pwsh
@@ -115,11 +200,13 @@ jobs:
           CGO_ENABLED: '1'
           GOOS: windows
           GOARCH: amd64
+          SHEYTAN_BUILD_COMMIT: ${{ github.sha }}
+          SHEYTAN_BUILD_DATE: ${{ steps.meta.outputs.build_date }}
+          SHEYTAN_BUILT_BY: github-actions
+          SHEYTAN_BUILD_VERSION: ${{ github.ref_name }}
         run: |
           ./scripts/build/build-windows.ps1
-          $rc = $LASTEXITCODE
-          Copy-Item ci-logs/phase1-build.log ci-logs/windows-run.log
-          exit $rc
+          exit $LASTEXITCODE
 
       - name: Upload Windows log part
         if: always()
@@ -131,8 +218,8 @@ jobs:
           if-no-files-found: error
 
       - name: Check Windows portable build exists before upload
+        if: success()
         shell: pwsh
-        id: winbuild
         run: |
           $zip = "dist/SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
           if (-not (Test-Path $zip)) {
@@ -158,7 +245,7 @@ jobs:
     name: build-linux (ubuntu-24.04, x64)
     needs: preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -169,31 +256,55 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
-      - name: Install Fyne native prerequisites
+      # Native prerequisites, installed exactly once in this job, minimal set.
+      - name: Install Fyne native prerequisites and FFmpeg
         run: |
           set -o pipefail
           mkdir -p ci-logs
           {
             echo "=== apt-get update ==="
             sudo apt-get update
-            echo "=== apt-get install Fyne prerequisites ==="
+            echo "=== apt-get install Fyne prerequisites (minimal) ==="
             sudo apt-get install -y --no-install-recommends \
               gcc pkg-config \
               libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
               libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev \
-              libwayland-dev libxkbcommon-dev xorg-dev
+              libwayland-dev libxkbcommon-dev
+            echo "=== distro FFmpeg for export integration tests (external to the product) ==="
+            sudo apt-get install -y --no-install-recommends ffmpeg
             echo "=== pkg-config modules ==="
             pkg-config --modversion gl egl x11 xrandr xinerama xcursor xi xxf86vm wayland-client xkbcommon
+            echo "=== encoders/ffprobe availability ==="
+            ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx264|aac" | head -4
+            ffprobe -version | head -1
           } 2>&1 | tee ci-logs/linux-compiler.log
 
+      - name: Install govulncheck (pinned)
+        run: |
+          # v1.1.4 fails to build an SSA under the go1.27 toolchain;
+          # v1.9.0 is verified against this repository (0 called
+          # vulnerabilities) and prints its version via -version.
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          echo "govulncheck installed:"
+          govulncheck -version 2>&1 | head -4 || true
+
+      - name: Record build date
+        id: meta
+        run: echo "build_date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
       - name: Build and verify Linux x64 desktop app
+        env:
+          SHEYTAN_BUILD_COMMIT: ${{ github.sha }}
+          SHEYTAN_BUILD_DATE: ${{ steps.meta.outputs.build_date }}
+          SHEYTAN_BUILT_BY: github-actions
+          SHEYTAN_BUILD_VERSION: ${{ github.ref_name }}
         run: |
           set -o pipefail
           bash scripts/build/build-linux.sh --mode desktop 2>&1 | tee ci-logs/linux-build.log
-          rc=${PIPESTATUS[0]}
-          cp ci-logs/phase1-build.log ci-logs/linux-run.log
-          exit "$rc"
+          exit "${PIPESTATUS[0]}"
 
       - name: Upload Linux log part
         if: always()
@@ -205,6 +316,7 @@ jobs:
           if-no-files-found: error
 
       - name: Check Linux build exists before upload
+        if: success()
         run: |
           test -s bin/sheytan-music-visualizer || { echo "ERROR: linux executable missing or empty"; exit 1; }
           ls -l bin/sheytan-music-visualizer
@@ -217,12 +329,36 @@ jobs:
           path: bin/sheytan-music-visualizer
           if-no-files-found: error
 
+  # Same-run CodeQL analysis (reusable workflow). Its `analyze` job
+  # uploads a temporary codeql-logs-part artifact inside THIS run, so
+  # the collector can consolidate same-commit CodeQL evidence into the
+  # single log.txt without a second visible log artifact.
+  codeql:
+    name: codeql (reusable analysis)
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/codeql.yml
+    with:
+      called: true
+
   collect-logs:
-    name: collect-logs (consolidated evidence)
-    needs: [preflight, build-windows, build-linux]
+    name: collect-logs (single log.txt evidence)
+    needs: [preflight, build-windows, build-linux, codeql]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # actions:write is required ONLY to delete the temporary per-job
+      # log-part artifacts after the consolidated log.txt has been
+      # validated and uploaded, so the run exposes exactly one
+      # diagnostic artifact. It never changes job conclusions.
+      actions: write
+      # security-events:read lets the collector fetch open code
+      # scanning alerts for the analyzed commit (best effort).
+      security-events: read
     steps:
       - name: Checkout (collector source)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -233,6 +369,8 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: Download log parts (namespaced, never flattened)
         id: download
@@ -249,15 +387,12 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
           REF: ${{ github.ref }}
           EVENT: ${{ github.event_name }}
-          # The run start timestamp is left empty: github.run_started_at
-          # exists in the live GitHub context but is rejected by the
-          # actionlint schema gate, and the gate must stay clean. The
-          # consolidated report carries its own accurate generation time.
-          STARTED_AT: ""
+          REPO: ${{ github.repository }}
           RUNNER_OS_LABEL: ${{ runner.os }}
           RESULT_PREFLIGHT: ${{ needs.preflight.result }}
           RESULT_WINDOWS: ${{ needs.build-windows.result }}
           RESULT_LINUX: ${{ needs.build-linux.result }}
+          RESULT_CODEQL: ${{ needs.codeql.result }}
         run: |
           mkdir -p ci-parts
           {
@@ -267,77 +402,104 @@ jobs:
           cat > ci-parts/manifest.json <<MANIFEST
           {
             "product": "SHEYTAN Music Visualizer",
+            "repository": "${REPO}",
             "workflow": "build-desktop.yml",
             "run_id": "${RUN_ID}",
             "attempt": "${RUN_ATTEMPT}",
             "commit_sha": "${COMMIT_SHA}",
             "ref": "${REF}",
             "event": "${EVENT}",
-            "start_time_utc": "${STARTED_AT}",
             "runner_os": "${RUNNER_OS_LABEL}",
+            "codeql": {
+              "workflow": "codeql.yml",
+              "job": "codeql",
+              "result": "${RESULT_CODEQL}"
+            },
             "jobs": [
-              {"name": "preflight",     "result": "${RESULT_PREFLIGHT}", "artifact": "preflight-logs-part"},
-              {"name": "build-windows", "result": "${RESULT_WINDOWS}",   "artifact": "windows-logs-part"},
-              {"name": "build-linux",   "result": "${RESULT_LINUX}",     "artifact": "linux-logs-part"}
+              {"name": "preflight",     "result": "${RESULT_PREFLIGHT}", "artifact": "preflight-logs-part", "required": true},
+              {"name": "build-windows", "result": "${RESULT_WINDOWS}",   "artifact": "windows-logs-part",  "required": true},
+              {"name": "build-linux",   "result": "${RESULT_LINUX}",     "artifact": "linux-logs-part",    "required": true},
+              {"name": "codeql",        "result": "${RESULT_CODEQL}",    "artifact": "codeql-logs-part",   "required": true}
             ]
           }
           MANIFEST
           cat ci-parts/manifest.json
 
       - name: Build collector binary
-        id: build_collector
         run: |
           set -o pipefail
-          mkdir -p ci-logs
-          go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector 2>&1 | tee ci-logs/collector-build.log
-          rc=${PIPESTATUS[0]}
-          echo "$rc" > collector-build.rc
-          exit "$rc"
+          go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector
+          echo "collector build OK"
 
       - name: Run collector (report is written even when coverage is incomplete)
         id: run_collector
-        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set +e
-          mkdir -p ci-logs
-          if [ ! -x bin/ci-log-collector ]; then
-            {
-              echo "EMERGENCY FALLBACK CONSOLIDATED REPORT"
-              echo "The collector binary could not be built/run; this run must be treated as INCOMPLETE."
-              echo "Collector build exit code: $(cat collector-build.rc 2>/dev/null || echo UNKNOWN)"
-              echo "Download step outcome: ${{ steps.download.outcome }} / conclusion: ${{ steps.download.conclusion }}"
-              echo "--- download diagnostics ---"
-              cat ci-parts/download-diagnostics.txt 2>/dev/null || echo "(diagnostics unavailable)"
-              echo "--- parts root listing ---"
-              ls -laR ci-parts 2>/dev/null || echo "(parts root unavailable)"
-            } > ci-logs/emergency-consolidated-report.txt
-            echo "1" > collector.rc
-            echo "collector did not run; emergency report written"
-            exit 0
-          fi
+          mkdir -p ci-out
           ./bin/ci-log-collector \
-            --report ci-logs/consolidated-run-report.txt \
+            --report ci-out/log.txt \
             --parts-root ci-parts \
-            --manifest ci-parts/manifest.json
-          echo "$?" > collector.rc
-          echo "collector exit code: $(cat collector.rc)"
+            --manifest ci-parts/manifest.json \
+            --github-repo "${GITHUB_REPOSITORY}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}"
+          rc=$?
+          echo "$rc" > collector.rc
+          echo "collector exit code: $rc (0=green, 1=incomplete coverage, 3=required job failed, 2=hard error)"
           exit 0
 
-      - name: Upload consolidated report artifact
+      - name: Validate final log.txt before upload
+        run: |
+          test -s ci-out/log.txt || { echo "ERROR: consolidated log.txt missing or empty"; exit 1; }
+          test "$(find ci-out -maxdepth 1 -type f | wc -l)" -eq 1 || { echo "ERROR: ci-out must contain exactly one file"; exit 1; }
+          size=$(stat -c%s ci-out/log.txt)
+          echo "log.txt validated: $size bytes"
+
+      - name: Upload the single consolidated diagnostics artifact
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: consolidated-run-log
-          path: |
-            ci-logs/consolidated-run-report.txt
-            ci-logs/emergency-consolidated-report.txt
+          name: log.txt
+          path: ci-out/log.txt
           if-no-files-found: error
+
+      - name: Delete temporary log-part artifacts (single-artifact guarantee)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
+          tmp=$(mktemp)
+          curl -sfL --retry 2 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "${api}?per_page=100" -o "$tmp"
+          if [ ! -s "$tmp" ]; then
+            echo "WARNING: could not list artifacts for cleanup (report already uploaded); temporary part artifacts may remain visible."
+            exit 0
+          fi
+          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | endswith("-logs-part")) or (.name == "consolidated-run-log")) | .id' "$tmp")
+          for id in $ids; do
+            url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
+            if curl -sf -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$url"; then
+              echo "deleted temporary artifact ${id}"
+            else
+              echo "WARNING: deleting artifact ${id} failed; it may remain visible (report is unaffected)."
+            fi
+          done
+          rm -f "$tmp"
 
       - name: Fail closed after the report upload attempt
         run: |
           rc="$(cat collector.rc)"
           echo "collector exit code: $rc"
           if [ "$rc" != "0" ]; then
-            echo "Consolidated log coverage is INCOMPLETE or collection failed; failing this job after the report upload."
+            if [ "$rc" = "3" ]; then
+              echo "One or more required jobs did not succeed (see the job status table inside log.txt)."
+            elif [ "$rc" = "1" ]; then
+              echo "Consolidated log coverage is INCOMPLETE; failing this job after the report upload."
+            else
+              echo "Collector failed; the run must stay red."
+            fi
           fi
           exit "$rc"

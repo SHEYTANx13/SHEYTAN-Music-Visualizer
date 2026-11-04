@@ -1,6 +1,8 @@
 # SHEYTAN Music Visualizer
 
-**SHEYTAN™** · Licensor: Parsaetak · © 2024–2026 Parsaetak. All rights reserved.
+**SHEYTAN™** · Licensor / rights holder: [Parsaetak](https://linktr.ee/Parsaetak) ·
+Product/brand/project home: [SHEYTAN](https://github.com/SHEYTANx13) ·
+© 2024–2026 Parsaetak. All rights reserved.
 
 SHEYTAN Music Visualizer is a **local-first desktop studio** that imports a
 song, analyzes it locally, derives a deterministic per-track visual identity
@@ -106,6 +108,20 @@ Every command's stdout/stderr is captured from the first byte into
 `ci-logs/phase2-build.log` with structured records and true exit codes; the
 script exits non-zero if any required gate fails.
 
+## GPU backend preference
+
+The renderer selects a real hardware adapter when one can be proven
+(adapter + device + executed draw + verified readback); software/noop
+adapters are never reported as hardware GPU. The optional
+`SHEYTAN_GPU_PREFERENCE` environment variable selects a backend:
+`auto` (default; hardware first — Vulkan, then DirectX 12 on Windows),
+`vulkan`, `dx12` or `software`. An explicit selection either selects
+that backend or reports the exact reason it could not; it never
+silently falls back to software while claiming the requested backend.
+The live backend identity (adapter, device type, backend API and the
+fallback reason) is shown in the studio transport bar and in the About
+dialog.
+
 ## Run
 
 ```bash
@@ -140,8 +156,11 @@ go run -tags goffi_static ./cmd/sheytan-music-visualizer                # the st
   Visualizer/logs/app.log`; `SHEYTAN_LOG_DIR` overrides explicitly.
 - **Data** (canonical PCM cache): `<user-config-dir>/SHEYTAN Music
   Visualizer/data/pcm-cache`; `SHEYTAN_DATA_DIR` overrides (tests use this).
-- **Build/CI logs**: `ci-logs/phase2-build.log`; CI uploads per-job log
-  parts and one consolidated report (`cmd/ci-log-collector`).
+- **Build/CI logs**: `ci-logs/phase2-build.log`; CI uploads internal
+  per-job log parts, then `cmd/ci-log-collector` aggregates them (plus
+  the authoritative GitHub job/step conclusions) into ONE artifact named
+  exactly `log.txt`; the internal parts are deleted after validation so
+  the run exposes a single diagnostic file.
 - The packaged Phase 2 verification transcript lives in `evidence/`.
 
 ## License
@@ -149,6 +168,9 @@ go run -tags goffi_static ./cmd/sheytan-music-visualizer                # the st
 Proprietary — see [license.md](license.md) (Parsaetak Proprietary License
 v1.1). SHEYTAN™ is a trademark of Parsaetak; third-party dependencies remain
 under their own licenses as inventoried there.
+
+- Licensor / rights holder: Parsaetak — https://linktr.ee/Parsaetak
+- Product / brand / project home: SHEYTAN — https://github.com/SHEYTANx13
 
 No CI badges are shown because hosted workflow runs have not been observed
 (no push/PR was made from this session).

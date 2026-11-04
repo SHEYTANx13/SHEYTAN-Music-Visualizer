@@ -14,6 +14,7 @@ type tJob struct {
 	name     string
 	result   string
 	artifact string
+	required bool              // true = gate job whose failure must fail the run
 	files    map[string]string // rel path -> content ("" = empty file)
 }
 
@@ -46,7 +47,7 @@ func fixture(t *testing.T, jobs []tJob) (Options, string) {
 		}
 	}
 	for _, j := range jobs {
-		opts.Meta.Jobs = append(opts.Meta.Jobs, JobSpec{Name: j.name, Result: j.result, Artifact: j.artifact})
+		opts.Meta.Jobs = append(opts.Meta.Jobs, JobSpec{Name: j.name, Result: j.result, Artifact: j.artifact, Required: j.required})
 	}
 	return opts, opts.ReportPath
 }
@@ -67,8 +68,8 @@ func mustCollect(t *testing.T, opts Options) (Result, string) {
 // Fixture 1: all expected jobs have logs -> COMPLETE.
 func TestAllJobsHaveLogsReportComplete(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{"preflight-build.log": "ok\n"}},
-		{"build-windows", ResultSuccess, "windows-logs-part", map[string]string{"windows-build.log": "ok\n"}},
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{"preflight-build.log": "ok\n"}},
+		{"build-windows", ResultSuccess, "windows-logs-part", false, map[string]string{"windows-build.log": "ok\n"}},
 	})
 	res, report := mustCollect(t, opts)
 	if res.Coverage != CoverageComplete {
@@ -87,7 +88,7 @@ func TestAllJobsHaveLogsReportComplete(t *testing.T) {
 func TestFailedCommandIndexedButCoverageComplete(t *testing.T) {
 	logContent := "building...\nEXIT_CODE: 2 FAIL\n--- FAIL: TestSomething\nFAIL\texample.com/pkg\t0.5s\n"
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultFailure, "preflight-logs-part", map[string]string{"preflight-tests.log": logContent}},
+		{"preflight", ResultFailure, "preflight-logs-part", false, map[string]string{"preflight-tests.log": logContent}},
 	})
 	res, report := mustCollect(t, opts)
 	if res.Coverage != CoverageComplete {
@@ -108,7 +109,7 @@ func TestFailedCommandIndexedButCoverageComplete(t *testing.T) {
 // Fixture 3: warning-only lines appear in the warning index.
 func TestWarningsIndexed(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{"p.log": "::warning::deprecated input\nWARNING: minor drift\n"}},
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{"p.log": "::warning::deprecated input\nWARNING: minor drift\n"}},
 	})
 	res, report := mustCollect(t, opts)
 	if res.WarningRecords != 2 {
@@ -126,7 +127,7 @@ func TestWarningsIndexed(t *testing.T) {
 // preserved.
 func TestEmptyLogFileCaptured(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{"empty.log": ""}},
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{"empty.log": ""}},
 	})
 	res, report := mustCollect(t, opts)
 	if res.Coverage != CoverageComplete {
@@ -144,8 +145,8 @@ func TestEmptyLogFileCaptured(t *testing.T) {
 // named, coverage INCOMPLETE (collector exits non-zero at CLI level).
 func TestMissingArtifactNamedAndIncomplete(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{"p.log": "ok\n"}},
-		{"build-windows", ResultFailure, "windows-logs-part", nil}, // artifact never uploaded
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{"p.log": "ok\n"}},
+		{"build-windows", ResultFailure, "windows-logs-part", false, nil}, // artifact never uploaded
 	})
 	res, report := mustCollect(t, opts)
 	if res.Coverage != CoverageIncomplete {
@@ -154,7 +155,7 @@ func TestMissingArtifactNamedAndIncomplete(t *testing.T) {
 	if !strings.Contains(report, "MISSING LOG SOURCE: build-windows (expected artifact directory \"windows-logs-part\" under parts root)") {
 		t.Fatal("report must name the job with the missing artifact")
 	}
-	if !strings.Contains(report, "INCOMPLETE — log sources are missing.") {
+	if !strings.Contains(report, "Evidence coverage: INCOMPLETE — log sources are missing") {
 		t.Fatal("report must state INCOMPLETE coverage")
 	}
 	if !strings.Contains(report, "ARTIFACT: preflight-logs-part | FILE: p.log") {
@@ -166,8 +167,8 @@ func TestMissingArtifactNamedAndIncomplete(t *testing.T) {
 // artifact or failed command.
 func TestSkippedJobIsNeverStarted(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultFailure, "preflight-logs-part", map[string]string{"p.log": "EXIT_CODE: 1 FAIL\n"}},
-		{"build-linux", ResultSkipped, "linux-logs-part", nil},
+		{"preflight", ResultFailure, "preflight-logs-part", false, map[string]string{"p.log": "EXIT_CODE: 1 FAIL\n"}},
+		{"build-linux", ResultSkipped, "linux-logs-part", false, nil},
 	})
 	res, report := mustCollect(t, opts)
 	if res.Coverage != CoverageComplete {
@@ -188,8 +189,8 @@ func TestSkippedJobIsNeverStarted(t *testing.T) {
 // without overwriting.
 func TestSameBasenameInTwoNamespacesPreserved(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{"build.log": "from preflight\n"}},
-		{"build-linux", ResultSuccess, "linux-logs-part", map[string]string{"build.log": "from linux\n"}},
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{"build.log": "from preflight\n"}},
+		{"build-linux", ResultSuccess, "linux-logs-part", false, map[string]string{"build.log": "from linux\n"}},
 	})
 	res, report := mustCollect(t, opts)
 	if res.LogFiles != 2 {
@@ -206,7 +207,7 @@ func TestSameBasenameInTwoNamespacesPreserved(t *testing.T) {
 // Fixture 8: multiple log files sort deterministically within a job.
 func TestDeterministicFileOrder(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{
 			"c.log": "c\n", "a.log": "a\n", "b.log": "b\n",
 		}},
 	})
@@ -219,7 +220,7 @@ func TestDeterministicFileOrder(t *testing.T) {
 	}
 	// Run twice; output must be byte-identical.
 	opts2, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{
 			"c.log": "c\n", "a.log": "a\n", "b.log": "b\n",
 		}},
 	})
@@ -233,18 +234,18 @@ func TestDeterministicFileOrder(t *testing.T) {
 // skipped job records all three facts distinctly and accurately.
 func TestRedRunRecordsAllThreeFacts(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{"p.log": "fine\n"}},
-		{"build-windows", ResultFailure, "windows-logs-part", nil},
-		{"build-linux", ResultSkipped, "linux-logs-part", nil},
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{"p.log": "fine\n"}},
+		{"build-windows", ResultFailure, "windows-logs-part", false, nil},
+		{"build-linux", ResultSkipped, "linux-logs-part", false, nil},
 	})
 	res, report := mustCollect(t, opts)
 	if res.Coverage != CoverageIncomplete {
 		t.Fatalf("coverage = %s, want INCOMPLETE", res.Coverage)
 	}
-	if !strings.Contains(report, "Jobs failed:                   1\n") {
+	if !strings.Contains(report, "(succeeded 1, failed 1, cancelled 0, skipped 1)") {
 		t.Fatal("summary must count exactly one failed job")
 	}
-	if !strings.Contains(report, "Jobs skipped:                  1\n") {
+	if !strings.Contains(report, "skipped 1") {
 		t.Fatal("summary must count exactly one skipped job")
 	}
 	if !strings.Contains(report, "MISSING LOG SOURCE jobs:       1\n") {
@@ -264,7 +265,7 @@ func TestRedRunRecordsAllThreeFacts(t *testing.T) {
 func TestUnicodeAndSpacedFilenamesPreserved(t *testing.T) {
 	content := "ünïcodé π-content ✓\n"
 	opts, _ := fixture(t, []tJob{
-		{"preflight", ResultSuccess, "preflight-logs-part", map[string]string{
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{
 			"build log with spaces.log": content,
 			"ünïcodé-π.log":             content,
 		}},
@@ -295,8 +296,8 @@ func TestInvalidResultIsHardError(t *testing.T) {
 // Contract guard: duplicate artifact names across jobs are a hard error.
 func TestDuplicateArtifactNamesRejected(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
-		{"a", ResultSuccess, "same-part", map[string]string{"x.log": "x\n"}},
-		{"b", ResultSuccess, "same-part", map[string]string{"y.log": "y\n"}},
+		{"a", ResultSuccess, "same-part", false, map[string]string{"x.log": "x\n"}},
+		{"b", ResultSuccess, "same-part", false, map[string]string{"y.log": "y\n"}},
 	})
 	if _, err := Collect(opts); err == nil {
 		t.Fatal("duplicate artifact names must be rejected")
@@ -306,7 +307,7 @@ func TestDuplicateArtifactNamesRejected(t *testing.T) {
 // Contract guard: an artifact directory that exists but contains no log
 // files is a missing source, not silent coverage.
 func TestEmptyArtifactDirectoryIsMissingSource(t *testing.T) {
-	opts, _ := fixture(t, []tJob{{"j", ResultSuccess, "empty-part", nil}})
+	opts, _ := fixture(t, []tJob{{"j", ResultSuccess, "empty-part", true, nil}})
 	if err := os.MkdirAll(filepath.Join(opts.PartsRoot, "empty-part"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -316,5 +317,97 @@ func TestEmptyArtifactDirectoryIsMissingSource(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(res.MissingSources, " "), "contains no log files") {
 		t.Fatalf("missing sources = %v", res.MissingSources)
+	}
+}
+
+// Fixture 11: a required job fails WITHOUT any textual error marker in
+// its captured logs. The failure index must derive the failure from the
+// job conclusion, and the overall result must be FAIL — the collector
+// must never convert a failed build job into a green report.
+func TestFailedJobWithoutErrorMarkerIsReportedAsFailure(t *testing.T) {
+	opts, _ := fixture(t, []tJob{
+		{"preflight", ResultSuccess, "preflight-logs-part", true, map[string]string{"p.log": "all gates pass\n"}},
+		{"build-windows", ResultFailure, "windows-logs-part", true, map[string]string{"w.log": "everything looks fine, no markers here\n"}},
+	})
+	res, report := mustCollect(t, opts)
+	if res.Overall != OverallFail {
+		t.Fatalf("overall = %s, want FAIL", res.Overall)
+	}
+	if len(res.FailedJobs) != 1 || !strings.Contains(res.FailedJobs[0], "build-windows") {
+		t.Fatalf("failed jobs = %v, want exactly build-windows", res.FailedJobs)
+	}
+	if !strings.Contains(report, "JOB FAILURE: build-windows (workflow conclusion: failure)") {
+		t.Fatal("report must list the authoritative job conclusion failure")
+	}
+	if !strings.Contains(report, "failed WITHOUT any textual error marker") {
+		t.Fatal("report must explain that text scanning is not the status authority")
+	}
+	if !strings.Contains(report, "OVERALL RESULT: FAIL") {
+		t.Fatal("report must end with the truthful overall FAIL")
+	}
+	if strings.Contains(report, "OVERALL RESULT: PASS") {
+		t.Fatal("a failed required job must never produce an overall PASS")
+	}
+}
+
+// Fixture 12: all required jobs succeeded and coverage is complete.
+func TestOverallPassRequiresRequiredSuccess(t *testing.T) {
+	opts, _ := fixture(t, []tJob{
+		{"preflight", ResultSuccess, "preflight-logs-part", true, map[string]string{"p.log": "ok\n"}},
+		{"build-linux", ResultSuccess, "linux-logs-part", true, map[string]string{"l.log": "ok\n"}},
+	})
+	res, report := mustCollect(t, opts)
+	if res.Overall != OverallPass || res.Coverage != CoverageComplete {
+		t.Fatalf("overall=%s coverage=%s, want PASS/COMPLETE", res.Overall, res.Coverage)
+	}
+	if !strings.Contains(report, "OVERALL RESULT: PASS") {
+		t.Fatal("report must state the truthful overall PASS")
+	}
+}
+
+// Fixture 13: exact secret values and generic token patterns are
+// redacted from every raw section and index line.
+func TestSecretRedaction(t *testing.T) {
+	secret := "ghp_AbC123AbC123AbC123AbC123AbC12345"
+	exact := "super-exact-workflow-token-9876543210"
+	opts, _ := fixture(t, []tJob{
+		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{
+			"p.log": "token=" + exact + " pat=" + secret + " AKIAIOSFODNN7EXAMPLE bearer Bearer abcdef0123456789abcdef\n",
+		}},
+	})
+	opts.ExtraSecrets = []string{exact}
+	_, report := mustCollect(t, opts)
+	for _, banned := range []string{exact, secret, "AKIAIOSFODNN7EXAMPLE", "abcdef0123456789abcdef"} {
+		if strings.Contains(report, banned) {
+			t.Fatalf("report leaked secret %q", banned)
+		}
+	}
+	if !strings.Contains(report, "***REDACTED***") {
+		t.Fatal("report must visibly mark redactions")
+	}
+}
+
+// Fixture 14: duplicate artifact names are a hard error (2 exit code at
+// CLI level), not a silent overwrite.
+func TestDuplicateArtifactNamesAreHardError(t *testing.T) {
+	opts, _ := fixture(t, []tJob{
+		{"a", ResultSuccess, "same-part", false, map[string]string{"x.log": "x\n"}},
+		{"b", ResultSuccess, "same-part", false, map[string]string{"y.log": "y\n"}},
+	})
+	if _, err := Collect(opts); err == nil {
+		t.Fatal("duplicate artifact names must be a hard error")
+	}
+}
+
+// Fixture 15: multiline output (stderr interleaved) and unicode are
+// preserved verbatim in the raw section.
+func TestMultilineAndUnicodeRawPreserved(t *testing.T) {
+	content := "line1 stderr\nлиния-2 ✓\r\nline3\ttab\n"
+	opts, _ := fixture(t, []tJob{
+		{"build", ResultSuccess, "linux-logs-part", false, map[string]string{"m.log": content}},
+	})
+	_, report := mustCollect(t, opts)
+	if !strings.Contains(report, content) {
+		t.Fatal("multiline/unicode raw content not preserved verbatim")
 	}
 }

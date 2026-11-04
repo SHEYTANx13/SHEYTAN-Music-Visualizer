@@ -1,6 +1,16 @@
 // Package brand is the single source of truth for the SHEYTAN Music
 // Visualizer product identity: exact names, trademark position, licensor
-// attribution, application identifier, theme tokens and the legal footer.
+// attribution, project home, application identifier, theme tokens and
+// the legal footer.
+//
+// Two-party attribution model (must stay consistent with license.md):
+//   - Parsaetak is the licensor / rights holder and trademark owner
+//     (official link: https://linktr.ee/Parsaetak).
+//   - SHEYTAN is the product / brand / project identity whose home is
+//     the SHEYTANx13 GitHub organization
+//     (https://github.com/SHEYTANx13).
+//
+// Brand credit does not change who legally owns the Software.
 //
 // Product and marketing strings must not be re-declared elsewhere in
 // first-party code; import this package instead. Documentation files may
@@ -45,8 +55,19 @@ const (
 	// LicenseFile is the sole licensing authority document.
 	LicenseFile = "license.md"
 
-	// SourceURL is the canonical contact / source URL.
-	SourceURL = "https://github.com/Parsaetak"
+	// LicensorURL is Parsaetak's official licensor/rights link.
+	// (The historical https://github.com/Parsaetak destination was
+	// stale as Parsaetak's official link and is kept only as a
+	// historical reference where the license history requires it.)
+	LicensorURL = "https://linktr.ee/Parsaetak"
+
+	// ProjectURL is the SHEYTAN project/brand home.
+	ProjectURL = "https://github.com/SHEYTANx13"
+
+	// SourceURL is the canonical contact / source URL for the
+	// product (kept as the project home for compatibility with
+	// existing consumers of this constant).
+	SourceURL = "https://github.com/SHEYTANx13"
 
 	// LogDirName is the directory name used inside the user config
 	// directory for application-owned data.
@@ -62,6 +83,18 @@ func WindowTitle() string {
 // placeholder window and used in CLI outputs.
 func LegalFooter() string {
 	return Copyright + " " + TrademarkStatement
+}
+
+// AttributionBlock returns the two-party attribution lines used by the
+// CLI --version output, the Fyne About surface and diagnostics: the
+// licensor/rights role (Parsaetak) and the product/brand/project role
+// (SHEYTAN), each with its exact official URL.
+func AttributionBlock() []string {
+	return []string{
+		Copyright,
+		"Licensor / rights holder: Parsaetak — " + LicensorURL,
+		"Product / brand / project home: SHEYTAN — " + ProjectURL,
+	}
 }
 
 // Theme direction: black and red — hellish / infernal. Black dominates;

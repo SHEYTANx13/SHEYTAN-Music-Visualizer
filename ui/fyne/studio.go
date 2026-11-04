@@ -13,6 +13,7 @@ package fyneapp
 import (
 	"fmt"
 	"image/color"
+	"net/url"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
@@ -61,6 +63,9 @@ type studioUI struct {
 	trackLabel  *widget.Label
 	statusLabel *widget.Label
 
+	// honest renderer identity for the selected backend
+	rendererInfo render.BackendInfo
+
 	// center preview
 	preview    *canvas.Image
 	emptyState *widget.Label
@@ -76,6 +81,7 @@ type studioUI struct {
 	volumeSl   *widget.Slider
 	analysisLB *widget.Label
 	deviceLB   *widget.Label
+	rendererLB *widget.Label
 
 	// inspector
 	modeSelect  *widget.Select
@@ -103,10 +109,15 @@ type studioUI struct {
 }
 
 func newStudioUI(w fyne.Window, svc *studio.Studio) *studioUI {
+	// Honest backend selection: GPU when a real hardware adapter can
+	// be proven (adapter + device), CPU otherwise, with the exact
+	// fallback reason kept in rendererInfo for the About/status UI.
+	r, info := render.SelectRenderer()
 	return &studioUI{
-		win:      w,
-		svc:      svc,
-		renderer: render.NewCPURenderer(),
+		win:          w,
+		svc:          svc,
+		renderer:     r,
+		rendererInfo: info,
 	}
 }
 
@@ -125,10 +136,11 @@ func (u *studioUI) build() fyne.CanvasObject {
 	btnOpen := widget.NewButton("Open Project…", u.onOpenProject)
 	btnSave := widget.NewButton("Save Project", u.onSaveProject)
 	btnExport := widget.NewButton("Export MP4…", u.onExport)
+	btnAbout := widget.NewButton("About", u.onAbout)
 
 	top := container.NewBorder(nil, nil,
 		container.NewHBox(brandMark, widget.NewLabel(" "), u.trackLabel),
-		container.NewHBox(btnImport, btnOpen, btnSave, btnExport),
+		container.NewHBox(btnImport, btnOpen, btnSave, btnExport, btnAbout),
 		u.statusLabel,
 	)
 
@@ -279,6 +291,9 @@ func (u *studioUI) build() fyne.CanvasObject {
 	u.analysisLB = widget.NewLabel("analysis: —")
 	u.deviceLB = widget.NewLabel("")
 	u.deviceLB.TextStyle = fyne.TextStyle{Italic: true}
+	u.rendererLB = widget.NewLabel("")
+	u.rendererLB.TextStyle = fyne.TextStyle{Italic: true}
+	u.rendererLB.SetText("renderer: " + rendererSummary(u.rendererInfo))
 
 	transport := container.NewBorder(nil, nil,
 		container.NewHBox(u.btnPlay, u.btnStop),
@@ -288,7 +303,7 @@ func (u *studioUI) build() fyne.CanvasObject {
 
 	bottom := container.NewVBox(
 		widget.NewSeparator(),
-		container.NewHBox(u.deviceLB),
+		container.NewHBox(u.deviceLB, u.rendererLB),
 		transport,
 	)
 
@@ -448,6 +463,68 @@ func (u *studioUI) refreshTransport() {
 
 // status updates the status line.
 func (u *studioUI) status(s string) { u.statusLabel.SetText(s) }
+
+// parseURL builds a *url.URL for the About hyperlinks; the brand URL
+// constants are pinned and always parseable, but an invalid value
+// cannot crash the About dialog.
+func parseURL(raw string) *url.URL {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return &url.URL{Scheme: "https", Host: raw}
+	}
+	return u
+}
+
+// rendererSummary renders the honest backend identity in one line.
+func rendererSummary(info render.BackendInfo) string {
+	s := string(info.Backend) + " / " + string(info.GpuState)
+	if info.BackendAPI != "" {
+		s += " / " + info.BackendAPI
+	}
+	if info.Adapter != "" {
+		s += " / " + info.Adapter
+	}
+	if info.Detail != "" {
+		s += " — " + info.Detail
+	}
+	return s
+}
+
+// onAbout shows the product identity, build metadata and the two-party
+// legal attribution (licensor and project home) with exact URLs.
+func (u *studioUI) onAbout() {
+	head := widget.NewLabelWithStyle(brand.ProductName, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	build := widget.NewLabel("Build: " + buildinfo.Line())
+	build.TextStyle = fyne.TextStyle{Monospace: true}
+	renderer := widget.NewLabel("Renderer: " + rendererSummary(u.rendererInfo))
+	renderer.Wrapping = fyne.TextWrapWord
+
+	content := container.NewVBox(
+		head,
+		build,
+		renderer,
+		widget.NewSeparator(),
+		widget.NewLabel(brand.Copyright),
+		container.NewHBox(
+			widget.NewLabel("Licensor / rights holder: Parsaetak —"),
+			widget.NewHyperlink(brand.LicensorURL, parseURL(brand.LicensorURL)),
+		),
+		container.NewHBox(
+			widget.NewLabel("Product / brand / project home: SHEYTAN —"),
+			widget.NewHyperlink(brand.ProjectURL, parseURL(brand.ProjectURL)),
+		),
+		widget.NewLabel(brand.TrademarkStatement),
+	)
+	content.Objects[0].(*widget.Label).Wrapping = fyne.TextWrapWord
+	for _, o := range content.Objects {
+		if l, ok := o.(*widget.Label); ok {
+			l.Wrapping = fyne.TextWrapWord
+		}
+	}
+	d := dialog.NewCustom("About "+brand.ProductName, "Close", content, u.win)
+	d.Resize(fyne.NewSize(640, 420))
+	d.Show()
+}
 
 // close stops the render loop and renderer.
 func (u *studioUI) close() {

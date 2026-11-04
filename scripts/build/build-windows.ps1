@@ -21,6 +21,11 @@
     (MSYS2 UCRT64 — never the deprecated MINGW64), PowerShell 7+.
     CGO_ENABLED=1, GOOS=windows, GOARCH=amd64 must be set for the
     desktop build (the CI workflow sets them; this script verifies them).
+
+    Build metadata: SHEYTAN_BUILD_COMMIT / SHEYTAN_BUILD_DATE /
+    SHEYTAN_BUILT_BY / SHEYTAN_BUILD_VERSION are injected into the
+    binary via internal/buildinfo when set; a local build without them
+    truthfully reports unknown/unknown by local.
 #>
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -39,7 +44,10 @@ Set-Content -Path $env:CI_LOG_FILE -Value "" -NoNewline # fresh local run
 $job = "phase2-windows-build"
 # goffi_static: required when Fyne (CGO) and wgpu (goffi FFI) link in one
 # binary; harmless on Windows (see ai-notes.md).
-$goTags = "-tags goffi_static"
+# Array form: PowerShell passes each element as its own argument to
+# native commands. A single "-tags goffi_static" string would arrive at
+# go as ONE argument and break flag parsing.
+$goTags = @("-tags", "goffi_static")
 $script:failures = 0
 $script:failedGates = @()
 $script:skippedGates = @()
@@ -68,8 +76,11 @@ Write-Note "=============================================================="
 $rc = Capture-Step -Job $job -Step "toolchain-report" -ToolContext "gate:toolchain" -Command {
     go version
     go env GOOS GOARCH CGO_ENABLED GOTOOLCHAIN GOPATH GOMOD
-    gcc --version | Select-Object -First 1
-    pkg-config --version
+    # $(...) captures the FULL output first; `| Select-Object -First 1`
+    # would terminate the pipeline and kill gcc mid-write.
+    "gcc: $((gcc --version)[0])"
+    "gcc -dumpmachine: $(gcc -dumpmachine)"
+    "pkg-config: $(pkg-config --version)"
 }
 if ($rc -ne 0) { Fail-Gate "toolchain-report" }
 
@@ -105,11 +116,13 @@ $rc = Capture-Step -Job $job -Step "gofmt-verify" -ToolContext "gate:gofmt" -Com
 }
 if ($rc -ne 0) { Fail-Gate "gofmt-verify" }
 
-$rc = Capture-Step -Job $job -Step "go-mod-tidy" -ToolContext "gate:go-mod-tidy" -Command { go mod tidy }
-if ($rc -ne 0) { Fail-Gate "go-mod-tidy" }
-
+# Read-only module hygiene: go mod tidy -diff never mutates the
+# checked-out tree (the mutating `go mod tidy` gate was removed).
 $rc = Capture-Step -Job $job -Step "go-mod-tidy-verify" -ToolContext "gate:go-mod-tidy" -Command { go mod tidy -diff }
 if ($rc -ne 0) { Fail-Gate "go-mod-tidy-verify" }
+
+$rc = Capture-Step -Job $job -Step "go-mod-verify" -ToolContext "gate:go-mod-verify" -Command { go mod verify }
+if ($rc -ne 0) { Fail-Gate "go-mod-verify" }
 
 $rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -Command { go test $goTags ./... }
 if ($rc -ne 0) { Fail-Gate "go-test" }
@@ -124,7 +137,20 @@ if ($rc -ne 0) { Fail-Gate "go-build-packages" }
 $exeOk = $false
 $exePath = Join-Path $repoRoot "bin\sheytan-music-visualizer.exe"
 $rc = Capture-Step -Job $job -Step "build-executable" -ToolContext "gate:build-exe" -Command {
-    go build -trimpath $goTags -o "bin\sheytan-music-visualizer.exe" "./cmd/sheytan-music-visualizer"
+    $bi = "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
+    $args_ = @("build", "-trimpath") + $goTags
+    $ld = @()
+    if ($env:SHEYTAN_BUILD_VERSION) { $ld += "${bi}.version=$($env:SHEYTAN_BUILD_VERSION)" }
+    if ($env:SHEYTAN_BUILD_COMMIT)  { $ld += "${bi}.commit=$($env:SHEYTAN_BUILD_COMMIT)" }
+    if ($env:SHEYTAN_BUILD_DATE)    { $ld += "${bi}.date=$($env:SHEYTAN_BUILD_DATE)" }
+    if ($env:SHEYTAN_BUILT_BY)      { $ld += "${bi}.builtBy=$($env:SHEYTAN_BUILT_BY)" }
+    if ($ld.Count -gt 0) {
+        # "-ldflags" and its (space-containing) value are two argv
+        # elements; go accepts a single-argument value with spaces.
+        $args_ += @("-ldflags", ($ld -join " "))
+    }
+    $args_ += @("-o", "bin\sheytan-music-visualizer.exe", "./cmd/sheytan-music-visualizer")
+    go @args_
 }
 if ($rc -eq 0) { $exeOk = $true } else { Fail-Gate "build-executable" }
 

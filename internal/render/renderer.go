@@ -46,7 +46,14 @@ type BackendInfo struct {
 	Vendor     string   `json:"vendor,omitempty"`
 	BackendAPI string   `json:"backendApi,omitempty"` // vulkan / dx12 / metal / noop / software
 	Driver     string   `json:"driver,omitempty"`
-	Detail     string   `json:"detail,omitempty"` // honest fallback/limit reason
+	// DeviceType is the honest adapter class (discrete-gpu,
+	// integrated-gpu, virtual-gpu, cpu, other) when the API exposes it.
+	DeviceType string `json:"deviceType,omitempty"`
+	// VendorID/DeviceID are the PCI identifiers when available.
+	VendorID uint32 `json:"vendorId,omitempty"`
+	DeviceID uint32 `json:"deviceId,omitempty"`
+	// Detail carries the honest fallback/limit reason.
+	Detail string `json:"detail,omitempty"`
 }
 
 // Renderer renders one deterministic frame per input.
@@ -65,23 +72,41 @@ type Renderer interface {
 // hardware adapter can be proven, otherwise CPU. Software/noop wgpu
 // adapters are deliberately refused as "GPU" — they execute pipeline
 // semantics on the CPU and labeling them GPU would be dishonest. The
-// returned info always reflects the actual decision.
+// returned info always reflects the actual decision, including the
+// exact reason when the GPU path was unavailable or refused.
 func SelectRenderer() (Renderer, BackendInfo) {
-	g := NewGPURenderer()
+	pref, fromEnv, envErr := PreferenceFromEnv()
+	if envErr != nil {
+		c := NewCPURenderer()
+		ci := c.Info()
+		ci.Detail = "GPU preference env invalid (" + envErr.Error() + "); using the CPU renderer"
+		return c, ci
+	}
+	g, attemptInfo := newGPURendererFull(pref)
 	if g != nil {
 		info := g.Info()
 		if info.GpuState == GpuAvailable && isHardwareBackend(info.BackendAPI) {
+			if fromEnv {
+				info.Detail = "GPU preference from SHEYTAN_GPU_PREFERENCE=" + string(pref)
+			}
 			return g, info
 		}
 		g.Close()
 		c := NewCPURenderer()
 		ci := c.Info()
-		if info.Adapter != "" {
-			ci.Detail = "GPU fallback: " + info.Adapter + " (" + info.BackendAPI +
+		switch {
+		case attemptInfo.Adapter != "":
+			ci.Detail = "GPU fallback: " + attemptInfo.Adapter + " (" + attemptInfo.BackendAPI +
 				") is not a hardware adapter; using the CPU renderer"
+		case attemptInfo.Detail != "":
+			ci.Detail = "GPU fallback: " + attemptInfo.Detail
 		}
 		return c, ci
 	}
 	c := NewCPURenderer()
-	return c, c.Info()
+	ci := c.Info()
+	if attemptInfo.Detail != "" {
+		ci.Detail = "GPU fallback: " + attemptInfo.Detail
+	}
+	return c, ci
 }

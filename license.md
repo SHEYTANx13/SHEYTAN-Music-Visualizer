@@ -1,7 +1,8 @@
 # LICENSE — SHEYTAN Music Visualizer licensing
 
-Copyright © 2024–2026 Parsaetak (https://github.com/Parsaetak). All rights
-reserved.
+Copyright © 2024–2026 Parsaetak (https://linktr.ee/Parsaetak). All rights
+reserved. Product and brand identity: SHEYTAN
+(https://github.com/SHEYTANx13).
 
 This is the **sole licensing artifact** of SHEYTAN Music Visualizer ("the
 Software"). It carries the complete licensing picture in one document: the
@@ -49,8 +50,9 @@ PARSAETAK & SHEYTAN PROPRIETARY LICENSE
 =============================
 Version 1.1 · Last updated: 2026-09-26
 
-Copyright © 2024–2026 Parsaetak (https://github.com/Parsaetak). All rights
-reserved. Product of Parsaetak; authored by Parsa Tak.
+Copyright © 2024–2026 Parsaetak (https://linktr.ee/Parsaetak). All rights
+reserved. Product and brand identity: SHEYTAN
+(https://github.com/SHEYTANx13). Product of Parsaetak; authored by Parsa Tak.
 
 SCOPE OF THIS LICENSE
 ---------------------
@@ -316,10 +318,14 @@ Only the repository maintainer (Parsaetak) may change this licensing model:
 
 ## 6. Contact
 
-Licensing questions, proprietary-use inquiries and exceptions:
-**https://github.com/Parsaetak** (use the contact channel listed there).
+Licensing questions, proprietary-use inquiries and exceptions (licensor /
+rights holder): Parsaetak — **https://linktr.ee/Parsaetak** (use the
+contact channel listed there).
 
-Trademark and branding inquiries: the same contact point.
+Product, brand and project home: SHEYTAN — **https://github.com/SHEYTANx13**.
+
+Trademark and branding inquiries: the same licensor contact point. Brand
+credit does not change who legally owns the Software.
 
 ---
 

@@ -13,9 +13,12 @@ package render
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"math"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gogpu/gputypes"
@@ -24,6 +27,85 @@ import (
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
 )
+
+// Preference is the explicit backend preference model. Auto prefers a
+// real hardware adapter on the platform (Vulkan first, then DX12 on
+// Windows, then GL); explicit selections either select that backend or
+// report the exact reason they cannot — they never silently select
+// software while claiming the requested backend.
+type Preference string
+
+const (
+	PrefAuto     Preference = "auto"
+	PrefVulkan   Preference = "vulkan"
+	PrefDX12     Preference = "dx12"
+	PrefSoftware Preference = "software"
+)
+
+// ParsePreference validates a user-supplied preference string
+// (case-insensitive). Unknown values are an error, never silently auto.
+func ParsePreference(s string) (Preference, error) {
+	switch Preference(strings.ToLower(strings.TrimSpace(s))) {
+	case "", PrefAuto:
+		return PrefAuto, nil
+	case PrefVulkan:
+		return PrefVulkan, nil
+	case PrefDX12:
+		return PrefDX12, nil
+	case PrefSoftware:
+		return PrefSoftware, nil
+	default:
+		return "", fmt.Errorf("render: unknown GPU preference %q (want auto|vulkan|dx12|software)", s)
+	}
+}
+
+// PreferenceFromEnv reads SHEYTAN_GPU_PREFERENCE (optional). Missing
+// env var → (PrefAuto, false); malformed value → error so callers can
+// surface it instead of silently falling back.
+func PreferenceFromEnv() (Preference, bool, error) {
+	v := strings.TrimSpace(os.Getenv("SHEYTAN_GPU_PREFERENCE"))
+	if v == "" {
+		return PrefAuto, false, nil
+	}
+	p, err := ParsePreference(v)
+	if err != nil {
+		return "", true, err
+	}
+	return p, true, nil
+}
+
+// instanceBackendsFor maps the preference onto the instance backend
+// mask (the pinned github.com/gogpu/wgpu v0.34.7 API: the instance only
+// enumerates adapters from backends enabled in this mask; provider
+// priority orders Vulkan → DX12 → GL → software).
+func instanceBackendsFor(p Preference) gputypes.Backends {
+	switch p {
+	case PrefVulkan:
+		return gputypes.BackendsVulkan
+	case PrefDX12:
+		return gputypes.BackendsDX12
+	default:
+		// Auto and Software use the default primary mask; Software is
+		// enforced via ForceFallbackAdapter on the adapter request.
+		return gputypes.BackendsPrimary
+	}
+}
+
+// deviceTypeName maps the adapter device type honestly.
+func deviceTypeName(t gputypes.DeviceType) string {
+	switch t {
+	case gputypes.DeviceTypeDiscreteGPU:
+		return "discrete-gpu"
+	case gputypes.DeviceTypeIntegratedGPU:
+		return "integrated-gpu"
+	case gputypes.DeviceTypeVirtualGPU:
+		return "virtual-gpu"
+	case gputypes.DeviceTypeCPU:
+		return "cpu"
+	default:
+		return "other"
+	}
+}
 
 // wgslShader is the Radial Spectrum fragment shader. It mirrors the
 // CPU radial renderer's math (base radius driven by bass + beat, 64
@@ -102,20 +184,22 @@ fn fs(@builtin(position) frag : vec4f) -> @location(0) vec4f {
 
 // GPURenderer renders the radial mode on the GPU.
 type GPURenderer struct {
-	info      BackendInfo
-	instance  *wgpu.Instance
-	adapter   *wgpu.Adapter // kept reachable for the device lifetime
-	device    *wgpu.Device
-	queue     *wgpu.Queue
-	pipeline  *wgpu.RenderPipeline
-	uniform   *wgpu.Buffer
-	bindGroup *wgpu.BindGroup
-	cpu       *CPURenderer // fallback renderer for non-GPU modes
-	lastW     int
-	lastH     int
-	target    *wgpu.Texture
-	readback  *wgpu.Buffer
-	lastImage *image.RGBA
+	info        BackendInfo
+	preference  Preference
+	instance    *wgpu.Instance
+	adapter     *wgpu.Adapter // kept reachable for the device lifetime
+	device      *wgpu.Device
+	queue       *wgpu.Queue
+	pipeline    *wgpu.RenderPipeline
+	uniform     *wgpu.Buffer
+	bindGroup   *wgpu.BindGroup
+	cpu         *CPURenderer // fallback renderer for non-GPU modes
+	lastW       int
+	lastH       int
+	target      *wgpu.Texture
+	readback    *wgpu.Buffer
+	lastImage   *image.RGBA
+	uniformData []byte // reused uniform staging buffer
 }
 
 func f32bits(v float64) uint32 { return mathFloat32bits(float32(v)) }
@@ -124,34 +208,62 @@ func mathFloat32bits(f float32) uint32 {
 	return math.Float32bits(f)
 }
 
-// NewGPURenderer attempts to create a real GPU renderer. It returns
-// nil when no usable adapter/device exists (the caller then uses the
-// CPU renderer and reports the fallback honestly).
+// NewGPURenderer attempts to create a real GPU renderer with the Auto
+// preference. It returns nil when no usable adapter/device exists (the
+// caller then uses the CPU renderer and reports the fallback honestly;
+// SelectRenderer carries the reason).
 func NewGPURenderer() *GPURenderer {
-	return newGPURendererFor(&wgpu.RequestAdapterOptions{})
+	g, _ := newGPURendererFull(PrefAuto)
+	return g
+}
+
+// NewGPURendererWithPreference builds the GPU renderer for an explicit
+// preference. It returns nil plus the honest failure/fallback info.
+func NewGPURendererWithPreference(p Preference) (*GPURenderer, BackendInfo) {
+	return newGPURendererFull(p)
 }
 
 // newGPURendererFor builds the GPU renderer against a specific adapter
 // request (tests force the noop fallback adapter to prove the full
 // render/readback pipeline deterministically on any host).
 func newGPURendererFor(opts *wgpu.RequestAdapterOptions) *GPURenderer {
-	g := &GPURenderer{cpu: NewCPURenderer()}
-	inst, err := wgpu.CreateInstance(nil)
+	g, _ := newGPURendererFull(PrefAuto, opts)
+	return g
+}
+
+// newGPURendererFull is the single construction path. opts==nil uses a
+// default adapter request (no forced fallback).
+func newGPURendererFull(p Preference, opts ...*wgpu.RequestAdapterOptions) (*GPURenderer, BackendInfo) {
+	g := &GPURenderer{cpu: NewCPURenderer(), preference: p}
+	inst, err := wgpu.CreateInstance(&wgpu.InstanceDescriptor{Backends: instanceBackendsFor(p)})
 	if err != nil {
-		g.info = BackendInfo{Backend: BackendGPU, GpuState: GpuNone,
+		info := BackendInfo{Backend: BackendGPU, GpuState: GpuNone,
 			Detail: fmt.Sprintf("wgpu instance creation failed: %v", err)}
-		return nil
+		return nil, info
 	}
 	// The instance, adapter and device stay alive for the renderer's
 	// lifetime (released in Close); releasing the instance here would
 	// invalidate the device.
 	g.instance = inst
-	adapter, err := inst.RequestAdapter(opts)
-	if err != nil || adapter == nil {
-		g.info = BackendInfo{Backend: BackendGPU, GpuState: GpuNone,
-			Detail: "no GPU adapter available on this host (expected on headless machines)"}
-		return nil
+	req := &wgpu.RequestAdapterOptions{ForceFallbackAdapter: p == PrefSoftware}
+	if len(opts) > 0 && opts[0] != nil {
+		req = opts[0]
 	}
+	adapter, err := inst.RequestAdapter(req)
+	if err != nil || adapter == nil {
+		reason := "no GPU adapter available on this host (expected on headless machines)"
+		if err != nil {
+			reason = fmt.Sprintf("adapter request failed: %v", err)
+		} else if p != PrefAuto {
+			reason = fmt.Sprintf("no adapter for the explicitly requested %q backend on this host", p)
+		}
+		info := BackendInfo{Backend: BackendGPU, GpuState: GpuNone, Detail: reason}
+		return nil, info
+	}
+	// OWNERSHIP: the adapter must be kept reachable for the device
+	// lifetime and released in Close. (It previously leaked out of
+	// scope here while the comment claimed otherwise.)
+	g.adapter = adapter
 	info := adapter.Info()
 	api := backendName(info.Backend)
 	if api == "unknown" || api == "software" {
@@ -168,22 +280,30 @@ func newGPURendererFor(opts *wgpu.RequestAdapterOptions) *GPURenderer {
 		Backend: BackendGPU, GpuState: GpuDetected,
 		Adapter: info.Name, Vendor: info.Vendor, Driver: info.Driver,
 		BackendAPI: api,
+		DeviceType: deviceTypeName(info.DeviceType),
+		VendorID:   info.VendorID, DeviceID: info.DeviceID,
 	}
 	dev, err := adapter.RequestDevice(nil)
 	if err != nil {
 		g.info.Detail = fmt.Sprintf("device creation failed: %v", err)
-		return nil
+		g.releaseGPU()
+		return nil, g.info
 	}
 	g.device = dev
 	g.queue = dev.Queue()
 	g.info.GpuState = GpuAvailable
 	if err := g.buildPipeline(); err != nil {
-		g.device.Release()
-		g.device = nil
 		g.info.Detail = fmt.Sprintf("pipeline build failed: %v", err)
-		return nil
+		g.releaseGPU()
+		return nil, g.info
 	}
-	return g
+	if p == PrefVulkan && api != "vulkan" || p == PrefDX12 && api != "dx12" {
+		// Defense in depth: the backend mask should make this
+		// impossible; if a backend mismatch ever occurs it is recorded,
+		// never silently relabeled.
+		g.info.Detail = fmt.Sprintf("preference %q requested but adapter reports %q", p, api)
+	}
+	return g, g.info
 }
 
 func backendName(b gputypes.Backend) string {
@@ -275,6 +395,16 @@ func (g *GPURenderer) Info() BackendInfo { return g.info }
 
 // Close releases GPU resources.
 func (g *GPURenderer) Close() {
+	g.releaseGPU()
+	if g.cpu != nil {
+		g.cpu.Close()
+	}
+}
+
+// releaseGPU releases adapter/device resources deterministically. It is
+// used both by Close and by construction failure paths so a partially
+// created renderer never leaks a device or adapter.
+func (g *GPURenderer) releaseGPU() {
 	if g.device != nil {
 		if g.readback != nil {
 			g.readback.Release()
@@ -286,12 +416,17 @@ func (g *GPURenderer) Close() {
 		}
 		if g.bindGroup != nil {
 			g.bindGroup.Release()
+			g.bindGroup = nil
 		}
 		if g.uniform != nil {
 			g.uniform.Release()
+			g.uniform = nil
 		}
 		if g.pipeline != nil {
 			g.pipeline.Release()
+			pipeline := g.pipeline
+			_ = pipeline
+			g.pipeline = nil
 		}
 		g.device.Release()
 		g.device = nil
@@ -303,9 +438,6 @@ func (g *GPURenderer) Close() {
 	if g.instance != nil {
 		g.instance.Release()
 		g.instance = nil
-	}
-	if g.cpu != nil {
-		g.cpu.Close()
 	}
 }
 
@@ -323,9 +455,15 @@ func (g *GPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 		return nil, fmt.Errorf("render: invalid frame size %dx%d", in.Width, in.Height)
 	}
 	if err := g.renderGPU(in); err != nil {
-		// device loss / adapter failure: report and fall back
+		// device loss / adapter failure: report and fall back. A
+		// lost device is named explicitly (wgpu.ErrDeviceLost) so
+		// the reason is not confused with a transient error.
+		if errors.Is(err, wgpu.ErrDeviceLost) {
+			g.info.Detail = "device lost: " + err.Error()
+		} else {
+			g.info.Detail = err.Error()
+		}
 		g.info.GpuState = GpuFallback
-		g.info.Detail = err.Error()
 		return g.cpu.RenderFrame(in)
 	}
 	return g.lastImage, nil
@@ -345,7 +483,15 @@ func (g *GPURenderer) renderGPU(in visualizer.FrameInput) error {
 
 	// build uniform data (little-endian; the exact layout mirrors the
 	// WGSL Params struct)
-	data := make([]byte, uniformSize)
+	// Reused staging buffer (allocation-free steady state; owned by the
+	// renderer, uploaded into the GPU uniform buffer each frame).
+	if len(g.uniformData) != uniformSize {
+		g.uniformData = make([]byte, uniformSize)
+	}
+	data := g.uniformData
+	for i := range data {
+		data[i] = 0
+	}
 	putF32 := func(off int, v float64) {
 		bits := f32bits(v)
 		data[off] = byte(bits)
@@ -357,12 +503,15 @@ func (g *GPURenderer) renderGPU(in visualizer.FrameInput) error {
 	putF32(4, float64(h))
 	putF32(8, in.Time)
 	putF32(12, in.Audio.Bass*cfg.Sensitivity)
-	putF32(16, in.Audio.Bass*cfg.PulseResponse*0.5+in.Audio.BeatPhase*0) // beat pulse approximated by bass impact
+	// beat pulse approximated by bass impact (WGSL offset 16)
+	putF32(16, in.Audio.Bass*cfg.PulseResponse*0.5)
 	putF32(20, 1.0+cfg.Glow*0.2)
 	putF32(24, 0.15+0.1*float64(cfg.MotionStyle%3))
-	rotSpeed := 0.15 + 0.1*float64(cfg.MotionStyle%3)
-	putF32(24, rotSpeed)
-	// bins: 64 floats at offset 32
+	// bins: 64 floats at offset 48 — the WGSL Params struct aligns
+	// the vec4f array to 16 bytes after the vec2f pad at offset 28,
+	// so the array starts at 48 (NOT 32; the previous offset
+	// misaligned every spectrum bin and shifted the palette by 16
+	// bytes inside the shader).
 	bins := in.Audio.Bins
 	if len(bins) < visualizer.NumVizBins {
 		bins = visualizer.InterpolateBins(bins, cfg.SpectrumTilt)
@@ -371,15 +520,15 @@ func (g *GPURenderer) renderGPU(in visualizer.FrameInput) error {
 		if i >= 64 {
 			break
 		}
-		putF32(32+i*4, v*cfg.Sensitivity)
+		putF32(uniformBinsAt+i*4, v*cfg.Sensitivity)
 	}
-	// colors at offset 288 (5 vec4s: low, mid, high, peak, back)
+	// colors at offset 304 (5 vec4s: low, mid, high, peak, back)
 	cols := [][3]float64{pal.Low, pal.Mid, pal.High, pal.Peak, pal.Back}
 	for ci, c := range cols {
-		putF32(288+ci*16, c[0])
-		putF32(288+ci*16+4, c[1])
-		putF32(288+ci*16+8, c[2])
-		putF32(288+ci*16+12, 1)
+		putF32(uniformColorsAt+ci*16, c[0])
+		putF32(uniformColorsAt+ci*16+4, c[1])
+		putF32(uniformColorsAt+ci*16+8, c[2])
+		putF32(uniformColorsAt+ci*16+12, 1)
 	}
 	if err := g.queue.WriteBuffer(g.uniform, 0, data); err != nil {
 		return fmt.Errorf("uniform upload: %w", err)
@@ -482,6 +631,10 @@ func (g *GPURenderer) renderGPU(in visualizer.FrameInput) error {
 		_ = g.readback.Unmap()
 		return fmt.Errorf("readback short: %d < %d", len(raw), rowBytes*h)
 	}
+	// A fresh image per frame: callers (export encoder, Fyne canvas)
+	// may retain the returned image past the next call, so the readback
+	// buffer itself must not be handed out twice. The per-frame
+	// allocation is bounded by the capped frame size.
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := 0; y < h; y++ {
 		src := raw[y*rowBytes : y*rowBytes+w*4]

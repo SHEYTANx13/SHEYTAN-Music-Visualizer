@@ -1,16 +1,29 @@
 name: codeql
 
-# CodeQL security analysis for SHEYTAN Music Visualizer (Phase 1).
-# Languages: go (manual build with real Fyne prerequisites) and actions
-# (build-mode: none). This is a SEPARATE workflow run from build-desktop;
-# its logs use a distinct artifact name and are not inputs to the
-# build-desktop log collector.
+# CodeQL security analysis for SHEYTAN Music Visualizer.
+# Languages: go (manual traced build with the REAL production flags:
+# CGO + -tags goffi_static + Fyne prerequisites) and actions
+# (build-mode: none).
+#
+# Invocation model (no duplicate scans, no dropped coverage):
+#   - push to main / pull_request: analyzed by build-desktop.yml, which
+#     calls this reusable workflow in the same run; its evidence flows
+#     into the single log.txt artifact of that run.
+#   - schedule (weekly) / workflow_dispatch: this workflow runs
+#     standalone and produces its own single log.txt artifact via the
+#     collect job below.
+# Push/PR triggers were removed from this file only because the same
+# events are covered through the reusable invocation; nothing was
+# silently dropped.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_call:
+    inputs:
+      called:
+        description: "Internal: true when invoked from build-desktop.yml (the caller aggregates the evidence)"
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '17 3 * * 1' # weekly, Monday 03:17 UTC
   workflow_dispatch:
@@ -46,7 +59,11 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
+      # goffi_static: required when Fyne (CGO) and wgpu (goffi FFI) link
+      # in one binary; the traced build must match the production build.
       - name: Install Fyne native prerequisites (go matrix only)
         if: matrix.language == 'go'
         run: |
@@ -60,14 +77,16 @@ jobs:
               gcc pkg-config \
               libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
               libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev \
-              libwayland-dev libxkbcommon-dev xorg-dev
+              libwayland-dev libxkbcommon-dev
+            echo "=== pkg-config modules ==="
+            pkg-config --modversion gl egl x11 xrandr xinerama xcursor xi xxf86vm wayland-client xkbcommon
           } 2>&1 | tee ci-logs/codeql-prereq.log
 
       - name: go vet quality gate (before tracing, go matrix only)
         if: matrix.language == 'go'
         run: |
           set -o pipefail
-          go vet ./... 2>&1 | tee ci-logs/codeql-go-vet.log
+          go vet -tags goffi_static ./... 2>&1 | tee ci-logs/codeql-go-vet.log
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
@@ -75,18 +94,23 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
 
+      # Manual traced build with the exact production configuration, so
+      # the extractor captures the code that actually ships.
       - name: Manual traced build (go matrix only)
         if: matrix.language == 'go' && matrix.build-mode == 'manual'
         run: |
           set -o pipefail
-          go build ./... 2>&1 | tee ci-logs/codeql-go-build.log
+          go build -tags goffi_static ./... 2>&1 | tee ci-logs/codeql-go-build.log
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           category: '/language:${{ matrix.language }}'
 
-      - name: Upload CodeQL log part (distinct artifact; separate workflow)
+      # Temporary internal artifact; the aggregator (collect-logs in
+      # build-desktop.yml for called runs, the collect job below for
+      # standalone runs) deletes it after producing the single log.txt.
+      - name: Upload CodeQL log part (temporary internal artifact)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -94,3 +118,144 @@ jobs:
           path: |
             ci-logs/**
           if-no-files-found: ignore
+
+  # Standalone runs (schedule / workflow_dispatch) still get ONE
+  # consolidated, truthful log.txt artifact. When called from
+  # build-desktop.yml this job is skipped and the caller aggregates.
+  collect:
+    name: collect-logs (standalone codeql evidence)
+    needs: analyze
+    if: always() && inputs.called != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write # delete the temporary codeql-logs-part after aggregation
+      security-events: read # fetch open code scanning alerts for the analyzed commit
+    steps:
+      - name: Checkout (collector source)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Download log parts (namespaced, never flattened)
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ci-parts
+          merge-multiple: false
+
+      - name: Write run manifest
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          COMMIT_SHA: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          RUNNER_OS_LABEL: ${{ runner.os }}
+          RESULT_ANALYZE: ${{ needs.analyze.result }}
+        run: |
+          mkdir -p ci-parts
+          {
+            echo "=== download step outcome: ${{ steps.download.outcome }} conclusion: ${{ steps.download.conclusion }} ==="
+            ls -laR ci-parts || true
+          } | tee ci-parts/download-diagnostics.txt || true
+          cat > ci-parts/manifest.json <<MANIFEST
+          {
+            "product": "SHEYTAN Music Visualizer",
+            "repository": "${REPO}",
+            "workflow": "codeql.yml",
+            "run_id": "${RUN_ID}",
+            "attempt": "${RUN_ATTEMPT}",
+            "commit_sha": "${COMMIT_SHA}",
+            "ref": "${REF}",
+            "event": "${EVENT}",
+            "runner_os": "${RUNNER_OS_LABEL}",
+            "codeql": {
+              "workflow": "codeql.yml",
+              "job": "analyze",
+              "result": "${RESULT_ANALYZE}"
+            },
+            "jobs": [
+              {"name": "analyze", "result": "${RESULT_ANALYZE}", "artifact": "codeql-logs-part", "required": true}
+            ]
+          }
+          MANIFEST
+          cat ci-parts/manifest.json
+
+      - name: Build collector binary
+        run: |
+          set -o pipefail
+          go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector
+          echo "collector build OK"
+
+      - name: Run collector
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          mkdir -p ci-out
+          ./bin/ci-log-collector \
+            --report ci-out/log.txt \
+            --parts-root ci-parts \
+            --manifest ci-parts/manifest.json \
+            --github-repo "${GITHUB_REPOSITORY}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}"
+          rc=$?
+          echo "$rc" > collector.rc
+          echo "collector exit code: $rc"
+          exit 0
+
+      - name: Validate final log.txt before upload
+        run: |
+          test -s ci-out/log.txt || { echo "ERROR: consolidated log.txt missing or empty"; exit 1; }
+          size=$(stat -c%s ci-out/log.txt)
+          echo "log.txt validated: $size bytes"
+
+      - name: Upload the single consolidated diagnostics artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: log.txt
+          path: ci-out/log.txt
+          if-no-files-found: error
+
+      - name: Delete temporary log-part artifacts (single-artifact guarantee)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
+          tmp=$(mktemp)
+          curl -sfL --retry 2 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "${api}?per_page=100" -o "$tmp"
+          if [ ! -s "$tmp" ]; then
+            echo "WARNING: could not list artifacts for cleanup (report already uploaded); temporary part artifacts may remain visible."
+            exit 0
+          fi
+          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | endswith("-logs-part")) or (.name == "consolidated-run-log")) | .id' "$tmp")
+          for id in $ids; do
+            url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
+            if curl -sf -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$url"; then
+              echo "deleted temporary artifact ${id}"
+            else
+              echo "WARNING: deleting artifact ${id} failed; it may remain visible (report is unaffected)."
+            fi
+          done
+          rm -f "$tmp"
+
+      - name: Fail closed after the report upload attempt
+        run: |
+          rc="$(cat collector.rc)"
+          echo "collector exit code: $rc"
+          exit "$rc"
