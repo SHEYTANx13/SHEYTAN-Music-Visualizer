@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-linux.sh — Phase 1 local build/verification entry point (Linux).
+# build-linux.sh — Phase 2 local build/verification entry point (Linux).
 #
 # Usage:
 #   scripts/build/build-linux.sh [--mode preflight|desktop]
@@ -8,16 +8,23 @@
 #   preflight  Static gates only: toolchain report, gofmt, tidy, tests,
 #              vet, package build. Used by the CI preflight job.
 #   desktop    All preflight gates plus the native Linux x64 desktop
-#              executable, --version and --self-check runtime checks.
-#              Default.
+#              executable, --version/--self-check runtime checks, race
+#              tests, govulncheck and the export/GPU/audio validation
+#              fixtures. Default.
 #
 # Contract:
 #   - Every command's stdout+stderr is captured from the first byte into
-#     ci-logs/phase1-build.log with a structured record and the original
+#     ci-logs/phase2-build.log with a structured record and the original
 #     exit code.
 #   - Independent gates keep running after a failure; dependent gates are
 #     recorded as SKIPPED, never as passed.
 #   - The script exits non-zero if any required gate failed.
+#
+# Build tag note: the WGPU dependency (github.com/go-webgpu/goffi) uses
+# its own fakecgo/dlopen stubs that the Go internal linker cannot place
+# into a CGO binary; -tags goffi_static selects goffi's static dlopen
+# path and is REQUIRED for every build that links Fyne + wgpu together
+# (see ai-notes.md). The tag is harmless on Windows.
 
 set -u
 umask 022
@@ -38,14 +45,14 @@ cd "$REPO_ROOT"
 
 LOG_DIR="$REPO_ROOT/ci-logs"
 mkdir -p "$LOG_DIR"
-CI_LOG_FILE="$LOG_DIR/phase1-build.log"
+CI_LOG_FILE="$LOG_DIR/phase2-build.log"
 export CI_LOG_FILE
-: >"$CI_LOG_FILE" # fresh local run; the packaged copy is evidence/phase1-build.log
+: >"$CI_LOG_FILE" # fresh local run; the packaged copy is evidence/phase2-build.log
 
 # shellcheck source=../ci/capture.sh
 source "$REPO_ROOT/scripts/ci/capture.sh"
 
-JOB="phase1-linux-build"
+JOB="phase2-linux-build"
 FAILURES=0
 FAILED_GATES=""
 SKIPPED_GATES=""
@@ -61,15 +68,18 @@ skip_gate() {
 }
 
 note "=============================================================="
-note "SHEYTAN MUSIC VISUALIZER — PHASE 1 LOCAL VERIFICATION (LINUX)"
+note "SHEYTAN MUSIC VISUALIZER — PHASE 2 LOCAL VERIFICATION (LINUX)"
 note "Product:  SHEYTAN Music Visualizer (SHEYTAN™, licensor Parsaetak)"
 note "Mode:     $MODE"
 note "Host:     $(uname -srm)"
 note "Started:  $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+note "Build tag: goffi_static (Fyne + wgpu link compatibility)"
 note "=============================================================="
 
+GO_TAGS="-tags goffi_static"
+
 # ---- toolchain report ------------------------------------------------------
-CI_TOOL_CONTEXT="gate:toolchain" ci_capture "$JOB" toolchain-report bash -c 'go version; echo "GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=$(go env CGO_ENABLED) GOTOOLCHAIN=$(go env GOTOOLCHAIN)"; echo "GOMOD=$(go env GOMOD)"; gcc --version | head -1; pkg-config --version' ||
+CI_TOOL_CONTEXT="gate:toolchain" ci_capture "$JOB" toolchain-report bash -c 'go version; echo "GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=$(go env CGO_ENABLED) GOTOOLCHAIN=$(go env GOTOOLCHAIN)"; echo "GOMOD=$(go env GOMOD)"; gcc --version | head -1; pkg-config --version; ffmpeg -version 2>/dev/null | head -1 || echo "ffmpeg: NOT AVAILABLE"' ||
   fail_gate toolchain-report
 
 # ---- static gates (all independent; always run) ----------------------------
@@ -82,13 +92,16 @@ CI_TOOL_CONTEXT="gate:go-mod-tidy" ci_capture "$JOB" go-mod-tidy go mod tidy ||
 CI_TOOL_CONTEXT="gate:go-mod-tidy" ci_capture "$JOB" go-mod-tidy-verify go mod tidy -diff ||
   fail_gate go-mod-tidy-verify
 
-CI_TOOL_CONTEXT="gate:go-test" ci_capture "$JOB" go-test go test ./... ||
+CI_TOOL_CONTEXT="gate:go-mod-verify" ci_capture "$JOB" go-mod-verify go mod verify ||
+  fail_gate go-mod-verify
+
+CI_TOOL_CONTEXT="gate:go-test" ci_capture "$JOB" go-test go test $GO_TAGS ./... ||
   fail_gate go-test
 
-CI_TOOL_CONTEXT="gate:go-vet" ci_capture "$JOB" go-vet go vet ./... ||
+CI_TOOL_CONTEXT="gate:go-vet" ci_capture "$JOB" go-vet go vet $GO_TAGS ./... ||
   fail_gate go-vet
 
-CI_TOOL_CONTEXT="gate:go-build" ci_capture "$JOB" go-build-packages go build ./... ||
+CI_TOOL_CONTEXT="gate:go-build" ci_capture "$JOB" go-build-packages go build $GO_TAGS ./... ||
   fail_gate go-build-packages
 
 if [ "$MODE" = "preflight" ]; then
@@ -103,7 +116,7 @@ if [ "$MODE" = "desktop" ]; then
   if [ -n "${SHEYTAN_BUILD_VERSION:-}" ]; then
     LDFLAGS=(-ldflags "-X github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo.version=${SHEYTAN_BUILD_VERSION}")
   fi
-  if CI_TOOL_CONTEXT="gate:build-exe" ci_capture "$JOB" build-executable go build -trimpath "${LDFLAGS[@]+"${LDFLAGS[@]}"}" -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer; then
+  if CI_TOOL_CONTEXT="gate:build-exe" ci_capture "$JOB" build-executable go build -trimpath $GO_TAGS "${LDFLAGS[@]+"${LDFLAGS[@]}"}" -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer; then
     EXE_OK=1
   else
     fail_gate build-executable
@@ -112,13 +125,41 @@ if [ "$MODE" = "desktop" ]; then
   if [ "$EXE_OK" -eq 1 ]; then
     CI_TOOL_CONTEXT="runtime:--version" ci_capture "$JOB" run-version ./bin/sheytan-music-visualizer --version ||
       fail_gate run-version
-    # --self-check writes the app log under the user config directory;
-    # on headless CI hosts this is $HOME/.config and is writable.
-    CI_TOOL_CONTEXT="runtime:--self-check" ci_capture "$JOB" run-self-check ./bin/sheytan-music-visualizer --self-check ||
+    CI_TOOL_CONTEXT="runtime:--self-check" ci_capture "$JOB" run-self-check env SHEYTAN_LOG_DIR="$(pwd)/ci-logs/app-logs" ./bin/sheytan-music-visualizer --self-check ||
       fail_gate run-self-check
   else
     skip_gate run-version "executable build failed"
     skip_gate run-self-check "executable build failed"
+  fi
+
+  # race tests on concurrent core packages
+  CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race $GO_TAGS -timeout 480s ./internal/audio/... ./internal/playback/... ./internal/dsp/... ./internal/export/... ./internal/studio/... ./internal/project/... ./internal/render/... ||
+    fail_gate go-test-race
+
+  # export validation (real FFmpeg; skips honestly when unavailable)
+  CI_TOOL_CONTEXT="gate:export-validation" ci_capture "$JOB" export-validation go test $GO_TAGS -timeout 560s -v -run 'TestExport1080p30|TestExport4K24|TestExportCancel|TestExportMissingEncoderFails' ./internal/export/ ||
+    fail_gate export-validation
+
+  # audio pipeline validation (decoders, resampler, cache)
+  CI_TOOL_CONTEXT="gate:audio-validation" ci_capture "$JOB" audio-validation go test $GO_TAGS -timeout 240s ./internal/audio/ ./internal/playback/ ||
+    fail_gate audio-validation
+
+  # GPU validation: wgpu render/readback proof on the noop/software
+  # adapter (honest: this host has no hardware GPU; a hardware run must
+  # be executed on a real machine and recorded separately)
+  CI_TOOL_CONTEXT="gate:gpu-validation" ci_capture "$JOB" gpu-validation go test $GO_TAGS -timeout 240s -v ./internal/render/ ||
+    fail_gate gpu-validation
+
+  # studio end-to-end integration
+  CI_TOOL_CONTEXT="gate:studio-integration" ci_capture "$JOB" studio-integration go test $GO_TAGS -timeout 380s ./internal/studio/ ||
+    fail_gate studio-integration
+
+  # govulncheck when available
+  if command -v govulncheck >/dev/null 2>&1; then
+    CI_TOOL_CONTEXT="gate:govulncheck" ci_capture "$JOB" govulncheck govulncheck ./... ||
+      fail_gate govulncheck
+  else
+    skip_gate govulncheck "govulncheck not installed on this host"
   fi
 fi
 

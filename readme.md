@@ -2,91 +2,74 @@
 
 **SHEYTAN™** · Licensor: Parsaetak · © 2024–2026 Parsaetak. All rights reserved.
 
-SHEYTAN Music Visualizer is a **local-first desktop studio** that analyzes a
-song and generates a unique, music-reactive visual identity from its
-frequency, rhythm, dynamics and musical structure — and eventually exports
-synchronized MP4 music videos up to 3840×2160 (4K). Nothing runs in the
-cloud: analysis, rendering and export happen on your machine.
+SHEYTAN Music Visualizer is a **local-first desktop studio** that imports a
+song, analyzes it locally, derives a deterministic per-track visual identity
+("Song DNA") and renders music-reactive visuals in a native Fyne studio —
+then exports synchronized H.264/AAC MP4 videos up to 3840×2160 (4K). Nothing
+runs in the cloud: decoding, analysis, rendering and encoding happen on your
+machine. No account, no telemetry, no bundled codec binaries.
 
-> Phase 1 status: this repository is the **foundation build**. It compiles,
-> starts a minimal placeholder window, and proves the build/CI/log-capture
-> pipeline. No media, visualizer, GPU or export functionality exists yet —
-> see [roadmap.md](roadmap.md) for the staged plan.
+> Phase 2 status: the studio slice is implemented and locally verified on
+> Linux x64 (build, tests, race tests, real MP4 export proofs at 1080p and
+> 4K, wgpu render/readback proof). See [roadmap.md](roadmap.md) for the
+> honest status of every capability and [ai-notes.md](ai-notes.md) for the
+> evidence trail of the current session.
 
 ---
 
 ## Visual identity
 
 The design direction is **black and red — hellish / infernal**, executed in a
-premium, cinematic, restrained way: black dominates, red is the accent, and
-no skulls, glow storms or saturated surfaces. The identity tokens are defined
-once in `internal/brand/brand.go` (obsidian background `#080808`, volcanic
-surfaces, dark-blood crimson `#9F0B18`, infernal action red `#D51D2A`, ember
-highlights). Phase 1 only records these rules; the visual design itself is a
-Phase 2 deliverable.
+premium, cinematic, restrained way: black dominates, red is the accent, warm
+white is reserved for text and peaks. The identity tokens are defined once in
+`internal/brand/brand.go` (obsidian background `#080808`, volcanic surfaces,
+dark-blood crimson `#9F0B18`, infernal action red `#D51D2A`, ember
+highlights) and drive the real Fyne theme (`ui/fyne/theme.go`) plus the four
+brand palettes used by the visualizer (`internal/visualizer`).
 
-## Technology
+## What works today (Phase 2 slice)
 
-| Aspect | Value |
+| Capability | Status |
 |---|---|
-| Implementation language | Go (1.27 toolchain line, per `go.mod`) |
-| Desktop framework | Fyne v2.8.x (`fyne.io/fyne/v2`) |
-| Initial target | Windows x64 (Linux x64 is a required CI build target) |
-| Product principle | Local-only: no cloud rendering, no accounts, no telemetry |
-| Future goal | Real GPU acceleration for rendering, with a tested CPU fallback |
+| Studio shell: top bar, library/presets rail, live preview, inspector, transport, export dialog | DELIVERED (Fyne v2.8.2, hellish theme) |
+| Import WAV (int16/int24/int32 + IEEE float32), MP3, FLAC, Ogg/Vorbis via first-party Go decoders | DELIVERED (`internal/audio`) |
+| Canonical PCM pipeline: 48 kHz stereo float32, disk-backed cache, Kaiser-sinc resampling, atomic writes | DELIVERED |
+| Playback: Oto v3 single context/player, play/pause/stop/seek/volume, buffering-aware playhead | DELIVERED (device-less hosts fall back to an honest silent mode) |
+| DSP: Hann FFT-2048/hop-512, bass/mid/treble bands, RMS, spectral centroid, flux/onsets, BPM with confidence | DELIVERED (`internal/dsp`) |
+| Song DNA: deterministic per-track identity from measured features + content fingerprint + user seed | DELIVERED (`internal/songdna`) |
+| Visualizer modes: Spectrum Bars, Radial Spectrum, Waveform, Particle Field (bounded, seeded particles) | DELIVERED (`internal/visualizer`, `internal/render`) |
+| CPU renderer: deterministic software rendering used by preview and export | DELIVERED |
+| GPU renderer: wgpu (Go-controlled WebGPU) radial-mode shader with verified readback; hardware adapters on Vulkan/DX12/Metal hosts | DELIVERED as code + software-adapter proof; **hardware-GPU execution: NOT AVAILABLE on the verification host** |
+| MP4 export: 1280×720 → 3840×2160 at 24/30/60 fps, H.264 + AAC via local FFmpeg, streamed frames, real progress, cancellation, ffprobe validation | DELIVERED (`internal/export`; verified 1080p30 and 4K24 proofs) |
+| Projects: versioned JSON, atomic save, validation, relink, presets (Hellfire Pulse, Crimson Orbit, Obsidian Wave, Ember Storm) | DELIVERED (`internal/project`) |
+| Windows x64 build | DELIVERED as script/workflow definition; **native Windows execution: NOT RUN on this Linux verification host** |
 
-## Architecture (current and planned)
+## Supported formats
 
-- **Go application core** — owns lifecycle, project model, analysis
-  coordination, render scheduling, configuration, diagnostics and (future)
-  export orchestration. First-party logic stays Go-only and local.
-- **Fyne desktop shell** — owns the native desktop window/UI only; it is not
-  the media renderer. *(Only a minimal placeholder window exists today.)*
-- **Audio analysis / DSP** — *(planned, Phase 2)* deterministic FFT/STFT,
-  band energies, onset and tempo estimation behind narrow Go interfaces.
-- **Deterministic visual rendering** — *(planned, Phase 2)* one shared
-  render model for UI preview and exported frames; the preview is never the
-  source of truth for export.
-- **GPU backend** — *(planned, Phase 2)* Direct3D 12 / WGPU research with a
-  mandatory proof gate (adapter + workload + readback evidence) and a CPU
-  fallback. Phase 1 claims no acceleration.
-- **Local video encoding** — *(planned, Phase 2)* MP4/H.264/AAC export up to
-  4K with duration sync and cancellation.
+Input (first-party Go decoders, no external codec process for import):
 
-## Phase 1 — what actually exists
+- **WAV** — RIFF PCM int16/int24/int32 and IEEE float32
+- **MP3** — MPEG Layer III (LAME/Xing gapless aware) via `llehouerou/go-mp3`
+- **FLAC** — via `tphakala/go-flac` (streaming PCM API)
+- **Ogg/Vorbis** — via `jfreymuth/oggvorbis`
 
-| Area | Status |
-|---|---|
-| Minimal Go + Fyne app: window title, placeholder, `--version`, `--self-check` | DELIVERED |
-| Central brand identity + build metadata authorities (`internal/brand`, `internal/buildinfo`) | DELIVERED |
-| Local structured logging with bounded rotation (`internal/logging`) | DELIVERED |
-| CI log capture + consolidated report collector with fixture tests (`internal/cilog`, `cmd/ci-log-collector`) | DELIVERED |
-| Build scripts (Windows PowerShell, Linux Bash) with first-byte capture | DELIVERED |
-| GitHub Actions: `build-desktop.yml` (Windows x64 UCRT64 + Linux x64) and `codeql.yml` (Go + Actions) | DELIVERED (workflow definitions, locally validated; hosted runs: NOT RUN) |
-| Import, playback, FFT, BPM detection, visualizer presets, GPU, MP4 export, studio UI | PLANNED — Phase 2, not implemented |
+M4A/AAC input and other formats are intentionally **not advertised** — the
+registry reports exactly what is registered and tested. The UI's file dialog
+and the decoder registry agree on this list by construction.
 
-## Repository map
+Export: MP4 (H.264 video + AAC audio) through your **locally installed
+FFmpeg/ffprobe**. The application never downloads or bundles an encoder
+binary; export is blocked with a clear message when FFmpeg is missing.
 
-```text
-.github/workflows/    build-desktop.yml, codeql.yml
-cmd/
-  sheytan-music-visualizer/   desktop app entry point (--version, --self-check)
-  ci-log-collector/           consolidated run-log collector (stdlib only)
-internal/
-  brand/          single source of truth: names, trademark, palette tokens
-  buildinfo/      single version/build metadata authority
-  logging/        local structured logging (slog, bounded rotation)
-  cilog/          consolidated CI report engine + fixture tests
-ui/fyne/          minimal Fyne launch surface (Phase 1 placeholder)
-scripts/
-  build/          build-linux.sh, build-windows.ps1
-  ci/             capture.sh (Bash), Capture-Step.ps1 (PowerShell)
-evidence/         phase1-build.log (packaged local verification transcript)
-license.md        sole licensing authority (Parsaetak Proprietary License v1.1)
-roadmap.md        full product plan and phase boundary
-agent.md          operating manual for coding agents
-ai-notes.md       durable AI engineering record
-```
+## Audio pipeline in one paragraph
+
+Every imported track is decoded once by an owned worker goroutine into a
+**canonical cache**: 48 000 Hz, stereo, float32 little-endian, stored as a
+raw `.f32` file, a provenance sidecar `.json` (fingerprint, decoder,
+resampler versions) and a canonical `.wav` wrapper used for export audio.
+Cache identity is the SHA-256 content fingerprint — never filename or mtime.
+Playback, analysis and export all read the finished cache; non-thread-safe
+decoders are never shared across goroutines.
 
 ## Build prerequisites
 
@@ -94,17 +77,22 @@ ai-notes.md       durable AI engineering record
 - **Linux**: `gcc`, `pkg-config` and the Fyne native libraries
   (`libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libwayland-dev
-  libxkbcommon-dev xorg-dev` on Ubuntu 24.04).
+  libxkbcommon-dev xorg-dev` on Debian/Ubuntu).
 - **Windows**: MSYS2 **UCRT64** toolchain (not the deprecated MINGW64):
   `mingw-w64-ucrt-x86_64-gcc` and `mingw-w64-ucrt-x86_64-pkgconf`, with
   `CGO_ENABLED=1 GOOS=windows GOARCH=amd64`.
+- **FFmpeg/ffprobe 6+** on PATH (or a user-configured location) — only
+  needed for MP4 export, not for import/playback/preview.
+- Build tag: `-tags goffi_static` is **required** for binaries that link
+  Fyne (CGO) and wgpu (goffi FFI) together; the build scripts and CI apply
+  it automatically. See `ai-notes.md` for the linker-conflict evidence.
 
 ## Build and verify
 
 Linux (Bash):
 
 ```bash
-scripts/build/build-linux.sh --mode desktop   # gates + exe + --version + --self-check
+scripts/build/build-linux.sh --mode desktop   # gates + exe + runtime + race + export/GPU proofs
 scripts/build/build-linux.sh --mode preflight # static gates only
 ```
 
@@ -115,29 +103,46 @@ Windows (PowerShell 7+, UCRT64 tools on PATH):
 ```
 
 Every command's stdout/stderr is captured from the first byte into
-`ci-logs/phase1-build.log` with structured records and true exit codes; the
+`ci-logs/phase2-build.log` with structured records and true exit codes; the
 script exits non-zero if any required gate fails.
 
 ## Run
 
 ```bash
-go run ./cmd/sheytan-music-visualizer --version      # product + build metadata
-go run ./cmd/sheytan-music-visualizer --self-check   # foundation invariants, no window
-go run ./cmd/sheytan-music-visualizer                # minimal Phase 1 placeholder window
+go run -tags goffi_static ./cmd/sheytan-music-visualizer --version      # product + build metadata
+go run -tags goffi_static ./cmd/sheytan-music-visualizer --self-check   # invariants incl. decoders, DSP fixture, renderer, ffmpeg probe
+go run -tags goffi_static ./cmd/sheytan-music-visualizer                # the studio window
 ```
+
+## Studio walkthrough
+
+1. **Import Audio…** — pick a WAV/MP3/FLAC/Ogg file. Import runs in the
+   background (real progress; cancellable) and writes the canonical cache.
+2. The analyzer starts automatically; the transport shows the analysis
+   state and the Song DNA line reports **measured** features (brightness,
+   warmth, punch, drive, loudness) plus the suggested mode.
+3. Press **Play**. The central preview renders the actual renderer output
+   synchronized to the audio clock (position derives from samples handed to
+   the device minus the buffered remainder — never a free-running timer).
+4. The **inspector** controls (mode, sensitivity, smoothing, glow, palette,
+   particle density, pulse response, title/subtitle overlay, watermark)
+   mutate the real preview state — the same configuration drives export.
+5. **Save Project** writes a versioned JSON (media reference + fingerprint
+   + settings); **Open Project** restores it and relinks the media.
+6. **Export MP4…** shows the detected FFmpeg version and proven H.264
+   encoders, resolution presets through 4K UHD, 24/30/60 fps, quality
+   presets, real progress (rendered frames + encoder frames), cancel, and
+   an ffprobe validation verdict before the file is finalized atomically.
 
 ## Logs
 
-- **Application logs** (runtime): written by the app to
-  `<user-config-dir>/SHEYTAN Music Visualizer/logs/app.log` (on Windows:
-  `%AppData%\SHEYTAN Music Visualizer\logs\app.log`; on Linux:
-  `$XDG_CONFIG_HOME` or `~/.config/...`). Rotation keeps one bounded backup;
-  `SHEYTAN_LOG_DIR` overrides the directory explicitly.
-- **Build/CI logs**: each build script writes `ci-logs/phase1-build.log`;
-  CI runs upload per-job log parts and one consolidated report produced by
-  `cmd/ci-log-collector` (see `agent.md` for the evidence rules).
-- The packaged Phase 1 verification transcript lives at
-  `evidence/phase1-build.log`.
+- **Application logs** (runtime): `<user-config-dir>/SHEYTAN Music
+  Visualizer/logs/app.log`; `SHEYTAN_LOG_DIR` overrides explicitly.
+- **Data** (canonical PCM cache): `<user-config-dir>/SHEYTAN Music
+  Visualizer/data/pcm-cache`; `SHEYTAN_DATA_DIR` overrides (tests use this).
+- **Build/CI logs**: `ci-logs/phase2-build.log`; CI uploads per-job log
+  parts and one consolidated report (`cmd/ci-log-collector`).
+- The packaged Phase 2 verification transcript lives in `evidence/`.
 
 ## License
 
@@ -145,5 +150,5 @@ Proprietary — see [license.md](license.md) (Parsaetak Proprietary License
 v1.1). SHEYTAN™ is a trademark of Parsaetak; third-party dependencies remain
 under their own licenses as inventoried there.
 
-No CI badges are shown because no public repository URL exists yet; badges
-will be added when the remote is established.
+No CI badges are shown because hosted workflow runs have not been observed
+(no push/PR was made from this session).

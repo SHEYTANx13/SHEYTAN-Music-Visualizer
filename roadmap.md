@@ -58,56 +58,66 @@ restrained. Black dominates; red is the accent. Identity tokens live in
 | Source archive + external handoff note | DELIVERED | ZIP integrity + extracted-tree verification |
 | Minimal window actually launched on screen | NOT RUN on the Phase 1 agent host (headless; no display server) — compiled and `--self-check` verified only | `evidence/phase1-build.log` |
 
-## Phase 2 — studio and media implementation (not started)
+## Phase 2 — studio and media implementation (Phase 2 slice, 2026-11-04)
 
-Organized as milestones in delivery order. Each milestone lists its
-acceptance gate; nothing below is implemented in Phase 1.
+Status after the Phase 2 session (evidence: `evidence/phase2-build.log`,
+`ai-notes.md`). Statuses distinguish what is implemented+verified locally
+from what still requires hardware or hosts this session never had.
 
-1. **Studio foundation UI/UX** — library, import panel, central preview
-   surface, transport, inspector, export settings; adaptive desktop layout;
-   hellish black/red theme; accessible contrast; resizable window.
-   Gate: theme tokens drive real widgets; keyboard navigation works.
-2. **Media foundation** — local file import, metadata, duration/sample
-   rate/channels, decode strategy, cancellation, large-file handling (no
-   whole-track memory load). Gate: import of a real fixture with bounded
-   memory and cancellation proven by test.
-3. **Audio playback and synchronization** — reliable seek/pause/resume,
-   monotonic playback clock, buffering/latency correction, exact frame-time
-   mapping, sample-rate and device changes. Gate: frame-time mapping test
-   against a known fixture with drift assertions.
-4. **DSP / song analysis** — FFT/STFT with documented windowing/hop size;
-   RMS/envelope; frequency band energies; spectral centroid/rolloff/flux;
-   onset detection; beat/tempo estimation with confidence and
-   half/double-time ambiguity handling; manual tempo/offset correction.
-   Analysis must be deterministic and tested against known generated
-   fixtures; estimates are never presented as certainty.
-5. **Song-specific identity (`Song DNA`)** — deterministic DNA derived from
-   analysis + explicit user seed/customization; the same source and
-   settings reproduce the same baseline visual; users can save/override
-   styles. Gate: reproducibility test (same input → identical output hash).
-6. **Visualizer engines** — waveform/oscilloscope, spectrum bars, radial
-   spectrum, particle field, and layered compositions; each responds to
-   appropriate audio features with bounded complexity and parameters, and
-   renders consistently in preview and export. Gate: golden-frame tests per
-   engine at fixed timestamps.
-7. **GPU backend** — research and benchmark actual Go-accessible Direct3D
-   12 / WGPU options on supported Windows hardware; real adapter/workload
-   proof (adapter name, vendor/device IDs, backend, driver version,
-   executed workload, readback); CPU fallback tested on unsupported
-   drivers. Separate `detected`, `available`, `selected`, `executed`,
-   `verified` states; never fake GPU telemetry.
-8. **Export pipeline** — deterministic offline frame rendering; 720p /
-   1080p / 1440p / 4K targets; 24/30/60 FPS where viable; H.264 MP4 with
-   compatible AAC; audio/video duration sync; cancellation/resume;
-   progress; disk-space checks; stream validation (ffprobe-equivalent or
-   native). Gate: a short real fixture exported end-to-end before any
-   delivery claim.
-9. **Presets/projects** — local project save/load, per-song styles,
-   versioned settings schema with backwards migration tests.
-10. **Quality/security** — performance benchmarks, memory bounds,
-    GPU-device-loss recovery, corrupted-media handling, path safety,
-    dependency/license audit, Windows packaging and signing decision,
-    regression discipline.
+1. **Studio foundation UI/UX** — DELIVERED. Full studio shell (top bar,
+   library/presets rail, live preview of actual renderer output, inspector,
+   audio-clock transport, export dialog) with the hellish black/red theme
+   driving real widgets. Keyboard navigation beyond tab order: NOT DONE.
+2. **Media foundation** — DELIVERED. WAV (int16/int24/int32/float32), MP3,
+   FLAC, Ogg/Vorbis import through first-party Go decoders; canonical
+   48 kHz stereo float32 disk cache with fingerprint-keyed sidecars,
+   bounded streaming, cancellation; malformed-input tests.
+   M4A/AAC input: NOT IMPLEMENTED (would require an FFmpeg decoder adapter
+   or a licensed AAC decoder; deliberately not promised).
+3. **Audio playback and synchronization** — DELIVERED (Linux). Oto v3
+   single context/player, seek/pause/stop/volume, buffering-aware playhead
+   with documented latency uncertainty. Windows playback runtime: NOT RUN
+   on this session's Linux host. Manual tempo/offset correction: NOT DONE.
+4. **DSP / song analysis** — DELIVERED. Hann FFT-2048/hop-512 (Gonum),
+   RMS envelope, bass/mid/treble bands, spectral centroid, flux/onset
+   detection with adaptive threshold, BPM estimate with confidence,
+   half/double-time handling, waveform envelope. Verified against
+   generated fixtures (pure tones → bands/centroid; 120 BPM click → BPM;
+   steady tone → unreliable). Rolloff: NOT DONE (not required by P0).
+5. **Song-specific identity (`Song DNA`)** — DELIVERED. Deterministic
+   derivation from measured features + content fingerprint + user seed;
+   reproducibility verified by test; measured-vs-artistic split documented
+   in the UI.
+6. **Visualizer engines** — DELIVERED. Spectrum Bars, Radial Spectrum,
+   Waveform and Particle Field all respond to measured audio features with
+   bounded complexity; preview and export share the same logic, config and
+   scene contract; determinism verified per mode. Layered compositions:
+   NOT DONE.
+7. **GPU backend** — DELIVERED as code with an honest evidence chain.
+   `github.com/gogpu/wgpu` v0.34.7 renders the Radial Spectrum mode
+   through a WGSL fragment shader with submit + verified readback; the
+   full pipeline proof passes on the software adapter and the renderer
+   refuses to label software/noop adapters as GPU. Hardware-GPU execution
+   (Vulkan/DX12/Metal): **NOT AVAILABLE** — the verification host has no
+   GPU/display; must be proven on real hardware before any acceleration
+   claim. CPU fallback always available and verified.
+8. **Export pipeline** — DELIVERED (Linux). Deterministic frame schedule,
+   streamed RGBA to local FFmpeg, canonical-WAV audio, H.264/AAC,
+   720p/1080p/1440p/4K at 24/30/60, quality presets, real progress,
+   cancellation, atomic finalize, ffprobe validation. Verified: 1080p30
+   and 4K24 short-fixture proofs with metadata/duration/codec checks.
+   Windows export runtime: NOT RUN (no Windows host). Hardware encoders
+   (NVENC/QSV/AMF) are offered only after a proof encode; none proven on
+   this host.
+9. **Presets/projects** — DELIVERED. Versioned JSON with validation,
+   atomic save, unknown-field tolerance, media relinking, four built-in
+   presets (Hellfire Pulse, Crimson Orbit, Obsidian Wave, Ember Storm);
+   round-trip tested.
+10. **Quality/security** — PARTIALLY DELIVERED. Race tests pass on the
+    concurrent core packages; `go mod verify`/`tidy -diff` clean;
+    govulncheck: 0 called vulnerabilities; licence inventory updated.
+    Performance benchmarks, GPU-device-loss recovery drills and Windows
+    packaging/signing: NOT DONE.
 
 ## Research questions kept open for Phase 2
 
@@ -138,6 +148,8 @@ explicit research gate with measurable requirements:
 
 ## Phase boundary rule
 
-Phase 1 delivers the foundation only. Phase 2 functions above are `PLANNED`
-and were **not started** as of 2026-11-04. See `ai-notes.md` for the
-evidence-backed current state and the next narrow mission.
+Phase 1 delivered the foundation only. Phase 2 (this session) implemented
+and locally verified the studio slice listed above; every NOT DONE / NOT
+RUN / NOT AVAILABLE item is stated exactly and requires either real
+hardware (Windows host, hardware GPU) or explicit follow-up work. See
+`ai-notes.md` for the evidence-backed state and the next narrow mission.

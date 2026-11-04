@@ -1,15 +1,14 @@
 // Package fyneapp owns the minimal Fyne desktop launch surface for
 // SHEYTAN Music Visualizer.
 //
-// Phase 1 scope: one window, the exact product title, one placeholder
-// that identifies this build as the Phase 1 foundation. No studio UI,
-// navigation, timeline, library, player or visualizer controls — those
-// are Phase 2 deliverables (see roadmap.md).
+// Phase 2 scope: the full studio shell lives in studio.go and
+// actions.go (top bar, library, live visualizer preview, inspector,
+// transport, export dialog). The Phase 1 placeholder window was
+// replaced by the studio in Phase 2.
 //
 // Rule: never create goroutines that mutate Fyne widgets directly.
-// Future asynchronous work must use Fyne's documented UI-thread
-// mechanism (fyne.Do, where supported by the selected Fyne version)
-// with a clear ownership rule.
+// Asynchronous work uses Fyne's documented UI-thread mechanism
+// (fyne.Do) with a clear ownership rule.
 package fyneapp
 
 import (
@@ -21,26 +20,10 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
 )
 
-// Run starts the minimal Fyne application and blocks until the window
-// is closed. It returns a non-nil error on real startup failures.
-func Run() error {
-	a := app.NewWithID(brand.AppID)
-	w := a.NewWindow(brand.WindowTitle())
-
-	title := widget.NewLabelWithStyle(
-		brand.ProductName,
-		fyne.TextAlignLeading,
-		fyne.TextStyle{Bold: true},
-	)
-	note := widget.NewLabel("Phase 1 foundation build. The studio UI, media import, " +
-		"analysis, visualizer engines, GPU rendering and MP4 export arrive in Phase 2. " +
-		"See roadmap.md for the staged plan.")
-	note.Wrapping = fyne.TextWrapWord
-	legal := widget.NewLabel(brand.Copyright)
-	legal.Wrapping = fyne.TextWrapWord
-
-	w.SetContent(container.NewVBox(title, note, legal))
-	w.Resize(fyne.NewSize(640, 420))
-	w.ShowAndRun()
-	return nil
-}
+// Run starts the full studio application; see studio.go (Phase 2).
+// This file keeps the package contract and Phase 1 history.
+var _ = fyne.NewSize
+var _ = container.New
+var _ = widget.NewLabel
+var _ = app.NewWithID
+var _ = brand.ProductName

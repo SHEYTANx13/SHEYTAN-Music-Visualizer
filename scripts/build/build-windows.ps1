@@ -1,17 +1,17 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    build-windows.ps1 — Phase 1 local build/verification entry point
+    build-windows.ps1 — Phase 2 local build/verification entry point
     (Windows x64, MSYS2 UCRT64 toolchain).
 
 .DESCRIPTION
-    Runs the Phase 1 verification gates for the Windows desktop build:
+    Runs the Phase 2 verification gates (studio build, export validation, GPU proof) for the Windows desktop build:
     toolchain report, gofmt, tidy, tests, vet, package build, the native
     Windows x64 executable, --version/--self-check runtime checks, and
     portable-folder staging with a ZIP validation.
 
     Every command's stdout+stderr is captured from the first byte into
-    ci-logs/phase1-build.log with a structured record and the original
+    ci-logs/phase2-build.log with a structured record and the original
     exit code. Independent gates keep running after a failure; dependent
     gates are recorded as SKIPPED, never as passed. The script exits
     non-zero if any required gate failed.
@@ -31,12 +31,15 @@ Set-Location $repoRoot
 
 $logDir = Join-Path $repoRoot "ci-logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$env:CI_LOG_FILE = Join-Path $logDir "phase1-build.log"
+$env:CI_LOG_FILE = Join-Path $logDir "phase2-build.log"
 Set-Content -Path $env:CI_LOG_FILE -Value "" -NoNewline # fresh local run
 
 . (Join-Path $repoRoot "scripts/ci/Capture-Step.ps1")
 
-$job = "phase1-windows-build"
+$job = "phase2-windows-build"
+# goffi_static: required when Fyne (CGO) and wgpu (goffi FFI) link in one
+# binary; harmless on Windows (see ai-notes.md).
+$goTags = "-tags goffi_static"
 $script:failures = 0
 $script:failedGates = @()
 $script:skippedGates = @()
@@ -55,7 +58,7 @@ function Skip-Gate([string]$gate, [string]$reason) {
 
 $started = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 Write-Note "=============================================================="
-Write-Note "SHEYTAN MUSIC VISUALIZER - PHASE 1 LOCAL VERIFICATION (WINDOWS)"
+Write-Note "SHEYTAN MUSIC VISUALIZER - PHASE 2 LOCAL VERIFICATION (WINDOWS)"
 Write-Note "Product:  SHEYTAN Music Visualizer (SHEYTAN trademark, licensor Parsaetak)"
 Write-Note "Host:     $([System.Environment]::OSVersion.VersionString) / $env:PROCESSOR_ARCHITECTURE"
 Write-Note "Started:  $started"
@@ -108,20 +111,20 @@ if ($rc -ne 0) { Fail-Gate "go-mod-tidy" }
 $rc = Capture-Step -Job $job -Step "go-mod-tidy-verify" -ToolContext "gate:go-mod-tidy" -Command { go mod tidy -diff }
 if ($rc -ne 0) { Fail-Gate "go-mod-tidy-verify" }
 
-$rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -Command { go test ./... }
+$rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -Command { go test $goTags ./... }
 if ($rc -ne 0) { Fail-Gate "go-test" }
 
-$rc = Capture-Step -Job $job -Step "go-vet" -ToolContext "gate:go-vet" -Command { go vet ./... }
+$rc = Capture-Step -Job $job -Step "go-vet" -ToolContext "gate:go-vet" -Command { go vet $goTags ./... }
 if ($rc -ne 0) { Fail-Gate "go-vet" }
 
-$rc = Capture-Step -Job $job -Step "go-build-packages" -ToolContext "gate:go-build" -Command { go build ./... }
+$rc = Capture-Step -Job $job -Step "go-build-packages" -ToolContext "gate:go-build" -Command { go build $goTags ./... }
 if ($rc -ne 0) { Fail-Gate "go-build-packages" }
 
 # ---- desktop executable + runtime checks -----------------------------------
 $exeOk = $false
 $exePath = Join-Path $repoRoot "bin\sheytan-music-visualizer.exe"
 $rc = Capture-Step -Job $job -Step "build-executable" -ToolContext "gate:build-exe" -Command {
-    go build -trimpath -o "bin\sheytan-music-visualizer.exe" "./cmd/sheytan-music-visualizer"
+    go build -trimpath $goTags -o "bin\sheytan-music-visualizer.exe" "./cmd/sheytan-music-visualizer"
 }
 if ($rc -eq 0) { $exeOk = $true } else { Fail-Gate "build-executable" }
 

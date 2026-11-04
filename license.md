@@ -170,16 +170,30 @@ repositories); they are reproduced here by reference, not copied.
 |---|---|---|
 | Go 1.27.3 toolchain and standard library | BSD-3-Clause (Go license) | https://go.dev/doc/devel/release — Copyright The Go Authors |
 
-### Direct dependency
+### Direct dependencies
 
 | Module | Version | License (verified in module archive) |
 |---|---|---|
 | fyne.io/fyne/v2 | v2.8.2 | BSD-3-Clause |
+| gonum.org/v1/gonum | v0.17.0 | BSD-3-Clause (Copyright ©2013 The Gonum Authors) |
+| github.com/go-audio/wav | v1.1.0 | Apache-2.0 |
+| github.com/llehouerou/go-mp3 | v1.5.0 | Apache-2.0 |
+| github.com/tphakala/go-flac | v1.4.0 | MIT (Copyright (c) 2026 Tomi P. Hakala) |
+| github.com/jfreymuth/oggvorbis | v1.0.5 | MIT (Copyright (c) 2016 Johann Freymuth) |
+| github.com/ebitengine/oto/v3 | v3.5.1 | Apache-2.0 |
+| github.com/gogpu/wgpu | v0.34.7 | MIT |
 
 Fyne v2.8.2 (https://github.com/fyne-io/fyne, release 2026-10-07) is the
-desktop UI toolkit linked into every desktop build.
+desktop UI toolkit linked into every desktop build. Gonum provides the FFT
+(`gonum.org/v1/gonum/dsp/fourier`). The `go-audio`/`go-mp3`/`go-flac`/
+`oggvorbis` modules are the first-choice local decoders behind the import
+registry. Oto provides local audio playback through one context per
+process. wgpu (`github.com/gogpu/wgpu`, pure Go WebGPU) backs the optional
+GPU renderer behind an internal interface; on hosts without a hardware
+adapter the product falls back to the CPU renderer and reports that
+honestly.
 
-### Modules linked into the Phase 1 desktop binary
+### Modules linked into the Phase 2 desktop binary (transitive of the direct set)
 
 | Module | Version | License (verified) |
 |---|---|---|
@@ -207,7 +221,7 @@ desktop UI toolkit linked into every desktop build.
 | github.com/yuin/goldmark | v1.8.2 | MIT |
 | golang.org/x/image | v0.43.0 | BSD-3-Clause (Copyright The Go Authors) |
 | golang.org/x/net | v0.35.0 | BSD-3-Clause (Copyright The Go Authors) |
-| golang.org/x/sys | v0.30.0 | BSD-3-Clause (Copyright The Go Authors) |
+| golang.org/x/sys | v0.49.0 | BSD-3-Clause (Copyright The Go Authors) |
 | golang.org/x/text | v0.38.0 | BSD-3-Clause (Copyright The Go Authors) |
 
 ### Full module graph (superset of the linked set; build/test/tooling only)
@@ -256,11 +270,34 @@ remains under its own license as verified in its module archive:
 | gopkg.in/check.v1 | v1.0.0-20200227125254-8fa46927fb4f | BSD-3-Clause |
 | gopkg.in/yaml.v3 | v3.0.1 | Apache-2.0 |
 
+### Modules linked into the Phase 2 binary (transitive of the Phase 2 direct set)
+
+| Module | Version | License (verified) |
+|---|---|---|
+| github.com/go-audio/audio | v1.0.0 | Apache-2.0 |
+| github.com/go-audio/riff | v1.0.0 | Apache-2.0 |
+| github.com/tphakala/simd | v1.14.0 | MIT (Copyright (c) 2025 Tomi P. Hakala) |
+| github.com/jfreymuth/vorbis | v1.0.2 | MIT (Copyright (c) 2016 Johann Freymuth) |
+| github.com/jfreymuth/pulse | v0.1.3 | MIT (Copyright (c) 2019 Johann Freymuth) |
+| github.com/ebitengine/purego | v0.11.0 | Apache-2.0 |
+| github.com/gogpu/gpucontext | v0.31.3 | MIT |
+| github.com/gogpu/gputypes | v0.8.2 | MIT |
+| github.com/gogpu/naga | v0.21.2 | MIT |
+| github.com/go-webgpu/webgpu | v0.5.5 | MIT |
+| github.com/go-webgpu/goffi | v0.6.8 | MIT |
+
+FFmpeg/ffprobe are **never bundled or downloaded** by this product. MP4
+export uses the user's locally installed FFmpeg executable strictly as a
+codec/mux adapter; users must obtain a build whose license (LGPL/GPL
+variant) they accept. No FFmpeg redistribution rights are claimed or
+granted by this repository.
+
 Inventory method note: license identifiers above were classified by reading
 each module's license file in the extracted Go module cache
-(GOMODCACHE) during Phase 1 packaging. This inventory is informational;
-the verbatim license text in each module archive is authoritative for that
-module.
+(GOMODCACHE) during Phase 1 packaging and re-verified for the Phase 2
+additions at Phase 2 packaging (2026-11-04). This inventory is
+informational; the verbatim license text in each module archive is
+authoritative for that module.
 
 ---
 

@@ -33,12 +33,15 @@ current user prompt.
 - **Phase 1 (done)**: foundation — buildable Go + Fyne skeleton with a
   placeholder window, identity/buildinfo/logging authorities, build
   scripts, CI workflows, log capture/consolidation, root documents.
-- **Phase 2 (not started)**: studio UI/UX, media import, playback sync,
-  DSP analysis, Song DNA, visualizer engines, GPU backend, export
-  pipeline, presets/projects, quality/security hardening (see
-  `roadmap.md`).
-- Never quietly expand Phase 1 scope into Phase 2, and never mark a
-  Phase 2 feature `DELIVERED` in Phase 1 documents.
+- **Phase 2 (done, 2026-11-04)**: studio slice — studio UI, media import
+  (WAV/MP3/FLAC/Ogg), canonical PCM cache, Oto playback with a
+  buffering-aware playhead, DSP analysis with tempo confidence, Song DNA,
+  four visualizer modes, CPU renderer + wgpu GPU renderer behind one
+  contract, MP4 export through 4K via local FFmpeg, projects/presets.
+  Evidence in `evidence/phase2-build.log`; honest gaps (hardware GPU,
+  Windows runtime, M4A input) in `roadmap.md` and `ai-notes.md`.
+- Never mark a capability `DELIVERED` without code, tests and captured
+  evidence. Hardware-dependent claims need hardware evidence.
 
 ## 3. Engineering invariants
 
@@ -50,9 +53,11 @@ current user prompt.
 - **Fyne owns the desktop UI only** — it must never become the export
   renderer or media pipeline. UI thread ownership: never mutate Fyne
   widgets from goroutines; use Fyne's documented UI-thread mechanism.
-- **GPU acceleration is a Phase 2 requirement with a proof gate.** Never
-  claim acceleration, never fake GPU telemetry, never label CPU output as
-  GPU. Detection ≠ execution.
+- **GPU acceleration has a proof gate.** Never claim acceleration, never
+  fake GPU telemetry, never label CPU output as GPU. Detection ≠
+  execution ≠ verification. The wgpu renderer reports
+  detected/available/selected/executed/verified honestly; software and
+  noop adapters are never reported as hardware GPUs.
 - **No silent fallbacks.** Errors are surfaced, not swallowed. Bounded
   operations, explicit context cancellation, real exit-code propagation.
   No sleep-based correctness, no blind retry storms, no disabled tests to
@@ -90,14 +95,21 @@ every command (see §6). On Linux:
 ```bash
 gofmt -l .                                   # no files listed
 go mod tidy && go mod tidy -diff             # no diff after final tidy
-go test ./...                                # all packages pass
-go vet ./...                                 # clean
-go build ./...                               # packages compile
-go build -trimpath -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer
+go mod verify                                # module integrity
+go test -tags goffi_static ./...             # all packages pass
+go vet -tags goffi_static ./...              # clean
+go build -tags goffi_static ./...            # packages compile
+go build -trimpath -tags goffi_static -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer
 ./bin/sheytan-music-visualizer --version     # prints product + build metadata
-./bin/sheytan-music-visualizer --self-check  # foundation invariants, exit 0
-go test ./internal/cilog/ -run . -count=1    # collector fixtures (included in ./...)
+./bin/sheytan-music-visualizer --self-check  # invariants incl. decoders/DSP/renderer/ffmpeg, exit 0
+go test -race -tags goffi_static ./internal/...  # race detector on concurrent cores
 ```
+
+The `-tags goffi_static` build tag is REQUIRED whenever Fyne (CGO) and the
+wgpu renderer (goffi FFI stubs) link into one binary — the Go internal
+linker rejects the mixed relocations (`goffi_dlopen` SDYNIMPORT vs CGO);
+`goffi_static` selects goffi's static dlopen path. The packaged build
+scripts apply it on both Linux and Windows.
 
 Or run the packaged script that does all of the above with full capture:
 

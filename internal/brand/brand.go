@@ -26,8 +26,10 @@ const (
 	// AppID is the application identifier for desktop integration.
 	AppID = "com.parsaetak.sheytan-music-visualizer"
 
-	// ModulePath is the Go module path. It is provisional: no GitHub
-	// remote exists for this repository as of Phase 1. See ai-notes.md.
+	// ModulePath is the Go module path. (The Phase 1 note that the
+	// remote was provisional is historical: the repository now exists
+	// at https://github.com/SHEYTANx13/SHEYTAN-Music-Visualizer and the
+	// go.mod module path matches this constant.)
 	ModulePath = "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer"
 
 	// Copyright is the canonical copyright line.

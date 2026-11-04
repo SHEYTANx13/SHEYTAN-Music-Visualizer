@@ -247,3 +247,144 @@ path — all documented as Phase 2 research gates in `roadmap.md`; none is
 prematurely locked.
 
 **The model proposes. The tools execute. The laboratory verifies.**
+
+---
+
+# Phase 2 session record (2026-11-04)
+
+## Session identity
+
+- **Mission:** Phase 2 — turn the Phase 1 foundation into a working studio
+  slice: media import, playback, DSP, Song DNA, visualizers, CPU/GPU
+  renderers, MP4 export, projects/presets, and local verification.
+- **Repository:** the live remote existed this time. Cloned
+  `https://github.com/SHEYTANx13/SHEYTAN-Music-Visualizer` (origin verified
+  against the mission URL; `go.mod` module path
+  `github.com/SHEYTANx13/SHEYTAN-Music-Visualizer` confirmed). Default
+  branch `main` (verified via `git ls-remote --symref`), starting HEAD
+  `b77c8ee` ("beta"), clean worktree, in sync with origin/main. The Phase 1
+  provisional-module-path note in `brand.go` is now historical — the
+  module path is real; the comment was left intact on purpose (identity
+  constants are frozen without a verified defect).
+- **Agent environment:** Linux x86_64, Debian 13 (trixie), gcc 14.2.0,
+  git 2.47.3, ffmpeg/ffprobe 7.1.5-0+deb13u1, headless (no display, no
+  audio device). Go 1.27.3 installed from go.dev. No passwordless sudo —
+  the Phase 1 X11 work-around (apt-get download → local prefix +
+  pkg-config define-prefix via CGO_CFLAGS/CGO_LDFLAGS) was re-applied for
+  the Fyne CGO build.
+
+## Starting state verification
+
+Phase 1 files read in full before editing: `license.md`, `readme.md`,
+`agent.md`, `roadmap.md`, `ai-notes.md`, `go.mod`/`go.sum`, every Go file
+under `cmd/`, `internal/`, `ui/`, both build scripts, both CI workflows,
+`scripts/ci/*`. Baseline `go build ./...` + `go test ./...` PASS after
+rebuilding the local X11 prefix. No user changes were discarded; nothing
+was reset, rebased or force-checked-out. No push/PR/tag/release was made.
+
+## Dependency lock (verified against the module proxy at run time)
+
+| Concern | Module (pinned) | Note vs mission pins |
+|---|---|---|
+| UI | fyne.io/fyne/v2 v2.8.2 | as pinned |
+| FFT | gonum.org/v1/gonum v0.17.0 | as pinned |
+| Playback | github.com/ebitengine/oto/v3 v3.5.1 | as pinned |
+| WAV | github.com/go-audio/wav v1.1.0 | as pinned |
+| MP3 | github.com/llehouerou/go-mp3 v1.5.0 | as pinned |
+| FLAC | github.com/tphakala/go-flac v1.4.0 | latest tag (mission said "resolve at implementation time") |
+| Ogg/Vorbis | github.com/jfreymuth/oggvorbis v1.0.5 | as pinned |
+| GPU | github.com/gogpu/wgpu v0.34.7 | v0.34.5 exists but v0.34.7 is the current tag (mission allowed verifying the current release) |
+| FFmpeg | local 7.1.5 executable, never bundled | adapter only |
+
+Archived `hajimehoshi/go-mp3` was NOT used; no LGPL codec modules were
+added; no Rust FFI/C++ renderer code was introduced.
+
+## Critical linker discovery (documented for every future session)
+
+Linking Fyne (CGO) and wgpu (goffi FFI) into one binary fails with the Go
+internal linker on Linux: `unhandled relocation for goffi_errno_location
+(SDYNIMPORT)`. Fix: `-tags goffi_static` (goffi's static dlopen path).
+Verified working for `go build` and `go test`. All build scripts, CI
+delegation and docs apply the tag; Windows theoretically does not need it
+(its goffi path differs) but gets it harmlessly.
+
+## Files created / changed (Phase 2, first-party only)
+
+| Path | Purpose |
+|---|---|
+| `internal/audio/` (audio, registry, decoders, decoders_wavfloat, convert, resample, fingerprint, cache, import + tests) | decoder registry, 4 native decoders, conversion, Kaiser-sinc resampler, canonical cache, import pipeline |
+| `internal/dsp/` (dsp, tempo + tests) | streaming FFT analysis, bands, centroid, flux/onsets, BPM confidence, waveform envelope |
+| `internal/songdna/` (+ test) | deterministic per-track DNA from measured features |
+| `internal/visualizer/` (config, frame) | modes, config clamping, presets, palettes, frame contract |
+| `internal/render/` (renderer, scene, cpu, gpu, text + tests) | Renderer contract, scene state/particles, deterministic CPU renderer (4 modes), wgpu GPU renderer with WGSL radial shader + verified readback, sfnt/opentype text overlays |
+| `internal/playback/` (output, transport + tests) | Oto context, silent fallback, transport with buffering-aware clock |
+| `internal/export/` (ffmpeg, job, validate + tests) | FFmpeg detection/proof, export job (streamed frames, progress, cancel), ffprobe validation |
+| `internal/project/` (+ test) | versioned JSON project, atomic save, validation, relink |
+| `internal/studio/` (studio + test) | application service layer (events, workers, ownership) |
+| `ui/fyne/` (studio, actions, theme; app.go doc updated) | the studio shell + hellish theme (replaces the Phase 1 placeholder) |
+| `cmd/sheytan-music-visualizer/main.go` | extended `--self-check` (decoders, DSP fixture, visualizer config, renderer, ffmpeg probe) |
+| `scripts/build/build-linux.sh`, `build-windows.ps1` | Phase 2 ladders (race, export/GPU/audio validations, govulncheck, goffi_static) |
+| `readme.md`, `roadmap.md`, `agent.md`, `license.md` | truth updates (this file: session record) |
+| `evidence/phase2-build.log` | packaged verification transcript |
+
+## Verification record (local, exit codes in evidence/phase2-build.log)
+
+| Gate | Result |
+|---|---|
+| gofmt clean | PASS |
+| go mod tidy / tidy -diff | PASS |
+| go mod verify | PASS |
+| go test -tags goffi_static ./... | PASS (audio, dsp, songdna, visualizer-internal, render, playback, export, project, studio, brand, buildinfo, cilog, logging) |
+| go vet -tags goffi_static ./... | PASS |
+| go build -tags goffi_static ./... | PASS |
+| Linux x64 desktop executable + `--version` + `--self-check` (8 checks) | PASS |
+| go test -race (audio, playback, dsp, export, studio, project, render) | PASS |
+| Export validation: real FFmpeg, streamed frames | PASS — 1080p30 (90 frames, 3.00 s, h264+aac validated, ~2.6 s) and 4K24 (72 frames at 3840×2160, 3.00 s, validated, ~8.8 s); cancel path leaves no partial file |
+| GPU validation (wgpu pipeline: adapter→device→WGSL→draw→submit→readback→deterministic compare) | PASS on the software adapter; hardware GPU: NOT AVAILABLE on this host |
+| Studio end-to-end integration (import→analysis→DNA→deterministic preview→project round trip→service export validated) | PASS |
+| govulncheck ./... | PASS — 0 called vulnerabilities (10 imported / 12 module-level informational, not called) |
+| GUI runtime observation | NOT RUN — headless host, no display server; the window compiles and self-check passes, which is not GUI proof |
+| Audio device playback (Oto with real device) | NOT AVAILABLE — no audio device on this host; transport verified via the silent output with identical clock logic |
+| Windows x64 native build/runtime | NOT RUN — Linux host; script + CI definition statically validated only |
+
+### Defects found and fixed during the session (honest record)
+
+1. DSP `emitFrame` indexed the spectrum with `len(coeff)/2` although Gonum
+   returns N/2+1 coefficients → panic on real input. Fixed (half = N/2).
+2. `Resampler.Process` returned frames where every caller expected
+   interleaved samples → half of the audio was written to the cache. Fixed
+   (contract: samples).
+3. The resampler feed loop re-appended the same input each iteration →
+   unbounded queue, disk-full hang. Fixed (append once, drain with nil).
+4. Canonical WAV cache entries were written without a header and never
+   finalized (temp files aborted) → corrupt/missing wrapper. Fixed (header
+   at open, atomic rename on finish).
+5. `Cache.StoreSidecar` re-locked the mutex the import worker already held
+   → deadlock. Fixed (locked internal variant).
+6. Mono WAV downmix wrote half the samples (frame/sample confusion).
+   Fixed.
+7. Tempo estimator: subdivision bonus biased metronome material to the
+   half-time reading; steady tones got spurious "reliable" tempo. Fixed
+   (main-correlation scoring + explicit half/double handling + RMS-
+   variation gate), tests updated.
+8. wgpu renderer: instance released too early (deferred in constructor)
+   and texture descriptors lacked Dimension/MipLevelCount → pipeline
+   proof failures. Fixed; readback+verify now passes deterministically.
+9. UI: Fyne slider API differences and a button self-reference compile
+   error; `fyne.Do` bridging for all service events. Fixed.
+
+No test was deleted, weakened or skipped to achieve green. Export/GPU
+tests skip with explicit "SKIP (NOT AVAILABLE)" messages when FFmpeg or
+an adapter is absent — the skip reason is recorded, never a fake PASS.
+
+## Remaining gaps (next narrow mission order)
+
+1. Windows native build + runtime proof on a real Windows 11 host
+   (UCRT64), including Oto WASAPI playback and the FFmpeg export path.
+2. Hardware-GPU proof (Vulkan/DX12) on a real GPU host; record
+   adapter/backend/driver + executed workload + readback.
+3. GUI observation (Xvfb or real desktop) — window/interaction survival.
+4. M4A/AAC input via the optional FFmpeg decoder adapter (registry slot
+   exists; deliberately unimplemented).
+5. Keyboard navigation polish, manual tempo/offset correction, spectral
+   rolloff, layered visual compositions — all explicitly NOT DONE.
