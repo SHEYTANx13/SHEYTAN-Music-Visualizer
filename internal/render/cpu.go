@@ -75,6 +75,28 @@ func (r *CPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 
 	c := &canvas{img: r.buf}
 	c.background(in, pal)
+	// Layered composition: the optional dimmed background layer is
+	// drawn first, then the primary mode composites over it
+	// (additive canvas blending). Same draw functions, dimmed
+	// palette — one deterministic pipeline for preview and export.
+	// The GPU shader path covers the primary radial mode only; the
+	// layer is a CPU-renderer feature (reported honestly in docs).
+	if cfg.BackgroundLayer != visualizer.ModeNone && cfg.BackgroundIntensity > 0 {
+		layerIn := in
+		layerCfg := cfg
+		layerCfg.Mode = cfg.BackgroundLayer
+		layerIn.Config = layerCfg
+		switch cfg.BackgroundLayer {
+		case visualizer.ModeBars:
+			r.drawBars(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
+		case visualizer.ModeRadial:
+			r.drawRadial(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
+		case visualizer.ModeWaveform:
+			r.drawWaveform(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
+		case visualizer.ModeParticles:
+			r.drawParticles(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
+		}
+	}
 	switch cfg.Mode {
 	case visualizer.ModeRadial:
 		r.drawRadial(c, in, pal)
@@ -96,6 +118,25 @@ func paletteFor(i int) visualizer.Palette {
 		i = 0
 	}
 	return visualizer.Palettes[i]
+}
+
+// dimPalette scales every foreground color of a palette by k (0..1)
+// for the background composition layer. The obsidian background is
+// left untouched so the layer cannot brighten the backdrop.
+func dimPalette(p visualizer.Palette, k float64) visualizer.Palette {
+	k = clamp01(k)
+	scale := func(c [3]float64) [3]float64 {
+		return [3]float64{c[0] * k, c[1] * k, c[2] * k}
+	}
+	return visualizer.Palette{
+		Name:   p.Name,
+		Back:   p.Back,
+		Low:    scale(p.Low),
+		Mid:    scale(p.Mid),
+		High:   scale(p.High),
+		Peak:   scale(p.Peak),
+		Accent: scale(p.Accent),
+	}
 }
 
 // canvas is a small software drawing surface over *image.RGBA.

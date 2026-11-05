@@ -22,6 +22,14 @@ const (
 // AllModes lists the modes in UI order.
 var AllModes = []Mode{ModeBars, ModeRadial, ModeWaveform, ModeParticles}
 
+// ModeNone disables the background composition layer.
+const ModeNone Mode = "none"
+
+// MaxBackgroundIntensity bounds the background layer alpha factor.
+// The background must stay a backdrop: the primary mode always reads
+// clearly on top of it.
+const MaxBackgroundIntensity = 0.6
+
 // DisplayName returns the human name of a mode.
 func (m Mode) DisplayName() string {
 	switch m {
@@ -63,6 +71,13 @@ type Config struct {
 	MotionStyle     int     `json:"motionStyle"`     // 0..3 artistic variation
 	VariationSeed   uint64  `json:"variationSeed"`   // user-controlled variation
 
+	// Layered composition (roadmap Phase 2 #6): an optional dimmed
+	// secondary mode rendered BEHIND the primary mode by the CPU
+	// renderer. "none" disables the layer. Preview and export share
+	// the same field through the same Config.
+	BackgroundLayer     Mode    `json:"backgroundLayer"`
+	BackgroundIntensity float64 `json:"backgroundIntensity"` // 0..0.6 when a layer is set
+
 	ShowTitle     bool   `json:"showTitle"`
 	TitleText     string `json:"titleText"`
 	SubtitleText  string `json:"subtitleText"`
@@ -83,6 +98,18 @@ func (c *Config) Clamp() {
 	c.PulseResponse = clampRange(c.PulseResponse, 0.5, 1.8, 1.0)
 	if c.MotionStyle < 0 || c.MotionStyle > 3 {
 		c.MotionStyle = 0
+	}
+	// Layered composition: an empty/unknown layer is "none"; a
+	// background layer equal to the primary mode is pointless and
+	// normalized to "none"; intensity is only meaningful when a
+	// layer is active.
+	if !ValidMode(c.BackgroundLayer) || c.BackgroundLayer == c.Mode {
+		c.BackgroundLayer = ModeNone
+	}
+	if c.BackgroundLayer == ModeNone {
+		c.BackgroundIntensity = 0
+	} else {
+		c.BackgroundIntensity = clampRange(c.BackgroundIntensity, 0, MaxBackgroundIntensity, 0.35)
 	}
 }
 

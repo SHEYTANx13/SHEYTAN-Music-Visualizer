@@ -56,7 +56,7 @@ restrained. Black dominates; red is the accent. Identity tokens live in
 | `codeql.yml` (go manual + actions none) | DELIVERED as workflow definition; CodeQL: NOT RUN | actionlint + YAML parse PASS |
 | Log capture + consolidation subsystem with fixture tests | DELIVERED | `internal/cilog` tests PASS |
 | Source archive + external handoff note | DELIVERED | ZIP integrity + extracted-tree verification |
-| Minimal window actually launched on screen | NOT RUN on the Phase 1 agent host (headless; no display server) — compiled and `--self-check` verified only | `evidence/phase1-build.log` |
+| Minimal window actually launched on screen | DELIVERED as observed behavior on a virtual display (Xvfb): the studio window was MAPPED, survived the event loop and exited cleanly on SIGTERM; screenshot captured. Physical-desktop observation on real hardware remains open. | `evidence/gui-smoke-xvfb.png`, `evidence/log.txt` (gui-smoke gate), `ai-notes.md` |
 
 ## Phase 2 — studio and media implementation (Phase 2 slice, 2026-11-04)
 
@@ -67,23 +67,33 @@ from what still requires hardware or hosts this session never had.
 1. **Studio foundation UI/UX** — DELIVERED. Full studio shell (top bar,
    library/presets rail, live preview of actual renderer output, inspector,
    audio-clock transport, export dialog) with the hellish black/red theme
-   driving real widgets. Keyboard navigation beyond tab order: NOT DONE.
+   driving real widgets. Keyboard navigation beyond tab order: DELIVERED
+   (Space = play/pause, Left/Right = ±5 s seek through the same service
+   actions as the transport buttons; `ui/fyne/studio.go`).
 2. **Media foundation** — DELIVERED. WAV (int16/int24/int32/float32), MP3,
    FLAC, Ogg/Vorbis import through first-party Go decoders; canonical
    48 kHz stereo float32 disk cache with fingerprint-keyed sidecars,
    bounded streaming, cancellation; malformed-input tests.
-   M4A/AAC input: NOT IMPLEMENTED (would require an FFmpeg decoder adapter
-   or a licensed AAC decoder; deliberately not promised).
+   M4A/AAC/ALAC input: DELIVERED as an OPTIONAL adapter through the
+   user's local FFmpeg/ffprobe (no bundled codec, no new dependency;
+   the formats register only when FFmpeg is present and the registry,
+   UI file dialog and cache sidecars report the provenance truthfully;
+   `internal/audio/decoders_ffmpeg.go`). First-party AAC decoding
+   without FFmpeg remains deliberately not promised.
 3. **Audio playback and synchronization** — DELIVERED (Linux). Oto v3
    single context/player, seek/pause/stop/volume, buffering-aware playhead
    with documented latency uncertainty. Windows playback runtime: NOT RUN
-   on this session's Linux host. Manual tempo/offset correction: NOT DONE.
+   on this session's Linux host. Manual tempo/offset correction: DELIVERED
+   (per-project tempo override 30–300 BPM that bypasses the confidence
+   gate, ±5 s sync offset; both reach the shared frame model and persist
+   in projects; `internal/studio`, `internal/project`).
 4. **DSP / song analysis** — DELIVERED. Hann FFT-2048/hop-512 (Gonum),
    RMS envelope, bass/mid/treble bands, spectral centroid, flux/onset
    detection with adaptive threshold, BPM estimate with confidence,
-   half/double-time handling, waveform envelope. Verified against
-   generated fixtures (pure tones → bands/centroid; 120 BPM click → BPM;
-   steady tone → unreliable). Rolloff: NOT DONE (not required by P0).
+   half/double-time handling, waveform envelope and spectral rolloff
+   (85% energy accumulation frequency). Verified against generated
+   fixtures (pure tones → bands/centroid/rolloff; 120 BPM click → BPM;
+   broadband clicks → high rolloff; steady tone → unreliable).
 5. **Song-specific identity (`Song DNA`)** — DELIVERED. Deterministic
    derivation from measured features + content fingerprint + user seed;
    reproducibility verified by test; measured-vs-artistic split documented
@@ -91,8 +101,13 @@ from what still requires hardware or hosts this session never had.
 6. **Visualizer engines** — DELIVERED. Spectrum Bars, Radial Spectrum,
    Waveform and Particle Field all respond to measured audio features with
    bounded complexity; preview and export share the same logic, config and
-   scene contract; determinism verified per mode. Layered compositions:
-   NOT DONE.
+   scene contract; determinism verified per mode. Layered
+   compositions: DELIVERED on the CPU renderer (a dimmed background
+   mode behind the primary mode, user-selectable with bounded
+   intensity 0–0.6, deterministic, preview and export share it; the
+   GPU shader path covers the primary radial mode only and reports
+   honestly; `internal/visualizer.Config.BackgroundLayer`,
+   `internal/render/cpu.go`).
 7. **GPU backend** — DELIVERED as code with an honest evidence chain.
    `github.com/gogpu/wgpu` v0.34.7 renders the Radial Spectrum mode
    through a WGSL fragment shader with submit + verified readback; the
@@ -115,9 +130,17 @@ from what still requires hardware or hosts this session never had.
    round-trip tested.
 10. **Quality/security** — PARTIALLY DELIVERED. Race tests pass on the
     concurrent core packages; `go mod verify`/`tidy -diff` clean;
-    govulncheck: 0 called vulnerabilities; licence inventory updated.
-    Performance benchmarks, GPU-device-loss recovery drills and Windows
-    packaging/signing: NOT DONE.
+    govulncheck (pinned v1.9.0): **no vulnerabilities found** after the
+    minimal safe bump (x/net v0.62.0, x/text v0.43.0, x/image v0.45.0);
+    licence inventory updated. Performance benchmarks: DELIVERED
+    (`internal/dsp/bench_test.go`, `internal/render/cpu_bench_test.go`;
+    reference numbers in `ai-notes.md`). GPU-device-loss recovery
+    drills: the recovery PATH is drilled (injected ErrDeviceLost →
+    FALLBACK state + explicit "device lost:" detail + valid CPU frame;
+    `internal/render/gpu_recovery_test.go`); a drill on real hardware
+    remains open. Windows packaging/signing: portable staging+ZIP
+    proven in the hosted run; code signing still NOT DONE (no
+    certificate).
 
 ## Research questions kept open for Phase 2
 

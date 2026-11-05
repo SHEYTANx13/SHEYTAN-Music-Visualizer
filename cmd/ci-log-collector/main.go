@@ -90,10 +90,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	fmt.Fprintf(os.Stdout, "ci-log-collector: report %q written; coverage=%s; overall=%s; jobs=%d with-parts=%d missing=%d skipped=%d log-files=%d api-jobs=%d api-logs=%d failed-records=%d warnings=%d\n",
+	fmt.Fprintf(os.Stdout, "ci-log-collector: report %q written; coverage=%s; overall=%s; jobs=%d with-parts=%d missing=%d skipped=%d log-files=%d api-jobs=%d api-logs=%d gates=%d failed-gates=%d failed-records=%d warnings=%d\n",
 		res.ReportPath, res.Coverage, res.Overall, res.JobsExpected, res.JobsWithParts,
 		len(res.MissingSources), len(res.NeverStarted), res.LogFiles,
-		res.APIJobsFetched, res.APILogsFetched, res.FailedCommandRecords, res.WarningRecords)
+		res.APIJobsFetched, res.APILogsFetched,
+		len(res.Gates), res.FailedGateCount, res.FailedCommandRecords, res.WarningRecords)
 	switch {
 	case res.Coverage == cilog.CoverageIncomplete:
 		os.Exit(1)

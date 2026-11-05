@@ -34,7 +34,12 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
-    runs-on: ubuntu-24.04
+    # Explicit ubuntu-26.04 (deliberate stable OS choice — never an
+    # ambiguous ubuntu-latest). Cache policy: the CodeQL analysis cache
+    # is managed by the codeql-action itself; setup-go caching is
+    # DISABLED here so this job can never collide with build-linux's
+    # Go build cache key (one saving job per identical key).
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
       actions: read
@@ -59,8 +64,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
+          cache: false # cache policy: only build-linux/build-windows save caches
 
       # goffi_static: required when Fyne (CGO) and wgpu (goffi FFI) link
       # in one binary; the traced build must match the production build.
@@ -88,6 +92,19 @@ jobs:
           set -o pipefail
           go vet -tags goffi_static ./... 2>&1 | tee ci-logs/codeql-go-vet.log
 
+      # Evidence marker for the actions matrix leg (build-mode: none has
+      # no traced build and normally produces no ci-logs files; this
+      # marker makes the leg's log part exist and state its config).
+      - name: Record actions analysis evidence (actions matrix only)
+        if: matrix.language == 'actions'
+        run: |
+          mkdir -p ci-logs
+          {
+            echo "language: actions"
+            echo "build-mode: none"
+            echo "note: actions analysis extracts workflow definitions; no traced build runs"
+          } | tee ci-logs/codeql-actions.log
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
@@ -107,26 +124,31 @@ jobs:
         with:
           category: '/language:${{ matrix.language }}'
 
-      # Temporary internal artifact; the aggregator (collect-logs in
+      # Temporary internal artifacts; the aggregator (collect-logs in
       # build-desktop.yml for called runs, the collect job below for
-      # standalone runs) deletes it after producing the single log.txt.
-      - name: Upload CodeQL log part (temporary internal artifact)
+      # standalone runs) deletes them after producing the single
+      # log.txt. Names are unique PER MATRIX DIMENSION so two matrix
+      # legs can never collide or overwrite identically named files
+      # (run-41915116613 review item).
+      - name: Upload CodeQL log part (temporary internal artifact, per matrix leg)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: codeql-logs-part
+          name: codeql-logs-part-${{ matrix.language }}
           path: |
             ci-logs/**
-          if-no-files-found: ignore
+          if-no-files-found: ${{ matrix.language == 'actions' && 'ignore' || 'error' }}
 
   # Standalone runs (schedule / workflow_dispatch) still get ONE
   # consolidated, truthful log.txt artifact. When called from
   # build-desktop.yml this job is skipped and the caller aggregates.
   collect:
     name: collect-logs (standalone codeql evidence)
+    # always() preserves the report path after failed analysis;
+    # !cancelled() avoids pointless collection on user cancellation.
     needs: analyze
-    if: always() && inputs.called != true
-    runs-on: ubuntu-24.04
+    if: ${{ always() && !cancelled() && inputs.called != true }}
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -142,8 +164,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
+          cache: false # cache policy: only build-linux/build-windows save caches
 
       - name: Download log parts (namespaced, never flattened)
         id: download
@@ -186,7 +207,8 @@ jobs:
               "result": "${RESULT_ANALYZE}"
             },
             "jobs": [
-              {"name": "analyze", "result": "${RESULT_ANALYZE}", "artifact": "codeql-logs-part", "required": true}
+              {"name": "codeql-go",      "result": "${RESULT_ANALYZE}", "artifact": "codeql-logs-part-go",      "required": true},
+              {"name": "codeql-actions", "result": "${RESULT_ANALYZE}", "artifact": "codeql-logs-part-actions", "required": true}
             ]
           }
           MANIFEST
@@ -243,7 +265,7 @@ jobs:
             echo "WARNING: could not list artifacts for cleanup (report already uploaded); temporary part artifacts may remain visible."
             exit 0
           fi
-          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | endswith("-logs-part")) or (.name == "consolidated-run-log")) | .id' "$tmp")
+          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | endswith("-logs-part")) or (.name | startswith("codeql-logs-part-")) or (.name == "consolidated-run-log")) | .id' "$tmp")
           for id in $ids; do
             url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
             if curl -sf -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$url"; then

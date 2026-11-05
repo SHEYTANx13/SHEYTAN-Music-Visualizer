@@ -13,9 +13,13 @@ machine. No account, no telemetry, no bundled codec binaries.
 
 > Phase 2 status: the studio slice is implemented and locally verified on
 > Linux x64 (build, tests, race tests, real MP4 export proofs at 1080p and
-> 4K, wgpu render/readback proof). See [roadmap.md](roadmap.md) for the
-> honest status of every capability and [ai-notes.md](ai-notes.md) for the
-> evidence trail of the current session.
+> 4K, wgpu render/readback proof, GUI smoke on a virtual display). The
+> 2026-11-05 repair session additionally delivered the optional AAC/M4A
+> input adapter, layered compositions, manual tempo/offset correction,
+> spectral rolloff, keyboard transport shortcuts, benchmarks and the
+> consolidated-diagnostics gate repair. See [roadmap.md](roadmap.md) for
+> the honest status of every capability and [ai-notes.md](ai-notes.md)
+> for the evidence trail of the current session.
 
 ---
 
@@ -35,6 +39,9 @@ brand palettes used by the visualizer (`internal/visualizer`).
 |---|---|
 | Studio shell: top bar, library/presets rail, live preview, inspector, transport, export dialog | DELIVERED (Fyne v2.8.2, hellish theme) |
 | Import WAV (int16/int24/int32 + IEEE float32), MP3, FLAC, Ogg/Vorbis via first-party Go decoders | DELIVERED (`internal/audio`) |
+| Import AAC/M4A/ALAC via the user's local FFmpeg (optional adapter, never bundled) | DELIVERED as an optional adapter (`internal/audio/decoders_ffmpeg.go`; registers only when FFmpeg is present) |
+| Layered compositions: a dimmed background mode behind the primary mode | DELIVERED (CPU renderer, deterministic, bounded intensity; `internal/render`) |
+| Manual tempo override and audio/visual sync offset, persisted per project | DELIVERED (`internal/studio`, `internal/project`) |
 | Canonical PCM pipeline: 48 kHz stereo float32, disk-backed cache, Kaiser-sinc resampling, atomic writes | DELIVERED |
 | Playback: Oto v3 single context/player, play/pause/stop/seek/volume, buffering-aware playhead | DELIVERED (device-less hosts fall back to an honest silent mode) |
 | DSP: Hann FFT-2048/hop-512, bass/mid/treble bands, RMS, spectral centroid, flux/onsets, BPM with confidence | DELIVERED (`internal/dsp`) |
@@ -55,9 +62,14 @@ Input (first-party Go decoders, no external codec process for import):
 - **FLAC** — via `tphakala/go-flac` (streaming PCM API)
 - **Ogg/Vorbis** — via `jfreymuth/oggvorbis`
 
-M4A/AAC input and other formats are intentionally **not advertised** — the
-registry reports exactly what is registered and tested. The UI's file dialog
-and the decoder registry agree on this list by construction.
+**AAC family (optional, through your local FFmpeg):** when `ffmpeg` and
+`ffprobe` are available, the app additionally registers **M4A/MP4 (AAC)**,
+**raw AAC/ADTS** and **ALAC** import through a bounded local-FFmpeg adapter
+(`SHEYTAN_FFMPEG` overrides the binary directory). Nothing is bundled or
+downloaded: without FFmpeg those formats stay unregistered, and the UI's
+file dialog and the decoder registry agree on the registered list by
+construction. The cache sidecars record the adapter provenance truthfully
+(`NativeDecoder: false`).
 
 Export: MP4 (H.264 video + AAC audio) through your **locally installed
 FFmpeg/ffprobe**. The application never downloads or bundles an encoder
@@ -145,7 +157,8 @@ go run -tags goffi_static ./cmd/sheytan-music-visualizer                # the st
    mutate the real preview state — the same configuration drives export.
 5. **Save Project** writes a versioned JSON (media reference + fingerprint
    + settings); **Open Project** restores it and relinks the media.
-6. **Export MP4…** shows the detected FFmpeg version and proven H.264
+6. Keyboard transport: **Space** toggles play/pause, **←/→** seek ∓5 s.
+7. **Export MP4…** shows the detected FFmpeg version and proven H.264
    encoders, resolution presets through 4K UHD, 24/30/60 fps, quality
    presets, real progress (rendered frames + encoder frames), cancel, and
    an ffprobe validation verdict before the file is finalized atomically.

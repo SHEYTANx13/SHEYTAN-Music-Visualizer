@@ -14,6 +14,8 @@ import (
 	"fmt"
 	"image/color"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,11 +49,50 @@ func Run() error {
 	}
 	u := newStudioUI(w, svc)
 	w.SetContent(u.build())
+	installTransportKeys(w, u)
 	w.Resize(fyne.NewSize(1440, 860))
 	w.ShowAndRun()
 	u.close()
 	svc.Close()
 	return nil
+}
+
+// installTransportKeys wires the keyboard transport shortcuts
+// (roadmap Phase 2 #1: keyboard navigation beyond tab order):
+//
+//	Space   play/pause toggle
+//	Left/Right   seek 5 s backward/forward (clamped to the track)
+//
+// The shortcuts dispatch through the same service actions as the
+// transport buttons — no duplicate logic, no direct widget writes.
+func installTransportKeys(w fyne.Window, u *studioUI) {
+	w.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
+		switch e.Name {
+		case fyne.KeySpace:
+			u.onPlayPause()
+		case fyne.KeyLeft:
+			u.seekBy(-5 * time.Second)
+		case fyne.KeyRight:
+			u.seekBy(5 * time.Second)
+		}
+	})
+}
+
+// seekBy seeks relative to the current playhead, clamped to
+// [0, total]. No-op when no track is loaded (total 0).
+func (u *studioUI) seekBy(delta time.Duration) {
+	clk := u.svc.Clock()
+	if clk.Total <= 0 {
+		return
+	}
+	target := clk.Position + delta
+	if target < 0 {
+		target = 0
+	}
+	if target > clk.Total {
+		target = clk.Total
+	}
+	_ = u.svc.Seek(target)
 }
 
 // studioUI holds the wired widgets and state.
@@ -96,6 +137,12 @@ type studioUI struct {
 	showTitleCb *widget.Check
 	watermarkCb *widget.Check
 	dnaLabel    *widget.Label
+
+	// layered composition + manual tempo/offset correction
+	bgLayerSelect *widget.Select
+	bgIntensitySl *widget.Slider
+	tempoEntry    *widget.Entry
+	offsetEntry   *widget.Entry
 
 	// export dialog state
 	exportDialog dialog.Dialog
@@ -222,6 +269,30 @@ func (u *studioUI) build() fyne.CanvasObject {
 		cfg.PulseResponse = v
 		u.svc.SetConfig(cfg)
 	})
+	u.bgLayerSelect = widget.NewSelect(layerNames(), func(sel string) {
+		cfg := u.svc.Config()
+		cfg.BackgroundLayer = layerFromName(sel)
+		u.svc.SetConfig(cfg)
+	})
+	u.bgIntensitySl = u.newSlider(0, visualizer.MaxBackgroundIntensity, func(v float64) {
+		cfg := u.svc.Config()
+		cfg.BackgroundIntensity = v
+		u.svc.SetConfig(cfg)
+	})
+	u.tempoEntry = widget.NewEntry()
+	u.tempoEntry.SetPlaceHolder("0 = measured BPM")
+	u.tempoEntry.OnChanged = func(txt string) {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(txt), 64); err == nil {
+			u.svc.SetTempoOverride(v)
+		}
+	}
+	u.offsetEntry = widget.NewEntry()
+	u.offsetEntry.SetPlaceHolder("\u00b15.0 s")
+	u.offsetEntry.OnChanged = func(txt string) {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(txt), 64); err == nil {
+			u.svc.SetSyncOffset(v)
+		}
+	}
 	u.titleEntry = widget.NewEntry()
 	u.titleEntry.SetPlaceHolder("Title overlay text")
 	u.titleEntry.OnChanged = func(s string) {
@@ -260,8 +331,12 @@ func (u *studioUI) build() fyne.CanvasObject {
 			widget.NewFormItem("Palette", u.paletteSl),
 			widget.NewFormItem("Particle density", u.densitySl),
 			widget.NewFormItem("Pulse response", u.pulseSl),
+			widget.NewFormItem("Background layer", u.bgLayerSelect),
+			widget.NewFormItem("Layer intensity", u.bgIntensitySl),
 			widget.NewFormItem("Title", u.titleEntry),
 			widget.NewFormItem("Subtitle", u.subEntry),
+			widget.NewFormItem("Tempo override", u.tempoEntry),
+			widget.NewFormItem("Sync offset", u.offsetEntry),
 		),
 		u.showTitleCb, u.watermarkCb,
 		widget.NewSeparator(),
@@ -332,6 +407,10 @@ func (u *studioUI) syncInspector() {
 	u.paletteSl.SetValue(float64(cfg.Palette))
 	u.densitySl.SetValue(cfg.ParticleDensity)
 	u.pulseSl.SetValue(cfg.PulseResponse)
+	u.bgLayerSelect.SetSelected(layerDisplayName(cfg.BackgroundLayer))
+	u.bgIntensitySl.SetValue(cfg.BackgroundIntensity)
+	u.tempoEntry.SetText(formatTempo(u.svc.TempoOverride()))
+	u.offsetEntry.SetText(fmt.Sprintf("%+.1f", u.svc.SyncOffset()))
 	u.titleEntry.SetText(cfg.TitleText)
 	u.subEntry.SetText(cfg.SubtitleText)
 	u.showTitleCb.SetChecked(cfg.ShowTitle)
@@ -565,6 +644,33 @@ func modeNames() []string {
 		out = append(out, m.DisplayName())
 	}
 	return out
+}
+
+// layerNames lists the background composition layer choices: None
+// first, then every mode.
+func layerNames() []string {
+	return append([]string{"None"}, modeNames()...)
+}
+
+func layerFromName(name string) visualizer.Mode {
+	if name == "None" {
+		return visualizer.ModeNone
+	}
+	return modeFromName(name)
+}
+
+func layerDisplayName(m visualizer.Mode) string {
+	if m == visualizer.ModeNone || m == "" {
+		return "None"
+	}
+	return m.DisplayName()
+}
+
+func formatTempo(bpm float64) string {
+	if bpm <= 0 {
+		return ""
+	}
+	return strconv.FormatFloat(bpm, 'f', -1, 64)
 }
 
 func modeFromName(name string) visualizer.Mode {

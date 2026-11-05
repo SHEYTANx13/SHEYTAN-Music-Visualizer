@@ -179,6 +179,38 @@ if [ "$MODE" = "desktop" ]; then
   CI_TOOL_CONTEXT="gate:studio-integration" ci_capture "$JOB" studio-integration go test $GO_TAGS -timeout 380s ./internal/studio/ ||
     fail_gate studio-integration
 
+  # GUI smoke on a virtual display when Xvfb is available (roadmap:
+  # the window launch was historically never observed on a screen).
+  # SKIPPED honestly when no display tooling exists on this host.
+  if command -v Xvfb >/dev/null 2>&1; then
+    CI_TOOL_CONTEXT="gate:gui-smoke" ci_capture "$JOB" gui-smoke bash -c '
+      set -u
+      Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+      XP=$!
+      sleep 1.5
+      if ! kill -0 "$XP" 2>/dev/null; then
+        echo "ERROR: Xvfb failed to start"; exit 1
+      fi
+      DISPLAY=:99 SHEYTAN_LOG_DIR="$(pwd)/ci-logs/gui-smoke-logs" ./bin/sheytan-music-visualizer >/dev/null 2>&1 &
+      AP=$!
+      sleep 8
+      ALIVE=0
+      if kill -0 "$AP" 2>/dev/null; then ALIVE=1; fi
+      kill "$AP" 2>/dev/null
+      sleep 1.5
+      kill -9 "$AP" 2>/dev/null
+      wait "$AP" 2>/dev/null
+      kill "$XP" 2>/dev/null
+      if [ "$ALIVE" -ne 1 ]; then
+        echo "ERROR: app did not stay alive on the virtual display (window/event-loop failure)"
+        exit 1
+      fi
+      echo "GUI smoke PASS: the studio window survived 8 s on Xvfb and terminated"
+    ' || fail_gate gui-smoke
+  else
+    skip_gate gui-smoke "Xvfb not available on this host"
+  fi
+
   # govulncheck when available
   if command -v govulncheck >/dev/null 2>&1; then
     CI_TOOL_CONTEXT="gate:govulncheck" ci_capture "$JOB" govulncheck govulncheck ./... ||

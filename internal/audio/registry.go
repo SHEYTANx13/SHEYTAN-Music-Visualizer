@@ -105,17 +105,9 @@ func Open(path string) (Decoder, SourceFormat, error) {
 	if err != nil {
 		return nil, SourceFormat{}, err
 	}
-	fmtMu.RLock()
-	var sf SourceFormat
-	for _, v := range fmts {
-		if v.Container != "" {
-			// resolve below
-		}
-	}
-	fmtMu.RUnlock()
 	container := containerFor(ext)
 	fmtMu.RLock()
-	sf = fmts[container]
+	sf := fmts[container]
 	fmtMu.RUnlock()
 	return d, sf, nil
 }
@@ -166,4 +158,16 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 	n, err := l.r.Read(p)
 	l.rem -= int64(n)
 	return n, err
+}
+
+// resetForTest clears the registry. It exists for tests that must
+// verify registration behavior from a clean state; production code
+// must never call it.
+func resetForTest() {
+	regMu.Lock()
+	reg = map[string]DecoderFactory{}
+	regMu.Unlock()
+	fmtMu.Lock()
+	fmts = map[string]SourceFormat{}
+	fmtMu.Unlock()
 }

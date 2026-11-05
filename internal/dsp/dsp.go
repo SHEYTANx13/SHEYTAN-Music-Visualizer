@@ -39,15 +39,18 @@ const (
 
 // Frame is one analysis hop with its derived metrics.
 type Frame struct {
-	Time     float64  `json:"time"` // seconds (window start)
-	RMS      float64  `json:"rms"`  // windowed RMS (≈0..1)
-	Bass     float64  `json:"bass"` // band energy share (0..1)
-	Mid      float64  `json:"mid"`
-	Treble   float64  `json:"treble"`
-	Centroid float64  `json:"centroid"` // spectral centroid, Hz
-	Flux     float64  `json:"flux"`     // positive spectral flux
-	Onset    bool     `json:"onset"`    // adaptive-threshold onset
-	Bins     Spectrum `json:"bins"`     // display spectrum (0..1), len FFTSize/2+1
+	Time     float64 `json:"time"` // seconds (window start)
+	RMS      float64 `json:"rms"`  // windowed RMS (≈0..1)
+	Bass     float64 `json:"bass"` // band energy share (0..1)
+	Mid      float64 `json:"mid"`
+	Treble   float64 `json:"treble"`
+	Centroid float64 `json:"centroid"` // spectral centroid, Hz
+	// Rolloff is the frequency below which 85%% of the window's
+	// spectral energy accumulates (Hz). 0 when the window is silent.
+	Rolloff float64  `json:"rolloff"`
+	Flux    float64  `json:"flux"`  // positive spectral flux
+	Onset   bool     `json:"onset"` // adaptive-threshold onset
+	Bins    Spectrum `json:"bins"`  // display spectrum (0..1), len FFTSize/2+1
 }
 
 // Spectrum is one display spectrum (0..1 per bin).
@@ -67,7 +70,9 @@ type Result struct {
 	MidEnergy    float64 `json:"midEnergy"`
 	TrebleEnergy float64 `json:"trebleEnergy"`
 	MeanCentroid float64 `json:"meanCentroid"`
-	OnsetCount   int     `json:"onsetCount"`
+	// MeanRolloff is the mean spectral rolloff frequency (Hz).
+	MeanRolloff float64 `json:"meanRolloff"`
+	OnsetCount  int     `json:"onsetCount"`
 
 	// Tempo — reported with confidence; never presented as certainty.
 	BPM             float64 `json:"bpm"`
@@ -228,6 +233,27 @@ func (a *Analyzer) emitFrame() {
 		return math.Min(1, x/totalSum)
 	}
 
+	// spectral rolloff: the frequency below which 85% of the
+	// window's energy accumulates. Deterministic; 0 on silence.
+	rolloff := 0.0
+	if totalSum > 0 {
+		cum := 0.0
+		for i := 0; i <= half && i < len(spec); i++ {
+			m := spec[i]
+			var e float64
+			if i == 0 || i == half {
+				e = m * m
+			} else {
+				e = 2 * m * m
+			}
+			cum += e
+			if cum >= 0.85*totalSum {
+				rolloff = binHz(i)
+				break
+			}
+		}
+	}
+
 	// positive spectral flux on raw magnitudes (bounded, mean per bin)
 	var flux float64
 	if a.prev != nil {
@@ -268,6 +294,7 @@ func (a *Analyzer) emitFrame() {
 		Mid:      norm(midSum),
 		Treble:   norm(trebleSum),
 		Centroid: centroid,
+		Rolloff:  rolloff,
 		Flux:     flux,
 		Bins:     bins,
 	}
@@ -293,7 +320,7 @@ func (a *Analyzer) Finish() *Result {
 		res.TempoNote = "no analysis frames"
 		return res
 	}
-	var sumRMS, sumB, sumM, sumT, sumC float64
+	var sumRMS, sumB, sumM, sumT, sumC, sumR float64
 	peak := 0.0
 	for _, f := range frames {
 		sumRMS += f.RMS
@@ -301,6 +328,7 @@ func (a *Analyzer) Finish() *Result {
 		sumM += f.Mid
 		sumT += f.Treble
 		sumC += f.Centroid
+		sumR += f.Rolloff
 		if f.RMS > peak {
 			peak = f.RMS
 		}
@@ -312,6 +340,7 @@ func (a *Analyzer) Finish() *Result {
 	res.MidEnergy = sumM / n
 	res.TrebleEnergy = sumT / n
 	res.MeanCentroid = sumC / n
+	res.MeanRolloff = sumR / n
 
 	res.OnsetCount = detectOnsets(frames)
 	bpm, conf, note := estimateTempo(frames, res.HopSeconds)

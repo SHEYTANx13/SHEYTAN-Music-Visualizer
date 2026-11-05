@@ -221,10 +221,10 @@ honestly.
 | github.com/srwiley/oksvg | v0.0.0-20221011165216-be6e8873101c | BSD-3-Clause |
 | github.com/srwiley/rasterx | v0.0.0-20220730225603-2ab79fcdd4ef | BSD-3-Clause |
 | github.com/yuin/goldmark | v1.8.2 | MIT |
-| golang.org/x/image | v0.43.0 | BSD-3-Clause (Copyright The Go Authors) |
-| golang.org/x/net | v0.35.0 | BSD-3-Clause (Copyright The Go Authors) |
+| golang.org/x/image | v0.45.0 | BSD-3-Clause (Copyright The Go Authors) |
+| golang.org/x/net | v0.62.0 | BSD-3-Clause (Copyright The Go Authors) |
 | golang.org/x/sys | v0.49.0 | BSD-3-Clause (Copyright The Go Authors) |
-| golang.org/x/text | v0.38.0 | BSD-3-Clause (Copyright The Go Authors) |
+| golang.org/x/text | v0.43.0 | BSD-3-Clause (Copyright The Go Authors) |
 
 ### Full module graph (superset of the linked set; build/test/tooling only)
 

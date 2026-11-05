@@ -58,6 +58,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -160,15 +161,24 @@ type Result struct {
 	LogFiles             int
 	FailedCommandRecords int
 	WarningRecords       int
-	FailedJobs           []string // authoritative required-job failures
-	FailedSteps          []string // authoritative failed steps "job/step"
-	APIJobsFetched       int
-	APIJobsWithSteps     int
-	APILogsFetched       int
-	APIError             string
-	AlertsFetched        int
-	AlertsError          string
-	ReportPath           string
+	// FailedGateCount/SkippedGateCount/PassedGateCount come from the
+	// AUTHORITATIVE gate table (ParseGates): the summary counts that
+	// must agree with the listed gates, and that must never inherit a
+	// passing gate into the failed list (run 41915116613 class).
+	FailedGateCount  int
+	SkippedGateCount int
+	PassedGateCount  int
+	// Gates holds every distinct parsed gate in deterministic order.
+	Gates            []GateRecord
+	FailedJobs       []string // authoritative required-job failures
+	FailedSteps      []string // authoritative failed steps "job/step"
+	APIJobsFetched   int
+	APIJobsWithSteps int
+	APILogsFetched   int
+	APIError         string
+	AlertsFetched    int
+	AlertsError      string
+	ReportPath       string
 }
 
 type logFile struct {
@@ -179,20 +189,38 @@ type logFile struct {
 }
 
 type finding struct {
-	where string // "[job | artifact/file:line]"
-	line  string
+	// line is the matched text (identical copies from repeated log
+	// sections are deduplicated into one entry).
+	line string
+	// wheres lists every provenance of the match:
+	// "[job | artifact/file:line]" — provenance is never lost.
+	wheres []string
+}
+
+// addFinding appends provenance to an existing finding with identical
+// text or creates a new one. Order of first appearance is stable.
+func addFinding(list []finding, line, where string) []finding {
+	for i := range list {
+		if list[i].line == line {
+			list[i].wheres = appendUnique(list[i].wheres, where)
+			return list
+		}
+	}
+	return append(list, finding{line: line, wheres: []string{where}})
 }
 
 var (
 	errorPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`^EXIT_CODE: [1-9][0-9]* FAIL\b`),
 		regexp.MustCompile(`::error::`),
+		regexp.MustCompile(`##\[error\]`),
 		regexp.MustCompile(`^--- FAIL: `),
 		regexp.MustCompile(`^FAIL[ \t]+\S`),
 		regexp.MustCompile(`^ERROR:`),
 	}
 	warningPatterns = []*regexp.Regexp{
 		regexp.MustCompile(`::warning::`),
+		regexp.MustCompile(`##\[warning\]`),
 		regexp.MustCompile(`^WARNING:`),
 	}
 )
@@ -297,7 +325,9 @@ func Collect(opts Options) (Result, error) {
 		return files[i].rel < files[k].rel
 	})
 
-	// Scan for error/warning findings with provenance.
+	// Scan for error/warning findings with provenance. Identical lines
+	// repeated by log copies are deduplicated into one finding with
+	// every provenance preserved (never silently dropped).
 	var errFindings, warnFindings []finding
 	for _, f := range files {
 		fh, err := os.Open(f.abs)
@@ -310,21 +340,16 @@ func Collect(opts Options) (Result, error) {
 		for sc.Scan() {
 			lineNo++
 			line := sc.Text()
+			where := fmt.Sprintf("[%s | %s/%s:%d]", f.job.Name, f.artifact, f.rel, lineNo)
 			for _, re := range errorPatterns {
 				if re.MatchString(line) {
-					errFindings = append(errFindings, finding{
-						where: fmt.Sprintf("[%s | %s/%s:%d]", f.job.Name, f.artifact, f.rel, lineNo),
-						line:  line,
-					})
+					errFindings = addFinding(errFindings, line, where)
 					break
 				}
 			}
 			for _, re := range warningPatterns {
 				if re.MatchString(line) {
-					warnFindings = append(warnFindings, finding{
-						where: fmt.Sprintf("[%s | %s/%s:%d]", f.job.Name, f.artifact, f.rel, lineNo),
-						line:  line,
-					})
+					warnFindings = addFinding(warnFindings, line, where)
 					break
 				}
 			}
@@ -342,6 +367,28 @@ func Collect(opts Options) (Result, error) {
 	res.WarningRecords = len(warnFindings)
 	res.LogFiles = len(files)
 	res.JobsExpected = len(meta.Jobs)
+
+	// AUTHORITATIVE gate status: parsed from the structured command
+	// records (and explicit SKIPPED markers) of every captured log.
+	// This is the single source the summary counts must agree with: a
+	// gate with an explicit `EXIT_CODE: 0 PASS` can never be listed as
+	// failed, SKIPPED is not a command failure, and the failed-gate
+	// count equals the number of distinct failed gates listed.
+	gates, gerr := ParseGates(files)
+	if gerr != nil {
+		return res, fmt.Errorf("cilog: parsing gate records: %w", gerr)
+	}
+	res.Gates = gates
+	for _, g := range gates {
+		switch g.Status {
+		case GateFail:
+			res.FailedGateCount++
+		case GateSkipped:
+			res.SkippedGateCount++
+		default:
+			res.PassedGateCount++
+		}
+	}
 
 	// Authoritative enrichment: GitHub API job/step conclusions, raw
 	// job logs, and same-commit code scanning alerts. Best effort.
@@ -703,12 +750,60 @@ func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, fil
 	} else {
 		fmt.Fprintf(w, "A. AUTHORITATIVE JOB CONCLUSIONS: none — every required job succeeded.\n")
 	}
-	fmt.Fprintf(w, "\nC. TEXT-DERIVED ERROR RECORDS (supplemental; provenance included):\n")
+
+	// B. AUTHORITATIVE GATE / COMMAND STATUS. The single source for
+	// gate status: each gate's own structured EXIT_CODE record. The
+	// summary counts MUST agree with this table — this is the fix for
+	// the run-41915116613 class, where a text-grep summary listed
+	// passing gates (EXIT_CODE: 0 PASS) among failed gates.
+	fmt.Fprintf(w, "\nB. GATE / COMMAND STATUS (authoritative — parsed from structured command records):\n")
+	fmt.Fprintf(w, "   Rule: a gate's status comes ONLY from its own command record's EXIT_CODE line.\n")
+	fmt.Fprintf(w, "   A gate with `EXIT_CODE: 0 PASS` is never listed as failed; a gate recorded\n")
+	fmt.Fprintf(w, "   `SKIPPED: gate ...` is dependency-blocked, not a command failure; the\n")
+	fmt.Fprintf(w, "   failed-gate count equals the number of distinct failed gates listed here.\n\n")
+	if len(res.Gates) == 0 {
+		fmt.Fprintf(w, "   (no structured command records found in the captured logs)\n")
+	} else {
+		fmt.Fprintf(w, "   %-22s %-26s %-8s %-5s %s\n", "JOB", "GATE/STEP", "STATUS", "EXIT", "PROVENANCE")
+		for _, g := range res.Gates {
+			exit := "-"
+			if g.Status != GateSkipped {
+				exit = strconv.Itoa(g.ExitCode)
+			}
+			detail := ""
+			if g.Status == GateSkipped {
+				detail = " (" + g.Reason + ")"
+			}
+			fmt.Fprintf(w, "   %-22s %-26s %-8s %-5s %s%s\n",
+				g.Job, g.Step, g.Status, exit, strings.Join(g.Wheres, ", "), detail)
+		}
+	}
+	failedNames := make([]string, 0, res.FailedGateCount)
+	skippedNames := make([]string, 0, res.SkippedGateCount)
+	for _, g := range res.Gates {
+		switch g.Status {
+		case GateFail:
+			failedNames = append(failedNames, g.Job+"/"+g.Step)
+		case GateSkipped:
+			skippedNames = append(skippedNames, g.Job+"/"+g.Step)
+		}
+	}
+	fmt.Fprintf(w, "\n   Distinct failed gates: %d", res.FailedGateCount)
+	if len(failedNames) > 0 {
+		fmt.Fprintf(w, " (%s)", strings.Join(failedNames, ", "))
+	}
+	fmt.Fprintf(w, "\n   Distinct skipped gates: %d", res.SkippedGateCount)
+	if len(skippedNames) > 0 {
+		fmt.Fprintf(w, " (%s)", strings.Join(skippedNames, ", "))
+	}
+	fmt.Fprintf(w, "\n   Distinct passed gates: %d\n", res.PassedGateCount)
+
+	fmt.Fprintf(w, "\nC. TEXT-DERIVED ERROR RECORDS (supplemental; provenance included; copies deduplicated):\n")
 	if len(errs) == 0 {
 		fmt.Fprintf(w, "   (no failed command records, ::error:: lines, failed Go test summaries or ERROR: lines found)\n")
 	} else {
 		for _, f := range errs {
-			fmt.Fprintf(w, "   %s %s\n", f.where, red.Apply(f.line))
+			fmt.Fprintf(w, "   %s %s\n", strings.Join(f.wheres, ", "), red.Apply(f.line))
 		}
 	}
 	if len(failedJobs) > 0 && len(errs) == 0 {
@@ -722,7 +817,7 @@ func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, fil
 		fmt.Fprintf(w, "(no ::warning:: or WARNING: lines found in the consolidated logs)\n")
 	} else {
 		for _, f := range warns {
-			fmt.Fprintf(w, "%s %s\n", f.where, red.Apply(f.line))
+			fmt.Fprintf(w, "%s %s\n", strings.Join(f.wheres, ", "), red.Apply(f.line))
 		}
 	}
 	fmt.Fprintf(w, "Note: GitHub UI annotations (warning toasts) are not exposed by the REST jobs API; only\n")
@@ -777,8 +872,10 @@ func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, fil
 	fmt.Fprintf(w, "Captured log files read:       %d\n", res.LogFiles)
 	fmt.Fprintf(w, "API job conclusions fetched:   %d (with step lists: %d)\n", res.APIJobsFetched, res.APIJobsWithSteps)
 	fmt.Fprintf(w, "API raw job logs fetched:      %d\n", res.APILogsFetched)
-	fmt.Fprintf(w, "Failed command/error records:  %d\n", res.FailedCommandRecords)
+	fmt.Fprintf(w, "Failed command/error records:  %d (deduplicated; supplemental — see 5.C)\n", res.FailedCommandRecords)
 	fmt.Fprintf(w, "Warning records:               %d\n", res.WarningRecords)
+	fmt.Fprintf(w, "Distinct gates parsed:         %d (failed %d, skipped %d, passed %d — see 5.B)\n",
+		len(res.Gates), res.FailedGateCount, res.SkippedGateCount, res.PassedGateCount)
 	if len(res.NeverStarted) == 0 {
 		fmt.Fprintf(w, "Never-started (skipped) jobs:  (none)\n")
 	} else {

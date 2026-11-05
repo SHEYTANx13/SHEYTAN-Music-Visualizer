@@ -67,6 +67,10 @@ func Import(ctx context.Context, path string, cache *Cache, prog Progress) (*Imp
 		return nil, err
 	}
 	defer dec.Close()
+	// Context-aware adapters (the optional FFmpeg AAC family) kill
+	// their child process on cancellation; native decoders ignore
+	// this no-op hook and honor ctx between chunks as before.
+	attachDecodeContext(dec, ctx)
 
 	md, err := dec.Probe()
 	if err != nil {

@@ -184,20 +184,24 @@ fn fs(@builtin(position) frag : vec4f) -> @location(0) vec4f {
 
 // GPURenderer renders the radial mode on the GPU.
 type GPURenderer struct {
-	info        BackendInfo
-	preference  Preference
-	instance    *wgpu.Instance
-	adapter     *wgpu.Adapter // kept reachable for the device lifetime
-	device      *wgpu.Device
-	queue       *wgpu.Queue
-	pipeline    *wgpu.RenderPipeline
-	uniform     *wgpu.Buffer
-	bindGroup   *wgpu.BindGroup
-	cpu         *CPURenderer // fallback renderer for non-GPU modes
-	lastW       int
-	lastH       int
-	target      *wgpu.Texture
-	readback    *wgpu.Buffer
+	info       BackendInfo
+	preference Preference
+	instance   *wgpu.Instance
+	adapter    *wgpu.Adapter // kept reachable for the device lifetime
+	device     *wgpu.Device
+	queue      *wgpu.Queue
+	pipeline   *wgpu.RenderPipeline
+	uniform    *wgpu.Buffer
+	bindGroup  *wgpu.BindGroup
+	cpu        *CPURenderer // fallback renderer for non-GPU modes
+	lastW      int
+	lastH      int
+	target     *wgpu.Texture
+	readback   *wgpu.Buffer
+	// renderGPUFn is the GPU submission step, injectable so the
+	// device-loss RECOVERY path can be drilled in tests without
+	// hardware (production code always uses the real renderGPU).
+	renderGPUFn func(in visualizer.FrameInput) error
 	lastImage   *image.RGBA
 	uniformData []byte // reused uniform staging buffer
 }
@@ -303,6 +307,7 @@ func newGPURendererFull(p Preference, opts ...*wgpu.RequestAdapterOptions) (*GPU
 		// never silently relabeled.
 		g.info.Detail = fmt.Sprintf("preference %q requested but adapter reports %q", p, api)
 	}
+	g.renderGPUFn = g.renderGPU
 	return g, g.info
 }
 
@@ -454,7 +459,7 @@ func (g *GPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 	if in.Width <= 0 || in.Height <= 0 || in.Width > 7680 || in.Height > 4320 {
 		return nil, fmt.Errorf("render: invalid frame size %dx%d", in.Width, in.Height)
 	}
-	if err := g.renderGPU(in); err != nil {
+	if err := g.renderGPUFn(in); err != nil {
 		// device loss / adapter failure: report and fall back. A
 		// lost device is named explicitly (wgpu.ErrDeviceLost) so
 		// the reason is not confused with a transient error.

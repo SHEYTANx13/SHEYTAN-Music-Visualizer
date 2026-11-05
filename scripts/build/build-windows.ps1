@@ -44,10 +44,19 @@ Set-Content -Path $env:CI_LOG_FILE -Value "" -NoNewline # fresh local run
 $job = "phase2-windows-build"
 # goffi_static: required when Fyne (CGO) and wgpu (goffi FFI) link in one
 # binary; harmless on Windows (see ai-notes.md).
-# Array form: PowerShell passes each element as its own argument to
-# native commands. A single "-tags goffi_static" string would arrive at
-# go as ONE argument and break flag parsing.
-$goTags = @("-tags", "goffi_static")
+#
+# SINGLE DOCUMENTED TAG SOURCE: $env:SHEYTAN_GO_TAGS. Every gate runs in
+# a CHILD pwsh process (Capture-Step serializes each gate to its own
+# script); a child process never inherits the caller's PowerShell
+# variables — only the environment crosses the boundary. Each generated
+# gate script initializes and validates its own local $goTags array
+# from this variable (Capture-Step preamble), so no gate can reference
+# a parent-only variable and fail under StrictMode.
+#
+# Inside a gate script the array form is used: PowerShell passes each
+# element as its own argument to native commands; a single
+# "-tags goffi_static" string would arrive at go as ONE argument.
+$env:SHEYTAN_GO_TAGS = "-tags goffi_static"
 $script:failures = 0
 $script:failedGates = @()
 $script:skippedGates = @()

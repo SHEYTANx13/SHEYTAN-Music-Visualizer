@@ -85,12 +85,19 @@ type Studio struct {
 	importing      bool
 	importCancel   context.CancelFunc
 
+	// Manual tempo/offset correction (roadmap Phase 2 #3). The
+	// override bypasses the measured-tempo confidence gate because
+	// it is an explicit user decision; 0 = measured BPM.
+	tempoOverrideBPM  float64
+	syncOffsetSeconds float64
+
 	subscriber func(Event)
 }
 
 // New creates the studio: cache dirs, decoders, device output.
 func New() (*Studio, error) {
 	audio.RegisterAll()
+	audio.RegisterFFmpegOptional() // optional M4A/AAC family; no-op when FFmpeg is absent
 	dir, err := DataDir()
 	if err != nil {
 		return nil, err
@@ -204,6 +211,67 @@ func (s *Studio) SetConfig(c visualizer.Config) {
 	s.mu.Lock()
 	s.vizConfig = c
 	s.mu.Unlock()
+}
+
+// TempoOverride returns the manual tempo correction (0 = measured).
+func (s *Studio) TempoOverride() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.tempoOverrideBPM
+}
+
+// SetTempoOverride sets the manual tempo correction. 0 restores the
+// measured BPM; a nonzero value is clamped into the 30..300 BPM
+// range and deliberately bypasses the tempo-confidence gate (the
+// user decided). Returns the applied value.
+func (s *Studio) SetTempoOverride(bpm float64) float64 {
+	if bpm != 0 {
+		bpm = clampRange(bpm, 30, 300, 0)
+		if bpm == 0 {
+			bpm = 120 // clamp fallback: a musical default
+		}
+	}
+	s.mu.Lock()
+	s.tempoOverrideBPM = bpm
+	s.mu.Unlock()
+	return bpm
+}
+
+// SyncOffset returns the manual sync correction in seconds.
+func (s *Studio) SyncOffset() float64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.syncOffsetSeconds
+}
+
+// SetSyncOffset sets the manual audio/visual sync correction
+// (±5 s clamped). Analysis features are read at (t - offset).
+func (s *Studio) SetSyncOffset(seconds float64) {
+	if seconds != seconds { // NaN
+		seconds = 0
+	}
+	if seconds < -5 {
+		seconds = -5
+	}
+	if seconds > 5 {
+		seconds = 5
+	}
+	s.mu.Lock()
+	s.syncOffsetSeconds = seconds
+	s.mu.Unlock()
+}
+
+func clampRange(v, lo, hi, def float64) float64 {
+	if v != v { // NaN
+		return def
+	}
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // Import --------------------------------------------------------------
@@ -480,11 +548,21 @@ type FrameResult struct {
 }
 
 // audioStateAt interpolates analysis frames at time t (deterministic).
+// The manual sync offset shifts the analysis timeline: features are
+// read at (t - syncOffset). The manual tempo override (when set)
+// replaces the measured BPM for the beat phase and deliberately
+// bypasses the confidence gate (explicit user correction).
 func (s *Studio) audioStateAt(analysis *dsp.Result, t float64) visualizer.AudioState {
+	s.mu.RLock()
+	tempoOverride, syncOffset := s.tempoOverrideBPM, s.syncOffsetSeconds
+	s.mu.RUnlock()
+
+	te := t - syncOffset
 	st := visualizer.AudioState{Time: t}
 	if analysis == nil || len(analysis.Frames) == 0 {
 		return st
 	}
+	t = te
 	idx := int(t / analysis.HopSeconds)
 	if idx < 0 {
 		idx = 0
@@ -496,9 +574,18 @@ func (s *Studio) audioStateAt(analysis *dsp.Result, t float64) visualizer.AudioS
 	st.RMS, st.Bass, st.Mid, st.Treble = f.RMS, f.Bass, f.Mid, f.Treble
 	st.Centroid, st.Flux, st.Onset = f.Centroid, f.Flux, f.Onset
 	st.Bins = visualizer.InterpolateBins(f.Bins, 0)
-	if analysis.TempoReliable && analysis.BPM > 0 {
-		beat := 60.0 / analysis.BPM
+	bpm := analysis.BPM
+	reliable := analysis.TempoReliable
+	if tempoOverride > 0 {
+		bpm = tempoOverride
+		reliable = true // user override: explicit decision wins
+	}
+	if reliable && bpm > 0 {
+		beat := 60.0 / bpm
 		st.BeatPhase = math.Mod(t, beat) / beat
+		if st.BeatPhase < 0 {
+			st.BeatPhase += 1
+		}
 	}
 	return st
 }
@@ -551,6 +638,11 @@ func (s *Studio) SaveProject(path string) error {
 	}
 	p := project.NewDefault(track.SourceName, s.trackSourcePath(track), track.Fingerprint,
 		track.Metadata.Container, track.Duration)
+	s.mu.RLock()
+	tempoOverride, syncOffset := s.tempoOverrideBPM, s.syncOffsetSeconds
+	s.mu.RUnlock()
+	p.TempoOverrideBPM = tempoOverride
+	p.SyncOffsetSeconds = syncOffset
 	p.Visualizer = project.VisualizerSettings{
 		Mode: string(cfg.Mode), Sensitivity: cfg.Sensitivity, Smoothing: cfg.Smoothing,
 		Glow: cfg.Glow, Palette: cfg.Palette, ParticleDensity: cfg.ParticleDensity,
@@ -558,6 +650,8 @@ func (s *Studio) SaveProject(path string) error {
 		MotionStyle: cfg.MotionStyle, VariationSeed: cfg.VariationSeed,
 		ShowTitle: cfg.ShowTitle, TitleText: cfg.TitleText,
 		SubtitleText: cfg.SubtitleText, ShowWatermark: cfg.ShowWatermark,
+		BackgroundLayer:     string(cfg.BackgroundLayer),
+		BackgroundIntensity: cfg.BackgroundIntensity,
 	}
 	if err := project.Save(p, path); err != nil {
 		s.emit(Event{Kind: EventProjectFailed, Message: err.Error()})
@@ -626,8 +720,12 @@ func (s *Studio) LoadProject(path string) error {
 	cfg.TitleText = p.Visualizer.TitleText
 	cfg.SubtitleText = p.Visualizer.SubtitleText
 	cfg.ShowWatermark = p.Visualizer.ShowWatermark
+	cfg.BackgroundLayer = visualizer.Mode(p.Visualizer.BackgroundLayer)
+	cfg.BackgroundIntensity = p.Visualizer.BackgroundIntensity
 	cfg.Clamp()
 	s.vizConfig = cfg
+	s.tempoOverrideBPM = p.TempoOverrideBPM
+	s.syncOffsetSeconds = p.SyncOffsetSeconds
 	s.userCustomized = true
 	s.mu.Unlock()
 	s.emit(Event{Kind: EventProjectLoaded, Message: filepath.Base(path)})

@@ -1,0 +1,16 @@
+# actionlint configuration for this repository.
+#
+# `ubuntu-26.04` is the deliberate, explicit Linux runner choice for
+# every Linux job in this repository (mission-mandated migration away
+# from ubuntu-24.04 and the ambiguous ubuntu-latest). actionlint
+# v1.7.12's bundled runner-label database predates that image, so the
+# label is registered here the documented way for known GitHub-hosted
+# labels that a given actionlint build does not know yet.
+#
+# NOTE (evidence honesty): listing the label here makes local linting
+# pass; it does NOT prove GitHub currently offers the ubuntu-26.04
+# image. The first hosted run of build-desktop.yml is the proof point;
+# until then the hosted-availability status is NOT OBSERVED.
+self-hosted-runner:
+  labels:
+    - ubuntu-26.04

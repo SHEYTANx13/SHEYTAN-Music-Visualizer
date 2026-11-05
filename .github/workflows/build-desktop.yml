@@ -42,8 +42,8 @@ jobs:
     # work of the platform jobs: no native package setup, no tests, no
     # package builds — those run exactly once in build-linux and
     # build-windows.
-    name: preflight (ubuntu-24.04)
-    runs-on: ubuntu-24.04
+    name: preflight (ubuntu-26.04)
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -51,12 +51,25 @@ jobs:
         with:
           persist-credentials: false
 
+      # Cache policy (run 41915116613 class: concurrent setup-go jobs
+      # fighting over one identical cache key / cache reservation):
+      # exactly ONE Linux job (build-linux) saves the Go build cache
+      # for this OS. preflight, CodeQL and collect-logs run with
+      # caching DISABLED so they can never write or reserve the same
+      # key. build-windows saves under a different runner OS key.
       - name: Setup Go (go.mod toolchain is the version authority)
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
+          cache: false
+
+      - name: Record runner image (migration evidence)
+        run: |
+          {
+            echo "=== OS image ==="
+            grep PRETTY_NAME /etc/os-release || true
+            uname -srm
+          } | tee ci-logs/runner-image.log
 
       - name: Preflight gates (gofmt, tidy -diff, mod verify)
         run: |
@@ -85,6 +98,9 @@ jobs:
         with:
           persist-credentials: false
 
+      # Windows keeps its own Go build cache: the runner OS differs
+      # from the Linux jobs, so its cache key cannot collide with the
+      # single Linux saver (build-linux).
       - name: Setup Go (go.mod toolchain is the version authority)
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -144,18 +160,22 @@ jobs:
                 Write-Output "ERROR: first gcc on PATH is NOT the UCRT64 toolchain (stale shadowing toolchain detected)"
                 $script:fail = $true
               }
-              gcc --version | Select-Object -First 1
-              Write-Output "gcc -dumpmachine: $(gcc -dumpmachine)"
-              if ((gcc -dumpmachine) -ne 'x86_64-w64-mingw32') {
-                Write-Output "ERROR: unexpected gcc -dumpmachine (want x86_64-w64-mingw32)"
-                $script:fail = $true
-              }
+              # $(...) captures the FULL output first; piping a native
+              # tool into `Select-Object -First 1` can terminate the
+              # producer early and mask its real behavior.
+              "gcc: $((gcc --version)[0])"
+              $dumpmachine = (gcc -dumpmachine)
+              Write-Output "gcc -dumpmachine: $dumpmachine"
               $defines = 'int main(void){return 0;}' | gcc -E -dM -xc -
               if (-not ($defines | Select-String -SimpleMatch '_UCRT')) {
                 Write-Output "ERROR: compiler does not define _UCRT (not a UCRT64 toolchain)"
                 $script:fail = $true
               } else {
                 Write-Output "UCRT runtime confirmed (_UCRT defined)"
+              }
+              if ($dumpmachine -ne 'x86_64-w64-mingw32') {
+                Write-Output "ERROR: unexpected gcc -dumpmachine (want x86_64-w64-mingw32)"
+                $script:fail = $true
               }
             }
             Write-Output "=== pkg-config identity ==="
@@ -242,9 +262,12 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    name: build-linux (ubuntu-24.04, x64)
+    # Explicit ubuntu-26.04 (deliberate stable OS choice — never an
+    # ambiguous ubuntu-latest). This is the ONLY Linux job allowed to
+    # save the Go build cache (see the cache-policy note above).
+    name: build-linux (ubuntu-26.04, x64)
     needs: preflight
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -265,6 +288,9 @@ jobs:
           set -o pipefail
           mkdir -p ci-logs
           {
+            echo "=== OS image (ubuntu-26.04 migration evidence) ==="
+            grep PRETTY_NAME /etc/os-release || true
+            uname -srm
             echo "=== apt-get update ==="
             sudo apt-get update
             echo "=== apt-get install Fyne prerequisites (minimal) ==="
@@ -345,9 +371,14 @@ jobs:
 
   collect-logs:
     name: collect-logs (single log.txt evidence)
+    # always() so a failed build/CodeQL job still yields its report;
+    # !cancelled() so a user-cancelled run does not start a pointless
+    # collection. `needs` guarantees every evidence-producing job has
+    # reached a TERMINAL state before this job starts — the collector
+    # never observes an in_progress/pending job conclusion.
     needs: [preflight, build-windows, build-linux, codeql]
-    if: always()
-    runs-on: ubuntu-24.04
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -369,8 +400,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
+          cache: false # cache policy: only build-linux/build-windows save caches
 
       - name: Download log parts (namespaced, never flattened)
         id: download
@@ -419,7 +449,8 @@ jobs:
               {"name": "preflight",     "result": "${RESULT_PREFLIGHT}", "artifact": "preflight-logs-part", "required": true},
               {"name": "build-windows", "result": "${RESULT_WINDOWS}",   "artifact": "windows-logs-part",  "required": true},
               {"name": "build-linux",   "result": "${RESULT_LINUX}",     "artifact": "linux-logs-part",    "required": true},
-              {"name": "codeql",        "result": "${RESULT_CODEQL}",    "artifact": "codeql-logs-part",   "required": true}
+              {"name": "codeql-go",      "result": "${RESULT_CODEQL}",    "artifact": "codeql-logs-part-go",      "required": true},
+              {"name": "codeql-actions", "result": "${RESULT_CODEQL}",    "artifact": "codeql-logs-part-actions", "required": true}
             ]
           }
           MANIFEST
@@ -478,7 +509,7 @@ jobs:
             echo "WARNING: could not list artifacts for cleanup (report already uploaded); temporary part artifacts may remain visible."
             exit 0
           fi
-          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | endswith("-logs-part")) or (.name == "consolidated-run-log")) | .id' "$tmp")
+          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | endswith("-logs-part")) or (.name | startswith("codeql-logs-part-")) or (.name == "consolidated-run-log")) | .id' "$tmp")
           for id in $ids; do
             url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
             if curl -sf -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$url"; then

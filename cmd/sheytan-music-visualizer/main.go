@@ -151,6 +151,7 @@ func checkLogDirectory(out io.Writer) error {
 // the registry reports them from implementations (not a hard-coded list).
 func checkDecoderRegistry(out io.Writer) error {
 	audio.RegisterAll()
+	ffa := audio.RegisterFFmpegOptional() // optional; no-op when FFmpeg is absent
 	fs := audio.SupportedFormats()
 	got := map[string]bool{}
 	for _, f := range fs {
@@ -161,7 +162,16 @@ func checkDecoderRegistry(out io.Writer) error {
 			return fmt.Errorf("decoder %s not registered", want)
 		}
 	}
-	fmt.Fprintf(out, "  decoders=%d (wav, mp3, flac, ogg)\n", len(fs))
+	names := make([]string, 0, len(fs))
+	for _, f := range fs {
+		names = append(names, f.Container)
+	}
+	fmt.Fprintf(out, "  decoders=%d (%s)\n", len(fs), strings.Join(names, ", "))
+	if ffa.Available {
+		fmt.Fprintf(out, "  ffmpeg-adapter=%s (optional AAC/M4A family via local FFmpeg)\n", ffa.Version)
+	} else {
+		fmt.Fprintf(out, "  ffmpeg-adapter=not registered (%s)\n", ffa.Reason)
+	}
 	return nil
 }
 

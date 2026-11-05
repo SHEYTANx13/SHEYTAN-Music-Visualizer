@@ -52,6 +52,15 @@ type Project struct {
 
 	// TimelineMarkers are user-placed chapter marks (seconds).
 	TimelineMarkers []float64 `json:"timelineMarkers,omitempty"`
+
+	// TempoOverrideBPM is the manual tempo correction (roadmap
+	// Phase 2 #3). 0 = use the measured BPM; 30..300 = user value
+	// that bypasses the tempo-confidence gate (user decision).
+	TempoOverrideBPM float64 `json:"tempoOverrideBpm,omitempty"`
+	// SyncOffsetSeconds is the manual audio/visual sync correction:
+	// analysis features are read at (t - SyncOffsetSeconds).
+	// Clamped to ±5 s.
+	SyncOffsetSeconds float64 `json:"syncOffsetSeconds,omitempty"`
 }
 
 // MediaRef points at the source track.
@@ -83,6 +92,10 @@ type VisualizerSettings struct {
 	TitleText     string `json:"titleText"`
 	SubtitleText  string `json:"subtitleText"`
 	ShowWatermark bool   `json:"showWatermark"`
+
+	// Layered composition (mirrors visualizer.Config).
+	BackgroundLayer     string  `json:"backgroundLayer,omitempty"`
+	BackgroundIntensity float64 `json:"backgroundIntensity,omitempty"`
 }
 
 // ExportDefaults carries the remembered export settings.
@@ -139,6 +152,21 @@ func (p *Project) Validate() error {
 	if p.Export.Encoder == "" {
 		p.Export.Encoder = "auto"
 	}
+	// Layered composition mirror fields.
+	switch p.Visualizer.BackgroundLayer {
+	case "", "none", "bars", "radial", "waveform", "particles":
+	default:
+		p.Visualizer.BackgroundLayer = "none"
+	}
+	p.Visualizer.BackgroundIntensity = clamp(p.Visualizer.BackgroundIntensity, 0, 0.6, 0)
+	if p.Visualizer.BackgroundLayer == "none" || p.Visualizer.BackgroundLayer == "" {
+		p.Visualizer.BackgroundIntensity = 0
+	}
+	// Manual tempo/offset correction.
+	if p.TempoOverrideBPM != 0 {
+		p.TempoOverrideBPM = clamp(p.TempoOverrideBPM, 30, 300, 0)
+	}
+	p.SyncOffsetSeconds = clamp(p.SyncOffsetSeconds, -5, 5, 0)
 	return nil
 }
 
