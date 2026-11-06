@@ -627,3 +627,97 @@ Not run / blocked (exact reasons):
 No test was deleted, weakened or skipped to achieve green. The
 baseline suite at the starting commit 50ffe8b passed before any edit
 (17 gates), and the final ladder passes after them.
+
+---
+
+## Session 2026-11-06 — CI repair for run 42026322748 (no push made)
+
+- **Mission:** repair every demonstrated workflow/logging failure of GitHub
+  Actions run 42026322748 (build-desktop.yml @ fcc81a0d1581817f3263cb8f161291caf147739c),
+  restore complete Windows/Linux/CodeQL/log-collector evidence per run,
+  deliver the updated source ZIP + note.md. Repository constraint honored:
+  NO push, PR, tag, release or settings change was performed.
+- **Baseline:** live HEAD == the run's commit (branch had not diverged);
+  worktree clean; `$goTags`/Capture-Step preamble repair from run
+  41915116613 already present. Reproduction of the primary failure is in
+  `evidence/run-42026322748-forensic-analysis.log`.
+
+### Confirmed root causes and fixes
+
+| # | Root cause (run evidence) | Fix |
+|---|---|---|
+| RC-1 | preflight teed `ci-logs/runner-image.log` BEFORE any mkdir; the mkdir lived in the NEXT step, which was skipped after the failure | `scripts/ci/bootstrap-logs.sh` + `Bootstrap-Logs.ps1` run immediately after checkout in EVERY evidence-producing job |
+| RC-2 | upload `ci-logs/**` then found no files (`if-no-files-found: error` cascade) | bootstrap guarantees `bootstrap.log`; uploads now use the directory form `path: ci-logs` |
+| RC-3 | `build-windows`/`build-linux` had success-only `needs: preflight` -> both SKIPPED on preflight failure | dependency removed; collector remains the only aggregator (`always() && !cancelled()`); fail-closed step preserved |
+| RC-4 | preflight gates skipped after the runner-image step failed | gates step condition `!cancelled()`; runner-image capture hardened (PIPESTATUS, guarded lookups, toolchain identity) |
+| RC-5 | no guaranteed bootstrap evidence in build-windows/build-linux/codeql/collect-logs | bootstrap step in all five jobs + `if: failure()` BLOCKED-marker evidence steps |
+| RC-6 | artifact names carried no run attempt | attempt-suffixed names everywhere; manifest + cleanup jq pattern updated together |
+| RC-7 | one job could be listed twice as failed (manifest + API rows); CodeQL manifest rows didn't match API matrix-leg names | `deriveFailures` deduplicated per stable job id (one entry, BOTH sources; API authoritative; aggregate rows proven successful are RECONCILED, never failures); manifest rows renamed `analyze (go)`/`analyze (actions)` |
+| RC-8 | raw-log 404 classes conflated | per-job classification: skipped -> NEVER_STARTED (never fetched), in-progress -> IN_PROGRESS_AT_SNAPSHOT, completed 404 -> API_LOG_UNAVAILABLE, artifact missing + API log -> ARTIFACT_MISSING + RECOVERED_FROM_API |
+| RC-9 | collector-binary build failure left the run without log.txt | `scripts/ci/emergency-report.sh` fallback writes/uploads a truthful report; fail-closed still fires (rc forced >= 1) |
+| RC-10 | CodeQL vet/build used raw tee (no structured record for a silent build) | both steps wrapped in `scripts/ci/capture.sh` (EXIT_CODE: 0 PASS even with empty stdout) |
+| RC-11 | "0 failed / 0 skipped / 0 passed" ambiguity for a failed job that reached no gate | collector reports GATES NOT REACHED explicitly; BLOCKED gate state added (`BLOCKED: gate` lines parse into their own state) |
+| RC-12 | codeql caller held `actions: write` it never uses when called | tightened to `actions: read` (the reusable collect job needing write is skipped in that path) |
+
+Also fixed during validation: the prereq install steps' failure counter was
+modified inside a pipeline subshell and silently lost (actionlint
+SC2030/SC2031) — replaced with a status-file mechanism in both workflows;
+`build-windows.ps1` now asserts the UCRT64 target triple + `_UCRT` define
+itself (previously only the workflow identity gate did); `build-linux.sh`
+records `BLOCKED: gate` for missing prerequisites and runs under
+`set -Eeuo pipefail`; `github.run_started_at` feeds the manifest
+(`start_time_utc`) — actionlint v1.7.12's expression DB predates it, noted
+in `.github/actionlint.yaml` (same DB-vintage class as the ubuntu-26.04
+label note).
+
+### Verification record (all local, real commands)
+
+| Gate | Result |
+|---|---|
+| `scripts/build/build-linux.sh --mode preflight` (set -Eeuo pipefail) | PASS |
+| `--mode desktop` full ladder (tests, vet, build, exe, --version/--self-check, race, export proofs, GPU/software-honesty, studio, GUI smoke Xvfb, govulncheck) | PASS — `evidence/phase-build-linux.log` |
+| gofmt -l . / go mod tidy -diff / go mod verify | PASS |
+| `go test -tags goffi_static ./...` (incl. 9 new cilog classification fixtures) | PASS |
+| `go test -race` concurrent cores | PASS |
+| `govulncheck ./...` (pinned v1.9.0) | No vulnerabilities found |
+| `scripts/ci/tests/test-ci-plumbing.sh` (A1-A6, C14-C16, B7-B13, D22-25 static, E43/E44, F49) | 11 PASS / 0 FAIL / 2 NOT RUN (pwsh absent) |
+| `scripts/ci/tests/test-codeql-coverage-inventory.sh` | PASS — run-commit inventory 65 = 40 + 25 (`evidence/codeql-coverage-inventory.txt`) |
+| `scripts/ci/tests/Test-CaptureStep.ps1` | NOT RUN — pwsh not installed on this host |
+| actionlint v1.7.12 + PyYAML parse + semantic spot checks | PASS (2 known DB-vintage `run_started_at` findings, documented) |
+| shellcheck 0.10.0 (all bash CI scripts) | CLEAN |
+| Collector e2e on real local logs (skip/failure/determinism injections) | PASS with truthful exit codes 3/0/3 — `evidence/phase-collector.log` |
+| actionlint prereq-counter regression (SC2030/SC2031) | found and FIXED in both workflows |
+
+### Not run / blocked (exact reasons)
+
+- **Hosted CI re-run (all phases on GitHub runners)**: NOT RUN — pushing is
+  forbidden by the mission; the repaired workflow's first hosted run is the
+  proof point for ubuntu-26.04 image availability, Windows UCRT64 build,
+  CodeQL scan and the consolidated artifact lifecycle.
+- **Windows-target build/runtime, PE validation, portable ZIP**: NOT RUN —
+  no Windows host (static UCRT64 regressions verified; see
+  `evidence/phase-build-windows.log`).
+- **CodeQL diagnostics + open alerts for the analyzed commit**: BLOCKED —
+  GitHub REST API rate-limited for this host (unauthenticated 60/hr
+  exhausted) and the Actions page is JS-rendered; not invented. The hosted
+  collector now retrieves open alerts per run into log.txt section 7.
+- **PowerShell runtime fixtures**: NOT RUN — no pwsh on this host; shipped
+  for the CI Windows runner.
+- **`go list` compiled-file proof inside the inventory fixture**: NOT
+  COMPLETED on this host (CGO/pkg-config prerequisites for full package
+  resolution are session-local); the git ls-tree inventory is the
+  authoritative proof and the limitation is recorded in the fixture output.
+
+### Next handoff
+
+1. Push nothing until the user reviews; the deliverable is the source ZIP +
+   note.md beside it.
+2. On the next hosted run: expect every independent job to execute even if
+   preflight fails; check `log.txt` section 2 (job table with classified
+   log sources), 5.B (gate table incl. BLOCKED), 7 (CodeQL status + open
+   alerts for the exact commit) and 8 (missing/recovered sources).
+3. If `analyze (go)` still scans fewer files than production .go files in a
+   future tree, re-run `scripts/ci/tests/test-codeql-coverage-inventory.sh`
+   and re-derive the claim before touching CodeQL config.
+4. Run `scripts/ci/tests/Test-CaptureStep.ps1` on any pwsh 7 host to close
+   the PowerShell fixture gap recorded above.

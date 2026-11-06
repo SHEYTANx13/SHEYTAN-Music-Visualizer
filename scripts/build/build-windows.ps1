@@ -61,6 +61,35 @@ $script:failures = 0
 $script:failedGates = @()
 $script:skippedGates = @()
 
+# Missing-prerequisite honesty (agent.md §4 vocabulary): without the Go
+# toolchain NOTHING in this script can be verified. Dependent gates are
+# recorded BLOCKED (never passed, never failed-with-fake-output) and the
+# script exits non-zero so the CI job stays red with truthful evidence.
+# The gate records use the same `BLOCKED: gate <name> (<reason>)` shape the
+# consolidated report parses into the distinct BLOCKED state.
+$goResolved = Get-Command go -ErrorAction SilentlyContinue
+if ($null -eq $goResolved) {
+    $blockedReason = "go toolchain not found on PATH"
+    $blockedGates = @(
+        "toolchain-report", "desktop-env-check", "gofmt-verify",
+        "go-mod-tidy-verify", "go-mod-verify", "go-test", "go-vet",
+        "go-build-packages", "build-executable", "run-version",
+        "run-self-check", "stage-portable", "validate-pe", "create-portable-zip"
+    )
+    foreach ($g in $blockedGates) {
+        Add-Content -Path $env:CI_LOG_FILE -Value ("BLOCKED: gate {0} ({1})" -f $g, $blockedReason)
+    }
+    Write-Note ""
+    $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    Write-Note "RUN SUMMARY - $job"
+    Write-Note "Ended:            $ended"
+    Write-Note "Failed gates:     0 (prerequisite missing - this is NOT a passing run)"
+    Write-Note "Blocked gate list: $($blockedGates -join ' ')"
+    Write-Note "GATES NOT REACHED - the Go toolchain is required for every gate in this script."
+    Write-Note "RUN RESULT: FAIL"
+    exit 1
+}
+
 function Write-Note([string]$text) {
     Add-Content -Path $env:CI_LOG_FILE -Value $text
 }
@@ -104,10 +133,25 @@ $rc = Capture-Step -Job $job -Step "desktop-env-check" -ToolContext "gate:env" -
     }
     $gcc = (Get-Command gcc -ErrorAction SilentlyContinue)
     if ($null -eq $gcc) {
-        Write-Output "ERROR: gcc not found on PATH (MSYS2 UCRT64 required)"
+        Write-Output "BLOCKED: gate desktop-env-check (gcc not found on PATH - MSYS2 UCRT64 required)"
         exit 1
     }
     Write-Output "gcc resolved to: $($gcc.Source)"
+    # Target-triple and runtime-define identity (run-42026322748 brief
+    # D24-25): a stale MINGW64 or non-UCRT toolchain is rejected with a
+    # precise error, never silently used.
+    $dumpmachine = (gcc -dumpmachine)
+    Write-Output "gcc -dumpmachine: $dumpmachine"
+    if ($dumpmachine -ne "x86_64-w64-mingw32") {
+        Write-Output "ERROR: gcc -dumpmachine is '$dumpmachine' (want x86_64-w64-mingw32 - MSYS2 UCRT64 required)"
+        exit 1
+    }
+    $defines = 'int main(void){return 0;}' | gcc -E -dM -xc -
+    if (-not ($defines | Select-String -SimpleMatch '_UCRT')) {
+        Write-Output "ERROR: compiler does not define _UCRT (stale MINGW64 or non-UCRT toolchain detected)"
+        exit 1
+    }
+    Write-Output "UCRT64 toolchain identity OK: x86_64-w64-mingw32, _UCRT defined"
     exit 0
 }
 if ($rc -ne 0) { Fail-Gate "desktop-env-check" }

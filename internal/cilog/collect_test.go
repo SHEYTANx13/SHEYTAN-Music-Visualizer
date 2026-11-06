@@ -336,7 +336,7 @@ func TestFailedJobWithoutErrorMarkerIsReportedAsFailure(t *testing.T) {
 	if len(res.FailedJobs) != 1 || !strings.Contains(res.FailedJobs[0], "build-windows") {
 		t.Fatalf("failed jobs = %v, want exactly build-windows", res.FailedJobs)
 	}
-	if !strings.Contains(report, "JOB FAILURE: build-windows (workflow conclusion: failure)") {
+	if !strings.Contains(report, "JOB FAILURE: build-windows — workflow conclusion: failure") {
 		t.Fatal("report must list the authoritative job conclusion failure")
 	}
 	if !strings.Contains(report, "failed WITHOUT any textual error marker") {

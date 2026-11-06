@@ -1,0 +1,100 @@
+==============================================================
+PHASE: WINDOWS x64 / UCRT64 — EVIDENCE STATE
+Started: 2026-11-06T00:22:31Z
+==============================================================
+
+Windows-target native build/runtime: NOT RUN — this verification host is
+Linux (no Windows runner, no pwsh). Nothing about the Windows binary, PE
+layout, process self-check, GUI launch or physical GPU/audio on Windows is
+claimed from this session. The workflow's build-windows job will produce
+that evidence on the hosted runner.
+
+What WAS verified locally (static + structural):
+
+---- CMD: pwsh availability (expected NOT AVAILABLE)
+$ bash -c command -v pwsh || echo 'pwsh: NOT AVAILABLE on this host'
+pwsh: NOT AVAILABLE on this host
+[exit code: 0]
+
+---- CMD: CRLF/encoding of every .ps1
+$ bash -c file scripts/build/build-windows.ps1 scripts/ci/Capture-Step.ps1 scripts/ci/Bootstrap-Logs.ps1 scripts/ci/tests/Test-CaptureStep.ps1
+scripts/build/build-windows.ps1:       C source, Unicode text, UTF-8 text, with CRLF line terminators
+scripts/ci/Capture-Step.ps1:           Unicode text, UTF-8 text, with CRLF line terminators
+scripts/ci/Bootstrap-Logs.ps1:         Unicode text, UTF-8 text
+scripts/ci/tests/Test-CaptureStep.ps1: Unicode text, UTF-8 text, with CRLF line terminators
+[exit code: 0]
+
+---- CMD: every standalone PS1 defines its own variables (no parent-only $goTags)
+$ bash -c grep -n 'goTags' scripts/build/build-windows.ps1 scripts/ci/Capture-Step.ps1 | head -12
+scripts/build/build-windows.ps1:52:# gate script initializes and validates its own local $goTags array
+scripts/build/build-windows.ps1:180:$rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -Command { go test $goTags ./... }
+scripts/build/build-windows.ps1:183:$rc = Capture-Step -Job $job -Step "go-vet" -ToolContext "gate:go-vet" -Command { go vet $goTags ./... }
+scripts/build/build-windows.ps1:186:$rc = Capture-Step -Job $job -Step "go-build-packages" -ToolContext "gate:go-build" -Command { go build $goTags ./... }
+scripts/build/build-windows.ps1:194:    $args_ = @("build", "-trimpath") + $goTags
+scripts/ci/Capture-Step.ps1:15:#     gate initializes and validates its own local $goTags argument
+scripts/ci/Capture-Step.ps1:18:#     parent-only $goTags and failed under StrictMode with "The
+scripts/ci/Capture-Step.ps1:19:#     variable '$goTags' cannot be retrieved because it has not been
+scripts/ci/Capture-Step.ps1:89:$goTags = @($env:SHEYTAN_GO_TAGS -split '\s+' | Where-Object { $_ -ne '' })
+scripts/ci/Capture-Step.ps1:90:if ($goTags.Count -eq 0) {
+scripts/ci/Capture-Step.ps1:94:foreach ($tagToken in $goTags) {
+[exit code: 0]
+
+---- CMD: single documented tag source present
+$ bash -c grep -n 'SHEYTAN_GO_TAGS' scripts/build/build-windows.ps1 scripts/ci/Capture-Step.ps1 scripts/ci/tests/Test-CaptureStep.ps1 | head
+scripts/build/build-windows.ps1:48:# SINGLE DOCUMENTED TAG SOURCE: $env:SHEYTAN_GO_TAGS. Every gate runs in
+scripts/build/build-windows.ps1:59:$env:SHEYTAN_GO_TAGS = "-tags goffi_static"
+scripts/ci/Capture-Step.ps1:16:#     array from the single documented source $env:SHEYTAN_GO_TAGS.
+scripts/ci/Capture-Step.ps1:85:if ([string]::IsNullOrWhiteSpace($env:SHEYTAN_GO_TAGS)) {
+scripts/ci/Capture-Step.ps1:86:    Write-Output "ERROR: SHEYTAN_GO_TAGS is not set; each gate must initialize its own Go tag array from this documented source (the goffi_static build tag is required when Fyne and wgpu link together)."
+scripts/ci/Capture-Step.ps1:89:$goTags = @($env:SHEYTAN_GO_TAGS -split '\s+' | Where-Object { $_ -ne '' })
+scripts/ci/Capture-Step.ps1:91:    Write-Output "ERROR: SHEYTAN_GO_TAGS parsed to an empty argument array."
+scripts/ci/Capture-Step.ps1:96:        Write-Output "ERROR: SHEYTAN_GO_TAGS contains an invalid argument token: '$tagToken'."
+scripts/ci/tests/Test-CaptureStep.ps1:14:#        argument array from $env:SHEYTAN_GO_TAGS and succeeds.
+scripts/ci/tests/Test-CaptureStep.ps1:22:#        tags via the documented $env:SHEYTAN_GO_TAGS source.
+[exit code: 0]
+
+---- CMD: UCRT64 identity gate present in the workflow (target triple + _UCRT + stale rejection)
+$ bash -c grep -n 'x86_64-w64-mingw32\|_UCRT\|stale shadowing toolchain' .github/workflows/build-desktop.yml | head
+241:                Write-Output "ERROR: first gcc on PATH is NOT the UCRT64 toolchain (stale shadowing toolchain detected)"
+251:              if (-not ($defines | Select-String -SimpleMatch '_UCRT')) {
+252:                Write-Output "ERROR: compiler does not define _UCRT (not a UCRT64 toolchain)"
+255:                Write-Output "UCRT runtime confirmed (_UCRT defined)"
+257:              if ($dumpmachine -ne 'x86_64-w64-mingw32') {
+258:                Write-Output "ERROR: unexpected gcc -dumpmachine (want x86_64-w64-mingw32)"
+[exit code: 0]
+
+---- CMD: build-windows.ps1 carries its own UCRT64 identity assertions (D24-25)
+$ bash -c grep -n 'dumpmachine\|_UCRT\|UCRT64 toolchain identity OK' scripts/build/build-windows.ps1
+120:    "gcc -dumpmachine: $(gcc -dumpmachine)"
+143:    $dumpmachine = (gcc -dumpmachine)
+144:    Write-Output "gcc -dumpmachine: $dumpmachine"
+145:    if ($dumpmachine -ne "x86_64-w64-mingw32") {
+146:        Write-Output "ERROR: gcc -dumpmachine is '$dumpmachine' (want x86_64-w64-mingw32 - MSYS2 UCRT64 required)"
+150:    if (-not ($defines | Select-String -SimpleMatch '_UCRT')) {
+151:        Write-Output "ERROR: compiler does not define _UCRT (stale MINGW64 or non-UCRT toolchain detected)"
+154:    Write-Output "UCRT64 toolchain identity OK: x86_64-w64-mingw32, _UCRT defined"
+[exit code: 0]
+
+---- CMD: missing-prerequisite BLOCKED semantics (D20/C20)
+$ bash -c grep -n 'BLOCKED: gate' scripts/build/build-windows.ps1 scripts/build/build-linux.sh scripts/ci/Capture-Step.ps1 | head
+scripts/build/build-windows.ps1:68:# The gate records use the same `BLOCKED: gate <name> (<reason>)` shape the
+scripts/build/build-windows.ps1:80:        Add-Content -Path $env:CI_LOG_FILE -Value ("BLOCKED: gate {0} ({1})" -f $g, $blockedReason)
+scripts/build/build-windows.ps1:136:        Write-Output "BLOCKED: gate desktop-env-check (gcc not found on PATH - MSYS2 UCRT64 required)"
+scripts/build/build-linux.sh:85:  printf 'BLOCKED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"
+[exit code: 0]
+
+---- CMD: workflow declares UCRT64 MSYS2 install set
+$ bash -c grep -n -A 3 'mingw-w64-ucrt' .github/workflows/build-desktop.yml | head -8
+201:            mingw-w64-ucrt-x86_64-gcc
+202:            mingw-w64-ucrt-x86_64-pkgconf
+203-
+204-      # The setup-msys2 action scopes PATH changes to `shell: msys2`
+205-      # steps; normal pwsh steps would otherwise resolve the runner's
+[exit code: 0]
+
+PowerShell runtime fixtures (scripts/ci/tests/Test-CaptureStep.ps1): NOT RUN
+on this host — they must run on any pwsh 7 host (the CI Windows runner or a
+local Windows machine). The fixture file ships in this source tree and is
+listed in agent.md; its C7-C21/D22-D23 coverage is implemented and reviewed
+but NOT executed here, and no pass is claimed.
+==============================================================

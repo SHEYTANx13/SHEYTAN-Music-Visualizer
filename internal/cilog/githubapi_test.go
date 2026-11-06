@@ -149,8 +149,9 @@ func TestAPIConclusionsAreAuthoritativeWithoutErrorMarkers(t *testing.T) {
 	}
 	for _, want := range []string{
 		"STEP FAILURE: build-windows / step 3 \"Build and verify Windows x64 desktop app\": failure",
-		"JOB FAILURE: build-windows (workflow conclusion: failure)",
-		"JOB FAILURE: build-windows (API job conclusion: failure)",
+		// Deduplicated by stable job id: ONE entry that shows BOTH sources
+		// (run 42026322748 brief §1.J) — never two rows for one failure.
+		"JOB FAILURE: build-windows — workflow conclusion: failure; API job conclusion: failure",
 		"3. STEP STATUS TABLE",
 		"5. FAILURE INDEX",
 		"OVERALL RESULT: FAIL",

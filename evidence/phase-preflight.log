@@ -1,0 +1,80 @@
+==============================================================
+SHEYTAN MUSIC VISUALIZER — PHASE 2 LOCAL VERIFICATION (LINUX)
+Product:  SHEYTAN Music Visualizer (SHEYTAN™, licensor Parsaetak)
+Mode:     preflight
+Host:     Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
+Started:  2026-11-05T23:52:10Z
+Build tag: goffi_static (Fyne + wgpu link compatibility)
+==============================================================
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: toolchain-report
+STARTED: 2026-11-05T23:52:10Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: bash -c go version; echo "GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=$(go env CGO_ENABLED) GOTOOLCHAIN=$(go env GOTOOLCHAIN)"; echo "GOMOD=$(go env GOMOD)"; gcc --version | head -1; pkg-config --version; ffmpeg -version 2>/dev/null | head -1 || echo "ffmpeg: NOT AVAILABLE"
+TOOL_CONTEXT: gate:toolchain
+--- OUTPUT (stdout+stderr from first byte) ---
+go version go1.27.3 linux/amd64
+GOOS=linux GOARCH=amd64 CGO_ENABLED=1 GOTOOLCHAIN=local
+GOMOD=/home/z/my-project/work/repo/go.mod
+gcc (Debian 14.2.0-19) 14.2.0
+1.8.1
+ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-05T23:52:11Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: gofmt-verify
+STARTED: 2026-11-05T23:52:11Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: bash -c out=$(gofmt -l .); if [ -n "$out" ]; then printf "%s\n" "$out"; echo "ERROR: gofmt reported unformatted files"; exit 1; fi; echo "gofmt clean"
+TOOL_CONTEXT: gate:gofmt
+--- OUTPUT (stdout+stderr from first byte) ---
+gofmt clean
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-05T23:52:11Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: go-mod-tidy-verify
+STARTED: 2026-11-05T23:52:11Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go mod tidy -diff
+TOOL_CONTEXT: gate:go-mod-tidy
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-05T23:52:11Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: go-mod-verify
+STARTED: 2026-11-05T23:52:11Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go mod verify
+TOOL_CONTEXT: gate:go-mod-verify
+--- OUTPUT (stdout+stderr from first byte) ---
+all modules verified
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-05T23:52:13Z
+===== COMMAND END =====
+
+Preflight mode requested: tests, vet, builds and runtime checks belong to the platform build jobs.
+
+RUN SUMMARY — phase2-linux-build
+Ended:            2026-11-05T23:52:13Z
+Mode:             preflight
+Failed gates:     0
+
+FAILURE INDEX (EXIT_CODE records with non-zero codes):
+(none — all captured commands returned exit code 0)
+RUN RESULT: PASS
+==============================================================

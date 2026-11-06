@@ -1,0 +1,13 @@
+# shellcheckrc — scoped analyzer policy for scripts/ci/tests/
+#
+# These fixtures deliberately run each case in an ISOLATED subshell so that
+# environment changes and log files cannot leak between fixtures:
+#   disable=SC2030/SC2031 — the 'Modification ... local to subshell' notes
+#     ARE the isolation mechanism working as designed (env exports inside
+#     ( ... ) blocks).
+#   disable=SC1091 — capture.sh is sourced from the repo root, resolved at
+#     runtime from BASH_SOURCE; shellcheck cannot follow that path.
+# Everything else (SC2164 cd guards, quoting, word splitting) stays enabled.
+disable=SC2030
+disable=SC2031
+disable=SC1091

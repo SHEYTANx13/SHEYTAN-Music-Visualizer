@@ -29,7 +29,14 @@
 # path and is REQUIRED for every build that links Fyne + wgpu together
 # (see ai-notes.md). The tag is harmless on Windows.
 
-set -u
+# Justifications (shellcheck):
+#   SC2086: unquoted $GO_TAGS splitting is the documented argv contract
+#   SC2016: single-quoted gate bodies are expanded by the inner bash -c, deliberately
+#   SC1091: capture.sh is sourced from REPO_ROOT resolved at runtime
+# shellcheck disable=SC2086
+# shellcheck disable=SC2016
+# shellcheck disable=SC1091
+set -Eeuo pipefail
 umask 022
 
 MODE="desktop"
@@ -53,6 +60,7 @@ export CI_LOG_FILE
 : >"$CI_LOG_FILE" # fresh local run; the packaged copy is evidence/phase2-build.log
 
 # shellcheck source=../ci/capture.sh
+# shellcheck disable=SC1091
 source "$REPO_ROOT/scripts/ci/capture.sh"
 
 JOB="phase2-linux-build"
@@ -69,6 +77,13 @@ skip_gate() {
   SKIPPED_GATES="$SKIPPED_GATES $1"
   printf 'SKIPPED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"
 }
+blocked_gate() {
+  # Missing-prerequisite classification, distinct from SKIPPED (intentional
+  # not-run) and from FAIL (a command ran and exited nonzero). The
+  # consolidated report parses these into the BLOCKED gate state.
+  SKIPPED_GATES="$SKIPPED_GATES $1"
+  printf 'BLOCKED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"
+}
 
 note "=============================================================="
 note "SHEYTAN MUSIC VISUALIZER — PHASE 2 LOCAL VERIFICATION (LINUX)"
@@ -80,6 +95,32 @@ note "Build tag: goffi_static (Fyne + wgpu link compatibility)"
 note "=============================================================="
 
 GO_TAGS="-tags goffi_static"
+
+# Missing-prerequisite honesty (agent.md §4 vocabulary): without the Go
+# toolchain NOTHING in this script can be verified. Dependent gates are
+# recorded BLOCKED (never passed, never failed-with-fake-output) and the
+# script fails so the CI job stays red with truthful evidence.
+if ! command -v go >/dev/null 2>&1; then
+  blocked_gate toolchain-report "go toolchain not found on PATH"
+  blocked_gate gofmt-verify "go toolchain not found on PATH"
+  blocked_gate go-mod-tidy-verify "go toolchain not found on PATH"
+  blocked_gate go-mod-verify "go toolchain not found on PATH"
+  if [ "$MODE" = "desktop" ]; then
+    for g in go-test go-vet go-build-packages build-executable run-version run-self-check go-test-race export-validation audio-validation gpu-validation studio-integration; do
+      blocked_gate "$g" "go toolchain not found on PATH"
+    done
+  fi
+  note ""
+  note "RUN SUMMARY — $JOB"
+  note "Ended:            $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  note "Mode:             $MODE"
+  note "Failed gates:     0 (prerequisite missing — this is NOT a passing run)"
+  note "Blocked gate list:$SKIPPED_GATES"
+  note "GATES NOT REACHED — the Go toolchain is required for every gate in this script."
+  note "RUN RESULT: FAIL"
+  note "=============================================================="
+  exit 1
+fi
 
 # ---- toolchain report ------------------------------------------------------
 CI_TOOL_CONTEXT="gate:toolchain" ci_capture "$JOB" toolchain-report bash -c 'go version; echo "GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=$(go env CGO_ENABLED) GOTOOLCHAIN=$(go env GOTOOLCHAIN)"; echo "GOMOD=$(go env GOMOD)"; gcc --version | head -1; pkg-config --version; ffmpeg -version 2>/dev/null | head -1 || echo "ffmpeg: NOT AVAILABLE"' ||
@@ -106,6 +147,7 @@ if [ "$MODE" = "preflight" ]; then
   note "Mode:             $MODE"
   note "Failed gates:     $FAILURES"
   if [ -n "$FAILED_GATES" ]; then note "Failed gate list:$FAILED_GATES"; fi
+  if [ -n "$SKIPPED_GATES" ]; then note "Skipped/blocked gate list:$SKIPPED_GATES"; fi
   note ""
   note "FAILURE INDEX (EXIT_CODE records with non-zero codes):"
   if grep -n 'EXIT_CODE: [1-9][0-9]* FAIL' "$CI_LOG_FILE" >/dev/null 2>&1; then
@@ -229,7 +271,7 @@ note "Ended:            $ENDED"
 note "Mode:             $MODE"
 note "Failed gates:     $FAILURES"
 if [ -n "$FAILED_GATES" ]; then note "Failed gate list:$FAILED_GATES"; fi
-if [ -n "$SKIPPED_GATES" ]; then note "Skipped gate list:$SKIPPED_GATES"; fi
+if [ -n "$SKIPPED_GATES" ]; then note "Skipped/blocked gate list:$SKIPPED_GATES"; fi
 note ""
 note "FAILURE INDEX (EXIT_CODE records with non-zero codes):"
 if grep -n 'EXIT_CODE: [1-9][0-9]* FAIL' "$CI_LOG_FILE" >/dev/null 2>&1; then
@@ -238,9 +280,9 @@ else
   note "(none — all captured commands returned exit code 0)"
 fi
 note ""
-note "SKIPPED GATES:"
-if grep -n '^SKIPPED: ' "$CI_LOG_FILE" >/dev/null 2>&1; then
-  grep -n '^SKIPPED: ' "$CI_LOG_FILE"
+note "SKIPPED/BLOCKED GATES:"
+if grep -n '^SKIPPED: \|^BLOCKED: ' "$CI_LOG_FILE" >/dev/null 2>&1; then
+  grep -n '^SKIPPED: \|^BLOCKED: ' "$CI_LOG_FILE"
 else
   note "(none)"
 fi

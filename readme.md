@@ -120,6 +120,15 @@ Every command's stdout/stderr is captured from the first byte into
 `ci-logs/phase2-build.log` with structured records and true exit codes; the
 script exits non-zero if any required gate fails.
 
+CI regression fixtures (deterministic, no GitHub credentials needed):
+
+```bash
+scripts/ci/tests/test-ci-plumbing.sh                 # bootstrap/capture/DAG/UCRT64-static/fallback fixtures
+scripts/ci/tests/test-codeql-coverage-inventory.sh   # CodeQL 40/65 file-coverage proof
+scripts/ci/tests/Test-CaptureStep.ps1                # PowerShell capture fixtures (needs pwsh 7)
+go test ./internal/cilog/                            # collector correctness fixtures
+```
+
 ## GPU backend preference
 
 The renderer selects a real hardware adapter when one can be proven
@@ -169,11 +178,16 @@ go run -tags goffi_static ./cmd/sheytan-music-visualizer                # the st
   Visualizer/logs/app.log`; `SHEYTAN_LOG_DIR` overrides explicitly.
 - **Data** (canonical PCM cache): `<user-config-dir>/SHEYTAN Music
   Visualizer/data/pcm-cache`; `SHEYTAN_DATA_DIR` overrides (tests use this).
-- **Build/CI logs**: `ci-logs/phase2-build.log`; CI uploads internal
-  per-job log parts, then `cmd/ci-log-collector` aggregates them (plus
-  the authoritative GitHub job/step conclusions) into ONE artifact named
-  exactly `log.txt`; the internal parts are deleted after validation so
-  the run exposes a single diagnostic file.
+- **Build/CI logs**: `ci-logs/` (bootstrapped by `scripts/ci/bootstrap-logs.sh`
+  / `Bootstrap-Logs.ps1` before anything writes into it); CI uploads one
+  namespaced, attempt-suffixed log-part artifact per evidence-producing job
+  (`preflight-logs-part-attempt<N>`, `windows-logs-part-attempt<N>`,
+  `linux-logs-part-attempt<N>`, `codeql-logs-part-{go,actions}-attempt<N>`),
+  then `cmd/ci-log-collector` aggregates them (plus the authoritative GitHub
+  job/step conclusions and open code-scanning alerts) into ONE artifact named
+  exactly `log.txt`; the internal parts are deleted only after the final
+  upload is validated, so the run exposes a single diagnostic file. Every
+  Linux CI job runs on the explicit `ubuntu-26.04` runner label.
 - The packaged Phase 2 verification transcript lives in `evidence/`.
 
 ## License

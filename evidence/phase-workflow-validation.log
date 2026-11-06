@@ -1,0 +1,57 @@
+==============================================================
+PHASE: WORKFLOW / SCRIPT VALIDATION
+Started: 2026-11-06T00:15:22Z
+actionlint: v1.7.12
+shellcheck: version: 0.10.0
+==============================================================
+
+---------- actionlint (both workflows, repo label config) ----------
+
+---- CMD: actionlint -oneline (both workflows; run_started_at findings are the documented v1.7.12 DB-vintage limitation, see .github/actionlint.yaml)
+$ actionlint -oneline .github/workflows/build-desktop.yml .github/workflows/codeql.yml
+.github/workflows/build-desktop.yml:572:27: property "run_started_at" is not defined in object type {action: string; action_path: string; action_ref: string; action_repository: string; action_status: string; actor: string; actor_id: string; api_url: string; artifact_cache_size_limit: number; base_ref: string; env: string; event: object; event_name: string; event_path: string; graphql_url: string; head_ref: string; job: string; output: string; path: string; ref: string; ref_name: string; ref_protected: bool; ref_type: string; repository: string; repository_id: string; repository_owner: string; repository_owner_id: string; repository_visibility: string; repositoryurl: string; retention_days: number; run_attempt: string; run_id: string; run_number: string; secret_source: string; server_url: string; sha: string; state: string; step_summary: string; token: string; triggering_actor: string; workflow: string; workflow_ref: string; workflow_sha: string; workspace: string} [expression]
+.github/workflows/codeql.yml:275:27: property "run_started_at" is not defined in object type {action: string; action_path: string; action_ref: string; action_repository: string; action_status: string; actor: string; actor_id: string; api_url: string; artifact_cache_size_limit: number; base_ref: string; env: string; event: object; event_name: string; event_path: string; graphql_url: string; head_ref: string; job: string; output: string; path: string; ref: string; ref_name: string; ref_protected: bool; ref_type: string; repository: string; repository_id: string; repository_owner: string; repository_owner_id: string; repository_visibility: string; repositoryurl: string; retention_days: number; run_attempt: string; run_id: string; run_number: string; secret_source: string; server_url: string; sha: string; state: string; step_summary: string; token: string; triggering_actor: string; workflow: string; workflow_ref: string; workflow_sha: string; workspace: string} [expression]
+[exit code: 1]
+
+---------- YAML structural parse (python yaml.safe_load) ----------
+yaml parse exit: 0
+
+---------- workflow semantic spot checks (yaml) ----------
+semantic checks exit: 0
+
+---------- shellcheck (all bash CI scripts) ----------
+
+---- CMD: shellcheck scripts/ci/capture.sh
+$ shellcheck -x scripts/ci/capture.sh
+[exit code: 0]
+
+---- CMD: shellcheck scripts/ci/bootstrap-logs.sh
+$ shellcheck -x scripts/ci/bootstrap-logs.sh
+[exit code: 0]
+
+---- CMD: shellcheck scripts/ci/emergency-report.sh
+$ shellcheck -x scripts/ci/emergency-report.sh
+[exit code: 0]
+
+---- CMD: shellcheck scripts/build/build-linux.sh
+$ shellcheck -x scripts/build/build-linux.sh
+[exit code: 0]
+
+---- CMD: shellcheck scripts/ci/tests/test-ci-plumbing.sh
+$ shellcheck -x scripts/ci/tests/test-ci-plumbing.sh
+[exit code: 0]
+
+---- CMD: shellcheck scripts/ci/tests/test-codeql-coverage-inventory.sh
+$ shellcheck -x scripts/ci/tests/test-codeql-coverage-inventory.sh
+[exit code: 0]
+
+---------- PowerShell parser check ----------
+pwsh availability: NOT AVAILABLE on this host
+PowerShell parser: NOT RUN — pwsh is not installed on this Linux host.
+Mitigation performed instead: the CRLF/encoding of each .ps1 was verified with ,
+and the scripts ship for parsing on any pwsh 7 host (CI Windows runner / local Windows).
+This limitation is recorded in evidence/phase-build-windows.log and note.md.
+
+==============================================================
+END OF WORKFLOW VALIDATION
+==============================================================

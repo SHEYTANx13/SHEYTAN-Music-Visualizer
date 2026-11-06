@@ -1,0 +1,91 @@
+==============================================================
+PHASE: SECURITY / DEPENDENCIES / PERMISSIONS
+Started: 2026-11-06T00:22:25Z
+==============================================================
+
+---- CMD: govulncheck -version
+$ govulncheck -version
+Go: go1.27.3
+Scanner: govulncheck@v1.9.0
+DB: https://vuln.go.dev
+DB updated: 2026-11-05 22:55:15 +0000 UTC
+
+[exit code: 0]
+
+---- CMD: govulncheck ./... (pinned v1.9.0, same as CI)
+$ govulncheck ./...
+No vulnerabilities found.
+[exit code: 0]
+
+---------- least-privilege / secret-hygiene review (static, verified) ----------
+
+---- CMD: workflow permissions inventory
+$ grep -nE permissions:|^      [a-z-]+: (read|write|none) .github/workflows/build-desktop.yml .github/workflows/codeql.yml
+.github/workflows/build-desktop.yml:63:permissions:
+.github/workflows/build-desktop.yml:510:    permissions:
+.github/workflows/build-desktop.yml:511:      actions: read
+.github/workflows/build-desktop.yml:512:      contents: read
+.github/workflows/build-desktop.yml:513:      security-events: write
+.github/workflows/build-desktop.yml:530:    permissions:
+.github/workflows/build-desktop.yml:531:      contents: read
+.github/workflows/build-desktop.yml:536:      actions: write
+.github/workflows/build-desktop.yml:539:      security-events: read
+.github/workflows/codeql.yml:49:permissions:
+.github/workflows/codeql.yml:62:    permissions:
+.github/workflows/codeql.yml:63:      actions: read
+.github/workflows/codeql.yml:64:      contents: read
+.github/workflows/codeql.yml:65:      security-events: write
+.github/workflows/codeql.yml:239:    permissions:
+.github/workflows/codeql.yml:240:      contents: read
+.github/workflows/codeql.yml:241:      actions: write # delete the temporary codeql-logs-part after aggregation
+.github/workflows/codeql.yml:242:      security-events: read # fetch open code scanning alerts for the analyzed commit
+[exit code: 0]
+
+---- CMD: no write-all anywhere
+$ grep -rn write-all .github/workflows/
+[exit code: 0]
+
+---- CMD: no eval / Invoke-Expression anywhere
+$ grep -rniE eval |invoke-expression .github/workflows/ scripts/
+scripts/ci/tests/Test-CaptureStep.ps1:156:        # never re-quoted into a single command string via Invoke-Expression.
+scripts/ci/tests/Test-CaptureStep.ps1:157:        Report PASS "C21" "space-containing -ldflags value passed verbatim; no Invoke-Expression reinterpretation"
+[exit code: 0]
+
+---- CMD: persist-credentials: false on all checkouts
+$ grep -c persist-credentials: false .github/workflows/build-desktop.yml .github/workflows/codeql.yml
+.github/workflows/build-desktop.yml:4
+.github/workflows/codeql.yml:2
+[exit code: 0]
+
+---- CMD: token exposure check: GITHUB_TOKEN only via env, never in run text
+$ grep -n GITHUB_TOKEN\|GH_TOKEN .github/workflows/build-desktop.yml .github/workflows/codeql.yml
+.github/workflows/build-desktop.yml:633:          GITHUB_TOKEN: ${{ github.token }}
+.github/workflows/build-desktop.yml:695:          GH_TOKEN: ${{ github.token }}
+.github/workflows/build-desktop.yml:700:          curl -sfL --retry 2 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+.github/workflows/build-desktop.yml:709:            if curl -sf -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$url"; then
+.github/workflows/codeql.yml:328:          GITHUB_TOKEN: ${{ github.token }}
+.github/workflows/codeql.yml:385:          GH_TOKEN: ${{ github.token }}
+.github/workflows/codeql.yml:390:          curl -sfL --retry 2 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+.github/workflows/codeql.yml:399:            if curl -sf -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$url"; then
+[exit code: 0]
+
+---- CMD: collector redaction unit test (exact-token + pattern classes)
+$ go test -tags goffi_static -run TestSecretRedaction -v ./internal/cilog/
+=== RUN   TestSecretRedaction
+--- PASS: TestSecretRedaction (0.00s)
+PASS
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	0.005s
+[exit code: 0]
+
+Review notes:
+- permissions: workflow top level contents:read; collector job adds actions:write
+  (temp-artifact deletion AFTER verified upload) and security-events:read (alert
+  retrieval); codeql analyze leg keeps actions:read + security-events:write; the
+  codeql CALLER job was tightened from actions:write to actions:read during this
+  repair (the reusable collect job that needs write is skipped when called).
+- secret hygiene: tokens only via env blocks; the collector redacts exact tokens
+  and token/Bearer/PEM patterns before anything leaves the runner; the emergency
+  fallback applies sed-based token/Bearer redaction (fixture E44).
+- no apt-get upgrade anywhere; minimal Fyne prerequisite set only.
+- govulncheck v1.9.0 (pinned, verified against go1.27): no vulnerabilities found.
+==============================================================

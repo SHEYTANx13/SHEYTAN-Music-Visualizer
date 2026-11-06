@@ -52,8 +52,8 @@ restrained. Black dominates; red is the accent. Identity tokens live in
 | Go/Fyne application scaffold, identity, buildinfo, logging authorities | DELIVERED | `internal/*`, `cmd/*`, `ui/fyne`; `go build ./...`, `go test ./...` PASS |
 | `--version` / `--self-check` CLI contracts | DELIVERED | captured in `evidence/phase1-build.log` |
 | Build scripts with first-byte capture and true exit codes (Linux + Windows) | DELIVERED (Linux executed; Windows script statically validated, NOT RUN — no Windows host) | `evidence/phase1-build.log` |
-| `build-desktop.yml` (preflight, Windows x64 UCRT64, Linux x64, collect-logs) | DELIVERED as workflow definition; HOSTED CI: NOT RUN | actionlint + YAML parse PASS |
-| `codeql.yml` (go manual + actions none) | DELIVERED as workflow definition; CodeQL: NOT RUN | actionlint + YAML parse PASS |
+| `build-desktop.yml` (preflight, Windows x64 UCRT64, Linux x64, collect-logs) | DELIVERED as workflow definition; 2026-11-06 repair: guaranteed log bootstrap in every job, fully independent evidence DAG (a failed preflight can no longer skip Windows/Linux), attempt-suffixed artifact identity, emergency fallback report, GATES NOT REACHED semantics. HOSTED CI: NOT RUN (no push was made) | actionlint + YAML parse + semantic spot checks + `scripts/ci/tests/test-ci-plumbing.sh` PASS (`evidence/phase-workflow-validation.log`) |
+| `codeql.yml` (go manual + actions none) | DELIVERED as workflow definition; 2026-11-06 repair: structured capture for the traced build, per-leg attempt-suffixed parts, least-privilege caller. Go-file coverage 40/65 explained: 65 = 40 production + 25 test files (extract_tests=false); `scripts/ci/tests/test-codeql-coverage-inventory.sh` reproduces the proof. CodeQL execution itself: NOT RUN (no push) | `evidence/codeql-coverage-inventory.txt`, `evidence/phase-codeql.log` |
 | Log capture + consolidation subsystem with fixture tests | DELIVERED | `internal/cilog` tests PASS |
 | Source archive + external handoff note | DELIVERED | ZIP integrity + extracted-tree verification |
 | Minimal window actually launched on screen | DELIVERED as observed behavior on a virtual display (Xvfb): the studio window was MAPPED, survived the event loop and exited cleanly on SIGTERM; screenshot captured. Physical-desktop observation on real hardware remains open. | `evidence/gui-smoke-xvfb.png`, `evidence/log.txt` (gui-smoke gate), `ai-notes.md` |
@@ -168,6 +168,17 @@ explicit research gate with measurable requirements:
   capabilities; never conflate them.
 
 ---
+
+## CI repair session (2026-11-06, run 42026322748)
+
+The consolidated-log/workflow repair for GitHub Actions run 42026322748 is
+complete and locally verified. Root cause and fix map: `evidence/run-42026322748-forensic-analysis.log`.
+What changed and why: `ai-notes.md` (2026-11-06 section) and `note.md`
+(external handoff). Local verification: full Linux ladder PASS (tests, race,
+export proofs, GUI smoke on Xvfb, govulncheck), collector fixtures PASS,
+workflow validation PASS. Everything hosted (the actual workflow run,
+Windows-target build, CodeQL alerts) remains NOT RUN / NOT OBSERVED because
+no push was made — the status vocabulary above was not inflated.
 
 ## Phase boundary rule
 

@@ -4,23 +4,50 @@ name: build-desktop
 # Triggers: push to main, pull requests to main, manual dispatch.
 # No automatic release/tag publication.
 #
-# Concurrency policy: queued, not cancelled. Cancelling an in-progress
-# run risks killing the collect-logs job before it preserves the
-# consolidated evidence (log.txt); per-run artifact namespaces keep
-# queued runs unambiguous. Recorded in ai-notes.md.
+# DAG contract (repaired for run 42026322748): preflight, build-windows,
+# build-linux and the CodeQL reusable call are INDEPENDENT evidence-producing
+# jobs. None of them declares a success-only `needs:` on another, so a failed
+# preflight can never again suppress the Windows/Linux builds (run
+# 42026322748 skipped both platform builds because of `needs: preflight`).
+# Only collect-logs depends on all evidence-producing jobs, with
+# `if: always() && !cancelled()`, so it consolidates evidence after any
+# combination of success/failure/skipped conclusions. A failed gate inside a
+# platform job does not suppress later independent gates (the gate runners
+# accumulate statuses and fail once at the end); a final aggregate gate keeps
+# the workflow red when a required job failed. More logs never mask errors.
+#
+# Bootstrap contract (fixes the run's primary root cause): every
+# evidence-producing job runs scripts/ci/bootstrap-logs.sh (bash) or
+# scripts/ci/Bootstrap-Logs.ps1 (Windows) IMMEDIATELY AFTER CHECKOUT, before
+# any step that writes into ci-logs/. Run 42026322748 failed because the
+# runner-image step teed into ci-logs/ before the directory existed
+# (`tee: ci-logs/runner-image.log: No such file or directory`), the step that
+# contained the only mkdir was skipped, and the always() upload then found no
+# files. With the bootstrap, every job always has a non-empty
+# ci-logs/bootstrap.log to upload, even when a later setup step fails
+# (a setup failure additionally writes an explicit BLOCKED marker).
+#
+# Artifact identity: per-job log-part artifact names carry the run attempt
+# (`...-logs-part-attempt${{ github.run_attempt }}`), so artifacts can never
+# be ambiguous across queued attempts (concurrency is queued, NOT cancelled —
+# cancelling an in-progress run risks killing collect-logs before it
+# preserves log.txt; per-run artifact namespaces keep queued runs unambiguous).
 #
 # Final user-facing diagnostics artifact: exactly ONE artifact named
 # `log.txt` containing exactly one file named `log.txt`. The per-job
-# `*-logs-part` artifacts are internal; the collect-logs job deletes
-# them after validating the final file (needs `actions: write`,
-# scoped to that job only — the reason is the single-artifact
-# requirement, not a way to hide failures: the final job conclusion is
-# still derived from the real build/CodeQL job results).
+# `*-logs-part-attempt*` artifacts are internal; the collect-logs job deletes
+# them only AFTER the consolidated log.txt is validated and uploaded
+# successfully (needs `actions: write`, scoped to that job only — the reason
+# is the single-artifact requirement, not a way to hide failures: the final
+# job conclusion is still derived from the real build/CodeQL job results).
+# If the collector binary cannot be built or hard-fails, a tested emergency
+# fallback (scripts/ci/emergency-report.sh) still writes and uploads a
+# truthful log.txt, and the job then fails closed (coverage unverified).
 #
-# CodeQL runs as a reusable workflow called below, so same-commit
-# CodeQL evidence is part of the same run and its result feeds the
-# manifest. codeql.yml keeps its own schedule/dispatch triggers for
-# standalone security scanning.
+# CodeQL runs as a reusable workflow called below, so same-commit CodeQL
+# evidence is part of the same run and its result feeds the manifest.
+# codeql.yml keeps its own schedule/dispatch triggers for standalone
+# security scanning.
 
 on:
   push:
@@ -51,6 +78,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # BOOTSTRAP FIRST (run 42026322748 root cause): the log directory
+      # layout and a non-empty bootstrap.log exist before ANY redirection
+      # into ci-logs/, so this job can never again fail because tee could
+      # not open its destination, and the always() upload always has a file.
+      - name: Bootstrap CI log directories (guaranteed evidence)
+        run: bash scripts/ci/bootstrap-logs.sh
+
       # Cache policy (run 41915116613 class: concurrent setup-go jobs
       # fighting over one identical cache key / cache reservation):
       # exactly ONE Linux job (build-linux) saves the Go build cache
@@ -63,33 +97,76 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      # Runner-image capture with exact pipeline status handling: the
+      # bootstrap guarantees the destination directory, informational
+      # lookups are guarded, and the ORIGINAL pipeline status (not tee's)
+      # decides the step result via PIPESTATUS.
       - name: Record runner image (migration evidence)
         run: |
+          set -Eeuo pipefail
           {
             echo "=== OS image ==="
-            grep PRETTY_NAME /etc/os-release || true
+            grep PRETTY_NAME /etc/os-release || echo "PRETTY_NAME: not present in /etc/os-release"
             uname -srm
+            echo "=== runner identity (allowlisted, non-secret context only) ==="
+            echo "runner_os=${RUNNER_OS:-unknown} runner_name=${RUNNER_NAME:-unknown}"
+            echo "image_os=${ImageOS:-unknown} image_version=${ImageVersion:-unknown}"
+            echo "job=${GITHUB_JOB:-unknown} run_id=${GITHUB_RUN_ID:-unknown} attempt=${GITHUB_RUN_ATTEMPT:-unknown}"
+            echo "=== toolchain identity ==="
+            go version || echo "ERROR: go not found on PATH (evidence failure)"
+            echo "GOOS=$(go env GOOS 2>/dev/null || echo '?') GOARCH=$(go env GOARCH 2>/dev/null || echo '?') CGO_ENABLED=$(go env CGO_ENABLED 2>/dev/null || echo '?') GOTOOLCHAIN=$(go env GOTOOLCHAIN 2>/dev/null || echo '?')"
+            gcc --version | head -1 || echo "ERROR: gcc not found on PATH"
+            pkg-config --version || echo "ERROR: pkg-config not found on PATH"
+            date -u '+captured_utc=%Y-%m-%dT%H:%M:%SZ'
           } | tee ci-logs/runner-image.log
+          st=${PIPESTATUS[0]}
+          if [ "$st" -ne 0 ]; then
+            echo "ERROR: runner-image capture pipeline failed with status $st (see ci-logs/runner-image.log)"
+          fi
+          exit "$st"
 
+      # Independent static gates. !cancelled() (not the default success
+      # condition) so the gofmt/tidy/verify gates still run even if the
+      # runner-image capture or setup-go failed — each gate is attempted
+      # and reported separately by the gate runner; missing tools are
+      # recorded as honest failures with their real exit codes.
       - name: Preflight gates (gofmt, tidy -diff, mod verify)
+        if: ${{ !cancelled() }}
         run: |
-          set -o pipefail
-          mkdir -p ci-logs
+          set -Eeuo pipefail
+          bash scripts/ci/bootstrap-logs.sh >/dev/null
           bash scripts/build/build-linux.sh --mode preflight 2>&1 | tee ci-logs/preflight-build.log
           exit "${PIPESTATUS[0]}"
+
+      # Explicit BLOCKED marker whenever this job ends red: the report must
+      # distinguish "a gate failed with records" from "gates never reached".
+      # The collector derives GATES NOT REACHED from actual evidence; this
+      # marker only guarantees the fact is visible in the uploaded log part.
+      - name: Record setup failure as BLOCKED evidence (never silent)
+        if: failure()
+        run: |
+          set -Eeuo pipefail
+          bash scripts/ci/bootstrap-logs.sh >/dev/null 2>&1 || mkdir -p ci-logs
+          {
+            echo "BLOCKED marker: job ${GITHUB_JOB:-unknown} run ${GITHUB_RUN_ID:-unknown} attempt ${GITHUB_RUN_ATTEMPT:-unknown} has at least one failed step (see the failing step above)."
+            echo "Captured ci-logs records remain authoritative for what ran; phases with no structured gate record are reported by the collector as GATES NOT REACHED."
+            date -u '+blocked_utc=%Y-%m-%dT%H:%M:%SZ'
+          } | tee ci-logs/setup-blocked.log
 
       - name: Upload preflight log part
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: preflight-logs-part
-          path: |
-            ci-logs/**
+          name: preflight-logs-part-attempt${{ github.run_attempt }}
+          # The directory itself, not a glob: the bootstrap guarantees it
+          # exists with at least bootstrap.log inside.
+          path: ci-logs
           if-no-files-found: error
 
   build-windows:
+    # INDEPENDENT evidence job — no `needs: preflight` (run 42026322748
+    # skipped this job because a success-only dependency suppressed it).
     name: build-windows (windows-latest, x64, UCRT64)
-    needs: preflight
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -97,6 +174,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Bootstrap CI log directories (guaranteed evidence)
+        shell: pwsh
+        run: ./scripts/ci/Bootstrap-Logs.ps1
 
       # Windows keeps its own Go build cache: the runner OS differs
       # from the Linux jobs, so its cache key cannot collide with the
@@ -228,13 +309,26 @@ jobs:
           ./scripts/build/build-windows.ps1
           exit $LASTEXITCODE
 
+      - name: Record setup failure as BLOCKED evidence (never silent)
+        if: failure()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $lines = @(
+            "BLOCKED marker: job $($env:GITHUB_JOB) run $($env:GITHUB_RUN_ID) attempt $($env:GITHUB_RUN_ATTEMPT) has at least one failed step (see the failing step above).",
+            "Captured ci-logs records remain authoritative for what ran; phases with no structured gate record are reported by the collector as GATES NOT REACHED.",
+            "blocked_utc=$now"
+          )
+          Add-Content -Path ci-logs/setup-blocked.log -Value $lines -Encoding utf8NoBOM
+          Get-Content ci-logs/setup-blocked.log
+
       - name: Upload Windows log part
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-logs-part
-          path: |
-            ci-logs/**
+          name: windows-logs-part-attempt${{ github.run_attempt }}
+          path: ci-logs
           if-no-files-found: error
 
       - name: Check Windows portable build exists before upload
@@ -262,11 +356,11 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    # Explicit ubuntu-26.04 (deliberate stable OS choice — never an
-    # ambiguous ubuntu-latest). This is the ONLY Linux job allowed to
-    # save the Go build cache (see the cache-policy note above).
+    # INDEPENDENT evidence job — no `needs: preflight`. Explicit
+    # ubuntu-26.04 (deliberate stable OS choice — never an ambiguous
+    # ubuntu-latest). This is the ONLY Linux job allowed to save the Go
+    # build cache (see the cache-policy note above).
     name: build-linux (ubuntu-26.04, x64)
-    needs: preflight
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -274,6 +368,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Bootstrap CI log directories (guaranteed evidence)
+        run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go (go.mod toolchain is the version authority)
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -283,30 +380,62 @@ jobs:
           cache-dependency-path: go.sum
 
       # Native prerequisites, installed exactly once in this job, minimal set.
+      # Every install is independently status-tracked: one failed package
+      # group must not mask the others, and the step exits with a real
+      # failure only after recording every outcome (the tee survives and
+      # the always() upload keeps the evidence).
       - name: Install Fyne native prerequisites and FFmpeg
         run: |
-          set -o pipefail
-          mkdir -p ci-logs
+          set -Eeuo pipefail
+          # Status tracking uses a FILE, not a shell variable: the { ... } |
+          # tee pipeline runs its left side in a subshell, so a counter
+          # modified there would be lost (actionlint SC2030/SC2031 — caught
+          # during the run-42026322748 repair validation).
+          status_file=ci-logs/prereq-status.txt
+          : > "$status_file"
           {
             echo "=== OS image (ubuntu-26.04 migration evidence) ==="
-            grep PRETTY_NAME /etc/os-release || true
+            grep PRETTY_NAME /etc/os-release || echo "PRETTY_NAME: not present in /etc/os-release"
             uname -srm
             echo "=== apt-get update ==="
-            sudo apt-get update
+            if ! sudo apt-get update; then
+              echo "ERROR: apt-get update failed"
+              echo fail >> "$status_file"
+            fi
             echo "=== apt-get install Fyne prerequisites (minimal) ==="
-            sudo apt-get install -y --no-install-recommends \
+            if ! sudo apt-get install -y --no-install-recommends \
               gcc pkg-config \
               libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
               libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev \
-              libwayland-dev libxkbcommon-dev
+              libwayland-dev libxkbcommon-dev; then
+              echo "ERROR: Fyne prerequisite install failed"
+              echo fail >> "$status_file"
+            fi
             echo "=== distro FFmpeg for export integration tests (external to the product) ==="
-            sudo apt-get install -y --no-install-recommends ffmpeg
+            if ! sudo apt-get install -y --no-install-recommends ffmpeg; then
+              echo "ERROR: FFmpeg install failed (export integration tests will report their exact missing-encoder behavior)"
+              echo fail >> "$status_file"
+            fi
             echo "=== pkg-config modules ==="
-            pkg-config --modversion gl egl x11 xrandr xinerama xcursor xi xxf86vm wayland-client xkbcommon
-            echo "=== encoders/ffprobe availability ==="
-            ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx264|aac" | head -4
-            ffprobe -version | head -1
+            if pkg-config --modversion gl egl x11 xrandr xinerama xcursor xi xxf86vm wayland-client xkbcommon; then
+              echo "pkg-config modules: OK"
+            else
+              echo "ERROR: pkg-config module check failed"
+              echo fail >> "$status_file"
+            fi
+            echo "=== encoders/ffprobe availability (informational) ==="
+            ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx264|aac" | head -4 || echo "(encoder list unavailable)"
+            ffprobe -version 2>/dev/null | head -1 || echo "(ffprobe unavailable)"
           } 2>&1 | tee ci-logs/linux-compiler.log
+          st=${PIPESTATUS[0]}
+          if grep -q '^fail$' "$status_file"; then
+            echo "ERROR: one or more prerequisite installs failed (details in ci-logs/linux-compiler.log); later dependent gates will record their exact failures"
+          fi
+          # The pipeline itself must also have succeeded (tee write errors
+          # are never masked), and install failures must fail this step —
+          # but ONLY after every install outcome above was recorded.
+          if grep -q '^fail$' "$status_file" || [ "$st" -ne 0 ]; then exit 1; fi
+          exit 0
 
       - name: Install govulncheck (pinned)
         run: |
@@ -332,13 +461,23 @@ jobs:
           bash scripts/build/build-linux.sh --mode desktop 2>&1 | tee ci-logs/linux-build.log
           exit "${PIPESTATUS[0]}"
 
+      - name: Record setup failure as BLOCKED evidence (never silent)
+        if: failure()
+        run: |
+          set -Eeuo pipefail
+          bash scripts/ci/bootstrap-logs.sh >/dev/null 2>&1 || mkdir -p ci-logs
+          {
+            echo "BLOCKED marker: job ${GITHUB_JOB:-unknown} run ${GITHUB_RUN_ID:-unknown} attempt ${GITHUB_RUN_ATTEMPT:-unknown} has at least one failed step (see the failing step above)."
+            echo "Captured ci-logs records remain authoritative for what ran; phases with no structured gate record are reported by the collector as GATES NOT REACHED."
+            date -u '+blocked_utc=%Y-%m-%dT%H:%M:%SZ'
+          } | tee ci-logs/setup-blocked.log
+
       - name: Upload Linux log part
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-logs-part
-          path: |
-            ci-logs/**
+          name: linux-logs-part-attempt${{ github.run_attempt }}
+          path: ci-logs
           if-no-files-found: error
 
       - name: Check Linux build exists before upload
@@ -356,13 +495,20 @@ jobs:
           if-no-files-found: error
 
   # Same-run CodeQL analysis (reusable workflow). Its `analyze` job
-  # uploads a temporary codeql-logs-part artifact inside THIS run, so
-  # the collector can consolidate same-commit CodeQL evidence into the
-  # single log.txt without a second visible log artifact.
+  # uploads a temporary codeql-logs-part-<language>-attempt* artifact
+  # inside THIS run, so the collector can consolidate same-commit CodeQL
+  # evidence into the single log.txt without a second visible log artifact.
+  #
+  # Least privilege: the caller grants exactly what the analyze job needs
+  # (actions: read for codeql-action packaging, security-events: write for
+  # the SARIF upload, contents: read). The reusable workflow's collect job
+  # needs actions: write to delete its temporary parts, but that job is
+  # skipped by its own inputs.called condition whenever this caller is
+  # used — so write is never granted here.
   codeql:
     name: codeql (reusable analysis)
     permissions:
-      actions: write
+      actions: read
       contents: read
       security-events: write
     uses: ./.github/workflows/codeql.yml
@@ -375,7 +521,8 @@ jobs:
     # !cancelled() so a user-cancelled run does not start a pointless
     # collection. `needs` guarantees every evidence-producing job has
     # reached a TERMINAL state before this job starts — the collector
-    # never observes an in_progress/pending job conclusion.
+    # never observes an in_progress/pending job conclusion (a defensive
+    # IN_PROGRESS classification still exists in the collector).
     needs: [preflight, build-windows, build-linux, codeql]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-26.04
@@ -395,6 +542,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Bootstrap CI log directories (guaranteed evidence)
+        run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -419,11 +569,13 @@ jobs:
           EVENT: ${{ github.event_name }}
           REPO: ${{ github.repository }}
           RUNNER_OS_LABEL: ${{ runner.os }}
+          STARTED_AT: ${{ github.run_started_at }}
           RESULT_PREFLIGHT: ${{ needs.preflight.result }}
           RESULT_WINDOWS: ${{ needs.build-windows.result }}
           RESULT_LINUX: ${{ needs.build-linux.result }}
           RESULT_CODEQL: ${{ needs.codeql.result }}
         run: |
+          set -Eeuo pipefail
           mkdir -p ci-parts
           {
             echo "=== download step outcome: ${{ steps.download.outcome }} conclusion: ${{ steps.download.conclusion }} ==="
@@ -440,51 +592,93 @@ jobs:
             "ref": "${REF}",
             "event": "${EVENT}",
             "runner_os": "${RUNNER_OS_LABEL}",
+            "start_time_utc": "${STARTED_AT}",
             "codeql": {
               "workflow": "codeql.yml",
-              "job": "codeql",
+              "job": "analyze",
               "result": "${RESULT_CODEQL}"
             },
             "jobs": [
-              {"name": "preflight",     "result": "${RESULT_PREFLIGHT}", "artifact": "preflight-logs-part", "required": true},
-              {"name": "build-windows", "result": "${RESULT_WINDOWS}",   "artifact": "windows-logs-part",  "required": true},
-              {"name": "build-linux",   "result": "${RESULT_LINUX}",     "artifact": "linux-logs-part",    "required": true},
-              {"name": "codeql-go",      "result": "${RESULT_CODEQL}",    "artifact": "codeql-logs-part-go",      "required": true},
-              {"name": "codeql-actions", "result": "${RESULT_CODEQL}",    "artifact": "codeql-logs-part-actions", "required": true}
+              {"name": "preflight",      "result": "${RESULT_PREFLIGHT}", "artifact": "preflight-logs-part-attempt${{ github.run_attempt }}", "required": true},
+              {"name": "build-windows",  "result": "${RESULT_WINDOWS}",   "artifact": "windows-logs-part-attempt${{ github.run_attempt }}",  "required": true},
+              {"name": "build-linux",    "result": "${RESULT_LINUX}",     "artifact": "linux-logs-part-attempt${{ github.run_attempt }}",    "required": true},
+              {"name": "analyze (go)",      "result": "${RESULT_CODEQL}", "artifact": "codeql-logs-part-go-attempt${{ github.run_attempt }}",      "required": true},
+              {"name": "analyze (actions)", "result": "${RESULT_CODEQL}", "artifact": "codeql-logs-part-actions-attempt${{ github.run_attempt }}", "required": true}
             ]
           }
           MANIFEST
           cat ci-parts/manifest.json
 
+      # The build failure is recorded and kept as evidence, but it must not
+      # stop the fallback path: the run still gets a truthful log.txt.
       - name: Build collector binary
         run: |
-          set -o pipefail
-          go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector
-          echo "collector build OK"
+          set -Eeuo pipefail
+          rc=0
+          go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector || rc=$?
+          printf '%s\n' "$rc" > collector-build.rc
+          {
+            echo "command: go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector"
+            echo "exit_code: $rc"
+            date -u '+utc=%Y-%m-%dT%H:%M:%SZ'
+          } | tee ci-logs/collector-build.log
+          if [ "$rc" -ne 0 ]; then
+            echo "ERROR: collector binary build failed (rc=$rc); the emergency fallback path will still produce a truthful log.txt"
+          fi
+          exit "$rc"
 
       - name: Run collector (report is written even when coverage is incomplete)
-        id: run_collector
+        if: ${{ !cancelled() }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set +e
           mkdir -p ci-out
-          ./bin/ci-log-collector \
-            --report ci-out/log.txt \
-            --parts-root ci-parts \
-            --manifest ci-parts/manifest.json \
-            --github-repo "${GITHUB_REPOSITORY}" \
-            --run-id "${GITHUB_RUN_ID}" \
-            --attempt "${GITHUB_RUN_ATTEMPT}"
-          rc=$?
+          rc=2
+          if [ -x bin/ci-log-collector ]; then
+            ./bin/ci-log-collector \
+              --report ci-out/log.txt \
+              --parts-root ci-parts \
+              --manifest ci-parts/manifest.json \
+              --github-repo "${GITHUB_REPOSITORY}" \
+              --run-id "${GITHUB_RUN_ID}" \
+              --attempt "${GITHUB_RUN_ATTEMPT}"
+            rc=$?
+          else
+            {
+              echo "BLOCKED: collector binary unavailable (build rc=$(cat collector-build.rc 2>/dev/null || echo unknown))"
+              echo "the emergency fallback report step will write ci-out/log.txt"
+            } | tee ci-logs/collector-run.log
+            rc=2
+          fi
           echo "$rc" > collector.rc
           echo "collector exit code: $rc (0=green, 1=incomplete coverage, 3=required job failed, 2=hard error)"
           exit 0
 
+      - name: Emergency fallback report (collector binary unavailable or hard-failed)
+        if: ${{ !cancelled() }}
+        run: |
+          set -Eeuo pipefail
+          if [ -s ci-out/log.txt ]; then
+            echo "collector report present; emergency fallback not needed"
+            exit 0
+          fi
+          reason="collector rc=$(cat collector.rc 2>/dev/null || echo unknown); build rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
+          bash scripts/ci/emergency-report.sh \
+            --out ci-out/log.txt \
+            --parts-root ci-parts \
+            --manifest ci-parts/manifest.json \
+            --reason "$reason" \
+            --result-preflight "${RESULT_PREFLIGHT:-unknown}" \
+            --result-build-windows "${RESULT_WINDOWS:-unknown}" \
+            --result-build-linux "${RESULT_LINUX:-unknown}" \
+            --result-codeql "${RESULT_CODEQL:-unknown}"
+          printf 'used\n' > collector-fallback.used
+
       - name: Validate final log.txt before upload
         run: |
           test -s ci-out/log.txt || { echo "ERROR: consolidated log.txt missing or empty"; exit 1; }
-          test "$(find ci-out -maxdepth 1 -type f | wc -l)" -eq 1 || { echo "ERROR: ci-out must contain exactly one file"; exit 1; }
+          test "$(find ci-out -maxdepth 1 -type f | wc -l)" -eq 1 || { echo "ERROR: ci-out must contain exactly one file (log.txt)"; exit 1; }
           size=$(stat -c%s ci-out/log.txt)
           echo "log.txt validated: $size bytes"
 
@@ -509,7 +703,7 @@ jobs:
             echo "WARNING: could not list artifacts for cleanup (report already uploaded); temporary part artifacts may remain visible."
             exit 0
           fi
-          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | endswith("-logs-part")) or (.name | startswith("codeql-logs-part-")) or (.name == "consolidated-run-log")) | .id' "$tmp")
+          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | test("-logs-part(-attempt[0-9]+)?$")) or (.name | startswith("codeql-logs-part-")) or (.name == "consolidated-run-log")) | .id' "$tmp")
           for id in $ids; do
             url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
             if curl -sf -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$url"; then
@@ -521,8 +715,14 @@ jobs:
           rm -f "$tmp"
 
       - name: Fail closed after the report upload attempt
+        if: always()
         run: |
-          rc="$(cat collector.rc)"
+          rc="$(cat collector.rc 2>/dev/null || echo 2)"
+          if [ -f collector-fallback.used ]; then
+            echo "EMERGENCY FALLBACK REPORT WAS USED: consolidated coverage is unverified;"
+            echo "the collecting job fails even though a truthful log.txt was uploaded."
+            if [ "$rc" -eq 0 ]; then rc=1; fi
+          fi
           echo "collector exit code: $rc"
           if [ "$rc" != "0" ]; then
             if [ "$rc" = "3" ]; then

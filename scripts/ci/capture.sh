@@ -60,6 +60,9 @@ ci_capture() {
     printf '===== COMMAND END =====\n'
   } >>"$CI_LOG_FILE"
 
+  # CI_CAPTURE_EXIT is the documented post-call contract variable (callers
+  # may read it in addition to the return code).
+  # shellcheck disable=SC2034
   CI_CAPTURE_EXIT="$rc"
   return "$rc"
 }

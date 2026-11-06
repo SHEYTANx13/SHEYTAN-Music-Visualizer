@@ -1,0 +1,330 @@
+==============================================================
+RUN 42026322748 FORENSIC ANALYSIS — PHASE 1 (BASELINE) + PHASE 2 (ROOT-CAUSE MAP)
+Generated: 2026-11-05T23:23:11Z
+Agent host: Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64  (PRETTY_NAME="Debian GNU/Linux 13 (trixie)")
+==============================================================
+
+---------- PHASE 1: LIVE REPOSITORY / WORKTREE / BASELINE ----------
+
+Repository: https://github.com/SHEYTANx13/SHEYTAN-Music-Visualizer
+Cloned read-only. No push, PR, tag, release or settings change is ever made.
+
+---- CMD: git remote
+$ git -C /home/z/my-project/work/repo remote -v
+origin	https://github.com/SHEYTANx13/SHEYTAN-Music-Visualizer.git (fetch)
+origin	https://github.com/SHEYTANx13/SHEYTAN-Music-Visualizer.git (push)
+[exit code: 0]
+
+---- CMD: live HEAD
+$ git -C /home/z/my-project/work/repo rev-parse HEAD
+fcc81a0d1581817f3263cb8f161291caf147739c
+[exit code: 0]
+
+---- CMD: branch
+$ git -C /home/z/my-project/work/repo branch --show-current
+main
+[exit code: 0]
+
+---- CMD: worktree status
+$ git -C /home/z/my-project/work/repo status --porcelain
+?? evidence/run-42026322748-forensic-analysis.log
+[exit code: 0]
+
+---- CMD: run SHA fcc81a0 is ancestor of HEAD (empty output = yes)
+$ git -C /home/z/my-project/work/repo merge-base --is-ancestor fcc81a0d1581817f3263cb8f161291caf147739c HEAD
+[exit code: 0]
+
+---- CMD: HEAD == run SHA check (git rev-parse fcc81a0^{commit})
+$ git -C /home/z/my-project/work/repo rev-parse fcc81a0d1581817f3263cb8f161291caf147739c^{commit}
+fcc81a0d1581817f3263cb8f161291caf147739c
+[exit code: 0]
+RESULT: live HEAD equals the run's reported commit fcc81a0d1581817f3263cb8f161291caf147739c;
+        the branch has NOT diverged — the workflow files analyzed from the live tree are the
+        exact files that produced run 42026322748.
+
+---- CMD: recent history
+$ git -C /home/z/my-project/work/repo log --oneline -8
+fcc81a0 beta
+50ffe8b Update build-desktop.yml
+d44dd63 Update build-desktop.yml
+daf68b6 beta
+7c830c0 beta
+b77c8ee beta
+09fa6a0 beta
+b183fe8 beta
+[exit code: 0]
+
+---- CMD: file inventory (non-.git)
+$ bash -c cd '/home/z/my-project/work/repo' && find . -type f -not -path './.git/*' | sort
+./.gitattributes
+./.github/actionlint.yaml
+./.github/workflows/build-desktop.yml
+./.github/workflows/codeql.yml
+./.gitignore
+./agent.md
+./ai-notes.md
+./cmd/ci-log-collector/main.go
+./cmd/sheytan-music-visualizer/main.go
+./evidence/gui-smoke-xvfb.png
+./evidence/log.txt
+./evidence/phase1-build.log
+./evidence/phase2-build.log
+./evidence/run-42026322748-forensic-analysis.log
+./go.mod
+./go.sum
+./internal/audio/audio.go
+./internal/audio/audio_test.go
+./internal/audio/cache.go
+./internal/audio/convert.go
+./internal/audio/decoders.go
+./internal/audio/decoders_ffmpeg.go
+./internal/audio/decoders_ffmpeg_test.go
+./internal/audio/decoders_integration_test.go
+./internal/audio/decoders_wavfloat.go
+./internal/audio/fingerprint.go
+./internal/audio/import.go
+./internal/audio/registry.go
+./internal/audio/resample.go
+./internal/brand/brand.go
+./internal/brand/brand_test.go
+./internal/buildinfo/buildinfo.go
+./internal/buildinfo/buildinfo_test.go
+./internal/cilog/collect.go
+./internal/cilog/collect_test.go
+./internal/cilog/gate.go
+./internal/cilog/gate_test.go
+./internal/cilog/githubapi.go
+./internal/cilog/githubapi_test.go
+./internal/cilog/redact.go
+./internal/dsp/bench_test.go
+./internal/dsp/dsp.go
+./internal/dsp/dsp_rolloff_test.go
+./internal/dsp/dsp_test.go
+./internal/dsp/tempo.go
+./internal/export/export_test.go
+./internal/export/ffmpeg.go
+./internal/export/job.go
+./internal/export/validate.go
+./internal/logging/logging.go
+./internal/logging/logging_test.go
+./internal/playback/output.go
+./internal/playback/transport.go
+./internal/playback/transport_test.go
+./internal/project/project.go
+./internal/project/project_layer_sync_test.go
+./internal/project/project_test.go
+./internal/render/cpu.go
+./internal/render/cpu_bench_test.go
+./internal/render/cpu_layer_test.go
+./internal/render/gpu.go
+./internal/render/gpu_noop_test.go
+./internal/render/gpu_preference_test.go
+./internal/render/gpu_recovery_test.go
+./internal/render/renderer.go
+./internal/render/scene.go
+./internal/render/text.go
+./internal/songdna/songdna.go
+./internal/songdna/songdna_test.go
+./internal/studio/studio.go
+./internal/studio/studio_sync_test.go
+./internal/studio/studio_test.go
+./internal/visualizer/config.go
+./internal/visualizer/config_layer_test.go
+./internal/visualizer/frame.go
+./license.md
+./readme.md
+./roadmap.md
+./scripts/build/build-linux.sh
+./scripts/build/build-windows.ps1
+./scripts/ci/Capture-Step.ps1
+./scripts/ci/capture.sh
+./ui/fyne/actions.go
+./ui/fyne/app.go
+./ui/fyne/studio.go
+./ui/fyne/theme.go
+[exit code: 0]
+
+---- CMD: go file counts
+$ bash -c cd '/home/z/my-project/work/repo' && echo 'all .go files:' $(find . -name '*.go' -not -path './.git/*' | wc -l) && echo '_test.go files:' $(find . -name '*_test.go' -not -path './.git/*' | wc -l) && echo 'non-test .go files:' $(find . -name '*.go' ! -name '*_test.go' -not -path './.git/*' | wc -l)
+all .go files: 65
+_test.go files: 25
+non-test .go files: 40
+[exit code: 0]
+
+---------- PHASE 2: FORENSIC REPRODUCTION OF THE PRIMARY FAILURE ----------
+
+Run 42026322748 step output (from the attached run report):
+    ci-logs/runner-image.log: No such file or directory (os error 2)
+    ##[error]Process completed with exit code 1.
+Reproduction A: the exact '{ ... } | tee ci-logs/runner-image.log' pattern in a
+fresh workspace WITHOUT ci-logs/ (the state a runner is in after checkout):
+
+---- CMD: reproduce tee-into-missing-directory
+$ bash -c cd '/tmp/tmp.boZHHYzwx5' && { echo '=== OS image ==='; grep PRETTY_NAME /etc/os-release || true; uname -srm; } | tee ci-logs/runner-image.log; echo "step-exit=$?"
+tee: ci-logs/runner-image.log: No such file or directory
+=== OS image ===
+PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
+step-exit=1
+[exit code: 0]
+REPRODUCED: tee cannot create ci-logs/runner-image.log because the parent directory
+does not exist -> exit 1. This is the primary preflight failure of run 42026322748.
+
+Reproduction B: the artifact-upload cascade that follows (path ci-logs/** finds nothing
+because the directory was never created and the mkdir in the NEXT step was skipped):
+
+---- CMD: state of ci-logs after the failed step
+$ bash -c T2=$(mktemp -d); cd "$T2" && ls -la; test -d ci-logs && echo "ci-logs exists" || echo "ci-logs DOES NOT EXIST -> upload-artifact (ci-logs/**, if-no-files-found: error) reports: No files were found with the provided path"; rm -rf "$T2"
+total 12
+drwx------ 2 z    z    4096 Nov  5 23:23 .
+drwxrwxrwt 1 root root 4096 Nov  5 23:23 ..
+ci-logs DOES NOT EXIST -> upload-artifact (ci-logs/**, if-no-files-found: error) reports: No files were found with the provided path
+[exit code: 0]
+
+---------- PHASE 2: ROOT-CAUSE MAP (static, from the live tree) ----------
+
+
+---- CMD: preflight runner-image step (build-desktop.yml)
+$ grep -n -A 8 Record runner image /home/z/my-project/work/repo/.github/workflows/build-desktop.yml
+66:      - name: Record runner image (migration evidence)
+67-        run: |
+68-          {
+69-            echo "=== OS image ==="
+70-            grep PRETTY_NAME /etc/os-release || true
+71-            uname -srm
+72-          } | tee ci-logs/runner-image.log
+73-
+74-      - name: Preflight gates (gofmt, tidy -diff, mod verify)
+[exit code: 0]
+
+---- CMD: where ci-logs is created in preflight (too late)
+$ grep -n mkdir -p ci-logs /home/z/my-project/work/repo/.github/workflows/build-desktop.yml
+77:          mkdir -p ci-logs
+289:          mkdir -p ci-logs
+[exit code: 0]
+
+---- CMD: success-only needs: preflight (skips platform jobs on preflight failure)
+$ grep -n -B 2 needs: preflight /home/z/my-project/work/repo/.github/workflows/build-desktop.yml
+90-  build-windows:
+91-    name: build-windows (windows-latest, x64, UCRT64)
+92:    needs: preflight
+--
+267-    # save the Go build cache (see the cache-policy note above).
+268-    name: build-linux (ubuntu-26.04, x64)
+269:    needs: preflight
+[exit code: 0]
+
+---- CMD: concurrency policy (already queued, not cancelled)
+$ grep -n -A 2 ^concurrency: /home/z/my-project/work/repo/.github/workflows/build-desktop.yml
+32:concurrency:
+33-  group: build-desktop-${{ github.ref }}
+34-  cancel-in-progress: false
+[exit code: 0]
+
+---- CMD: collect-logs condition
+$ grep -n always() && !cancelled() /home/z/my-project/work/repo/.github/workflows/build-desktop.yml
+380:    if: ${{ always() && !cancelled() }}
+[exit code: 0]
+
+---- CMD: artifact names (no attempt identity)
+$ grep -n logs-part /home/z/my-project/work/repo/.github/workflows/build-desktop.yml
+14:# `*-logs-part` artifacts are internal; the collect-logs job deletes
+85:          name: preflight-logs-part
+235:          name: windows-logs-part
+339:          name: linux-logs-part
+359:  # uploads a temporary codeql-logs-part artifact inside THIS run, so
+449:              {"name": "preflight",     "result": "${RESULT_PREFLIGHT}", "artifact": "preflight-logs-part", "required": true},
+450:              {"name": "build-windows", "result": "${RESULT_WINDOWS}",   "artifact": "windows-logs-part",  "required": true},
+451:              {"name": "build-linux",   "result": "${RESULT_LINUX}",     "artifact": "linux-logs-part",    "required": true},
+452:              {"name": "codeql-go",      "result": "${RESULT_CODEQL}",    "artifact": "codeql-logs-part-go",      "required": true},
+453:              {"name": "codeql-actions", "result": "${RESULT_CODEQL}",    "artifact": "codeql-logs-part-actions", "required": true}
+512:          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | endswith("-logs-part")) or (.name | startswith("codeql-logs-part-")) or (.name == "consolidated-run-log")) | .id' "$tmp")
+[exit code: 0]
+
+---- CMD: codeql.yml mkdir coverage
+$ grep -n mkdir -p ci-logs\|tee ci-logs /home/z/my-project/work/repo/.github/workflows/codeql.yml
+75:          mkdir -p ci-logs
+87:          } 2>&1 | tee ci-logs/codeql-prereq.log
+93:          go vet -tags goffi_static ./... 2>&1 | tee ci-logs/codeql-go-vet.log
+101:          mkdir -p ci-logs
+106:          } | tee ci-logs/codeql-actions.log
+120:          go build -tags goffi_static ./... 2>&1 | tee ci-logs/codeql-go-build.log
+[exit code: 0]
+
+---- CMD: goTags references in PowerShell scripts
+$ grep -rn goTags /home/z/my-project/work/repo/scripts
+/home/z/my-project/work/repo/scripts/build/build-windows.ps1:52:# gate script initializes and validates its own local $goTags array
+/home/z/my-project/work/repo/scripts/build/build-windows.ps1:136:$rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -Command { go test $goTags ./... }
+/home/z/my-project/work/repo/scripts/build/build-windows.ps1:139:$rc = Capture-Step -Job $job -Step "go-vet" -ToolContext "gate:go-vet" -Command { go vet $goTags ./... }
+/home/z/my-project/work/repo/scripts/build/build-windows.ps1:142:$rc = Capture-Step -Job $job -Step "go-build-packages" -ToolContext "gate:go-build" -Command { go build $goTags ./... }
+/home/z/my-project/work/repo/scripts/build/build-windows.ps1:150:    $args_ = @("build", "-trimpath") + $goTags
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:15:#     gate initializes and validates its own local $goTags argument
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:18:#     parent-only $goTags and failed under StrictMode with "The
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:19:#     variable '$goTags' cannot be retrieved because it has not been
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:89:$goTags = @($env:SHEYTAN_GO_TAGS -split '\s+' | Where-Object { $_ -ne '' })
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:90:if ($goTags.Count -eq 0) {
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:94:foreach ($tagToken in $goTags) {
+[exit code: 0]
+
+---- CMD: SHEYTAN_GO_TAGS single source
+$ grep -rn SHEYTAN_GO_TAGS /home/z/my-project/work/repo/scripts
+/home/z/my-project/work/repo/scripts/build/build-windows.ps1:48:# SINGLE DOCUMENTED TAG SOURCE: $env:SHEYTAN_GO_TAGS. Every gate runs in
+/home/z/my-project/work/repo/scripts/build/build-windows.ps1:59:$env:SHEYTAN_GO_TAGS = "-tags goffi_static"
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:16:#     array from the single documented source $env:SHEYTAN_GO_TAGS.
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:85:if ([string]::IsNullOrWhiteSpace($env:SHEYTAN_GO_TAGS)) {
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:86:    Write-Output "ERROR: SHEYTAN_GO_TAGS is not set; each gate must initialize its own Go tag array from this documented source (the goffi_static build tag is required when Fyne and wgpu link together)."
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:89:$goTags = @($env:SHEYTAN_GO_TAGS -split '\s+' | Where-Object { $_ -ne '' })
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:91:    Write-Output "ERROR: SHEYTAN_GO_TAGS parsed to an empty argument array."
+/home/z/my-project/work/repo/scripts/ci/Capture-Step.ps1:96:        Write-Output "ERROR: SHEYTAN_GO_TAGS contains an invalid argument token: '$tagToken'."
+[exit code: 0]
+
+---- CMD: capture helpers
+$ ls -la /home/z/my-project/work/repo/scripts/ci
+total 20
+drwxrwxr-x 2 z z 4096 Nov  5 23:13 .
+drwxrwxr-x 4 z z 4096 Nov  5 23:13 ..
+-rw-rw-r-- 1 z z 6828 Nov  5 23:13 Capture-Step.ps1
+-rw-rw-r-- 1 z z 2117 Nov  5 23:13 capture.sh
+[exit code: 0]
+
+ROOT-CAUSE MAP (priority order):
+  RC-1 [primary, proven by reproduction A] preflight 'Record runner image' tees into
+       ci-logs/ BEFORE any mkdir; the mkdir lives only in the NEXT step, which is skipped
+       after the failure. Fix: dedicated bootstrap step immediately after checkout.
+  RC-2 [cascade, reproduction B] upload 'ci-logs/**' + if-no-files-found: error then finds
+       no files -> second failure. Fix: bootstrap guarantees bootstrap.log; upload the
+       directory (not the glob).
+  RC-3 [DAG] build-windows/build-linux declare success-only 'needs: preflight' -> both
+       SKIPPED when preflight failed (run evidence D). Fix: remove the dependency; keep
+       collect-logs as the single aggregator with if: always() && !cancelled().
+  RC-4 [gate order] the preflight gates step has a default success condition, so the
+       runner-image failure skipped gofmt/tidy/verify. Fix: gates step gets
+       if: ${{ !cancelled() }} so independent static gates still run.
+  RC-5 [no guaranteed bootstrap evidence in ANY job] build-windows/build-linux/codeql/
+       collect-logs create ci-logs only mid-job; an early setup failure would repeat the
+       RC-2 cascade there. Fix: bootstrap step in every evidence-producing job.
+  RC-6 [artifact identity] per-job artifact names carry no run_attempt; fix names +
+       manifest + cleanup matching together.
+  RC-7 [collector reporting] deriveFailures can list one job twice (manifest conclusion
+       and API conclusion as separate rows) — brief J requires dedup by stable job id with
+       both sources shown; the codeql manifest rows must match the API matrix-leg names
+       ('analyze (go)'/'analyze (actions)').
+  RC-8 [404 classification] the collector must distinguish NEVER_STARTED /
+       IN_PROGRESS_AT_SNAPSHOT / API_LOG_UNAVAILABLE / ARTIFACT_MISSING / RECOVERED_FROM_API.
+  RC-9 [fallback report] if the collector binary cannot be built, the workflow must still
+       write+upload a truthful emergency log.txt (brief 9).
+  RC-10 [CodeQL structured records] codeql.yml vet/build steps use raw tee without the
+       structured COMMAND record, so a silent successful build has no EXIT_CODE: 0 PASS
+       evidence (brief G/47). Fix: run them under scripts/ci/capture.sh.
+  RC-11 [GATES NOT REACHED semantics] a failed job that reached no gate must be reported
+       as GATES NOT REACHED, not as zero failed gates (brief J/9).
+  RC-12 [least privilege] the codeql caller job holds actions: write only because the
+       standalone collect job needs it; when called, collect is skipped -> tighten to
+       actions: read.
+  VERIFIED-ALREADY-GOOD (no change): concurrency cancel-in-progress: false; explicit
+  ubuntu-26.04 on every Linux job; $goTags preamble fix in Capture-Step.ps1; CodeQL go
+  build-mode manual with traced build AFTER init; distinct SARIF categories; per-job
+  always() log uploads; single log.txt artifact design; collector report-before-nonzero-exit.
+==============================================================
+END OF FORENSIC ANALYSIS
+==============================================================

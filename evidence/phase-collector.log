@@ -1,0 +1,129 @@
+==============================================================
+PHASE: CONSOLIDATED COLLECTOR — END-TO-END + FAILURE INJECTION
+Started: 2026-11-06T00:18:20Z
+==============================================================
+
+---------- 1. build the collector binary ----------
+
+---- CMD: go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector
+$ go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector
+[exit code: 0]
+collector build exit: 0
+
+---------- 3. run the collector exactly like collect-logs does ----------
+(--fetch-jobs=false: this host has no GitHub token; the hosted collector
+ additionally fetches authoritative job/step conclusions and raw logs)
+
+EXPECTED: exit code 3 — build-windows is declared skipped (a required job
+did not succeed); coverage stays COMPLETE (a skipped job owes no logs) and
+overall=FAIL, so the collector must exit 3. The report is written BEFORE
+that nonzero exit.
+
+---- CMD: collector run (failure-injection: required job skipped)
+$ ./bin/ci-log-collector --report ci-out/log.txt --parts-root parts --manifest parts/manifest.json --fetch-jobs=false
+ci-log-collector: report "/tmp/tmp.th5OmwwpS6/ci-out/log.txt" written; coverage=COMPLETE; overall=FAIL; jobs=5 with-parts=4 missing=0 skipped=1 log-files=5 api-jobs=0 api-logs=0 gates=35 failed-gates=0 failed-records=0 warnings=0
+[collector exit code: 3] (0=green, 1=incomplete coverage, 3=required job failed, 2=hard error)
+
+one-file payload check:
+
+---- CMD: payload listing (exactly one file: log.txt)
+$ bash -c find '/tmp/tmp.th5OmwwpS6/ci-out' -maxdepth 1 -type f -printf '%f %s bytes\n'
+log.txt 40929 bytes
+[exit code: 0]
+
+---- CMD: log.txt head
+$ head -30 /tmp/tmp.th5OmwwpS6/ci-out/log.txt
+==============================================================
+SHEYTAN CONSOLIDATED RUN REPORT (log.txt)
+==============================================================
+
+--------------------------------------------------------------
+1. RUN METADATA
+--------------------------------------------------------------
+Product:          SHEYTAN Music Visualizer
+Repository:       SHEYTANx13/SHEYTAN-Music-Visualizer
+Workflow:         build-desktop.yml
+Run ID:           0-local-verification
+Attempt:          1
+Commit SHA:       fcc81a0d1581817f3263cb8f161291caf147739c+local-repairs
+Ref:              refs/heads/main
+Event:            workflow_dispatch
+Start time (UTC): (not provided by manifest and no API job start times)
+Generated (UTC):  2026-11-06T00:18:20Z
+Runner OS:        Linux
+
+--------------------------------------------------------------
+2. JOB STATUS TABLE
+--------------------------------------------------------------
+Declared jobs: 5 (succeeded 4, failed 0, cancelled 0, skipped 1)
+
+JOB                          REQUIRED     CONCLUSION (workflow)  API CONCLUSION LOG SOURCE
+preflight                    yes          success                unavailable    preflight-logs-part-attempt1
+build-windows                yes          skipped                not run        NEVER_STARTED (skipped; no log expected)
+build-linux                  yes          success                unavailable    linux-logs-part-attempt1
+analyze (go)                 yes          success                unavailable    codeql-logs-part-go-attempt1
+analyze (actions)            yes          success                unavailable    codeql-logs-part-actions-attempt1
+[exit code: 0]
+
+---- CMD: log.txt job status table
+$ bash -c sed -n '/2. JOB STATUS TABLE/,/3. STEP STATUS TABLE/p' '/tmp/tmp.th5OmwwpS6/ci-out/log.txt' | head -16
+2. JOB STATUS TABLE
+--------------------------------------------------------------
+Declared jobs: 5 (succeeded 4, failed 0, cancelled 0, skipped 1)
+
+JOB                          REQUIRED     CONCLUSION (workflow)  API CONCLUSION LOG SOURCE
+preflight                    yes          success                unavailable    preflight-logs-part-attempt1
+build-windows                yes          skipped                not run        NEVER_STARTED (skipped; no log expected)
+build-linux                  yes          success                unavailable    linux-logs-part-attempt1
+analyze (go)                 yes          success                unavailable    codeql-logs-part-go-attempt1
+analyze (actions)            yes          success                unavailable    codeql-logs-part-actions-attempt1
+
+--------------------------------------------------------------
+3. STEP STATUS TABLE
+[exit code: 0]
+
+---- CMD: log.txt gate summary
+$ bash -c grep -E 'Distinct (failed|skipped|blocked|passed) gates|GATES NOT REACHED|NEVER_STARTED' '/tmp/tmp.th5OmwwpS6/ci-out/log.txt' | head -8
+build-windows                yes          skipped                not run        NEVER_STARTED (skipped; no log expected)
+   JOB FAILURE: build-windows — workflow conclusion: skipped (NEVER_STARTED)
+   Distinct failed gates: 0
+   Distinct skipped gates: 0
+   Distinct blocked gates: 0
+   Distinct passed gates: 35
+   GATES NOT REACHED (required jobs that ended without ANY structured gate record —
+NEVER_STARTED: build-windows — the job did not run (workflow conclusion: skipped); absence of its logs is not a coverage failure and its API raw-log 404 class is NOT a failure.
+[exit code: 0]
+---- CMD: collector run (all-success injection)
+$ ./bin/ci-log-collector --report ci-out/log2.txt --parts-root parts --manifest parts/manifest.json --fetch-jobs=false
+ci-log-collector: report "/tmp/tmp.th5OmwwpS6/ci-out/log2.txt" written; coverage=COMPLETE; overall=PASS; jobs=5 with-parts=5 missing=0 skipped=0 log-files=6 api-jobs=0 api-logs=0 gates=35 failed-gates=0 failed-records=0 warnings=0
+[collector exit code: 0] (0 = COMPLETE coverage + every required job succeeded)
+
+---- CMD: all-success overall result
+$ bash -c grep -E 'OVERALL RESULT|Evidence coverage' '/tmp/tmp.th5OmwwpS6/ci-out/log2.txt' | head -3
+Evidence coverage: COMPLETE — every job that ran contributed its expected log part.
+OVERALL RESULT: PASS — every required job succeeded and evidence coverage is complete.
+[exit code: 0]
+
+---------- 5. failure-injection: failed gate inside one job ----------
+---- CMD: collector run (failed gate injection)
+$ ./bin/ci-log-collector --report ci-out/log3.txt --parts-root parts --manifest parts/manifest.json --fetch-jobs=false
+ci-log-collector: report "/tmp/tmp.th5OmwwpS6/ci-out/log3.txt" written; coverage=COMPLETE; overall=FAIL; jobs=6 with-parts=6 missing=0 skipped=0 log-files=7 api-jobs=0 api-logs=0 gates=35 failed-gates=0 failed-records=1 warnings=0
+[collector exit code: 3] (3 = required job failed; report written BEFORE exiting)
+
+---- CMD: failed-gate index from the injection
+$ bash -c grep -E 'JOB FAILURE|Distinct failed gates|go-test' '/tmp/tmp.th5OmwwpS6/ci-out/log3.txt' | head -6
+STEP: go-test
+TOOL_CONTEXT: gate:go-test
+STEP: go-test-race
+TOOL_CONTEXT: gate:go-test-race
+STEP: go-test
+TOOL_CONTEXT: gate:go-test
+[exit code: 0]
+
+---------- 6. deterministic ordering check ----------
+---- CMD: determinism check (two runs, diff modulo generation stamp)
+[DETERMINISTIC: reports identical except the generation stamp]
+
+==============================================================
+END OF COLLECTOR E2E (exit codes and outputs above are real)
+==============================================================

@@ -137,13 +137,50 @@ delete the failing test or turn the error into a warning.
   - appends a structured record (JOB, STEP, STARTED, WORKDIR, COMMAND,
     TOOL_CONTEXT, output, `EXIT_CODE: <n> PASS|FAIL`, ENDED);
   - returns the original non-zero exit code (no `|| true`).
+  A silent successful command is still evidence: an empty stdout with an
+  explicit `EXIT_CODE: 0 PASS` record is a PASS, never missing evidence
+  (this is exactly how the CodeQL traced build is recorded).
 - Independent gates keep running after a failure; dependent gates are
-  recorded `SKIPPED`, never as passed.
-- CI jobs upload log parts with `if: always()`; `collect-logs` downloads
-  them namespaced (never flattened), builds one deterministic
-  consolidated report via `cmd/ci-log-collector`, uploads it even when
-  coverage is INCOMPLETE, and only then fails the job (`MISSING LOG
-  SOURCE` ≠ `SKIPPED`/`NEVER_STARTED`).
+  recorded `SKIPPED` (intentional not-run) or `BLOCKED: gate <name>
+  (<reason>)` (missing prerequisite) — two distinct states, both distinct
+  from FAIL, and none of them counts as passed.
+- BOOTSTRAP FIRST (run-42026322748 root cause): every evidence-producing CI
+  job runs `scripts/ci/bootstrap-logs.sh` (bash) or
+  `scripts/ci/Bootstrap-Logs.ps1` (Windows) IMMEDIATELY AFTER CHECKOUT,
+  before any step that writes into `ci-logs/`. Never redirect into
+  `ci-logs/` before the bootstrap; never assume a previous step created the
+  directory. The bootstrap guarantees a non-empty `bootstrap.log`, so each
+  job's `if: always()` upload always has real evidence even when a later
+  setup step fails (a failed setup additionally writes an explicit BLOCKED
+  marker via the `if: failure()` evidence step).
+- DAG contract: preflight, build-windows, build-linux and the CodeQL call
+  are INDEPENDENT evidence-producing jobs — none declares a success-only
+  `needs:` on another, so one failed phase can never suppress the others.
+  Only `collect-logs` depends on all of them (`if: always() &&
+  !cancelled()`), and a final fail-closed step keeps the run red after the
+  report upload. Concurrency is queued, never cancelled
+  (`cancel-in-progress: false`), so a newer push cannot destroy an
+  in-progress evidence run.
+- Artifact lifecycle: per-job log-part artifact names carry the run attempt
+  (`*-logs-part-attempt${{ github.run_attempt }}`); `collect-logs` downloads
+  them namespaced (never flattened), builds one deterministic consolidated
+  report via `cmd/ci-log-collector`, uploads it even when coverage is
+  INCOMPLETE, and only then fails the job (`MISSING LOG SOURCE` ≠
+  `SKIPPED`/`NEVER_STARTED`; a missing artifact whose raw log the API
+  recovered is `RECOVERED_FROM_API`; a still-running job's 404 class is
+  `IN_PROGRESS_AT_SNAPSHOT`; a completed job's 404 class is
+  `API_LOG_UNAVAILABLE`). Temporary parts are deleted ONLY after the final
+  upload succeeded. If the collector binary cannot be built,
+  `scripts/ci/emergency-report.sh` still writes and uploads a truthful
+  `log.txt`, and the job then fails closed.
+- Reading `log.txt`: section 2 is the per-job status table (one row per
+  job, workflow + API conclusions, classified log source); section 5.B is
+  the authoritative gate table — a gate's status comes ONLY from its own
+  `EXIT_CODE` record; `GATES NOT REACHED` for a failed job means its gates
+  never executed (never read zero failed gates as a pass); section 8 lists
+  never-started jobs, missing/recovered/unavailable log sources and
+  reconciled rows; the overall result stays FAIL if any required job did
+  not succeed, no matter how complete the logs are.
 
 ## 7. Remote-mutation prohibition
 

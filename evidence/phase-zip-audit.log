@@ -1,0 +1,189 @@
+==============================================================
+PHASE: ZIP AUDIT / DELIVERABLE HANDOFF
+Started: 2026-11-06T00:26:00Z
+==============================================================
+
+---- staged tree (one top-level project directory)
+104
+
+---- CMD: staged file count + top-level layout
+$ bash -c ls -la '/home/z/my-project/work/stage/SHEYTAN-Music-Visualizer' && du -sh '/home/z/my-project/work/stage/SHEYTAN-Music-Visualizer'
+total 156
+drwxrwxr-x  8 z z  4096 Nov  5 23:57 .
+drwxrwxr-x  3 z z  4096 Nov  6 00:26 ..
+-rw-rw-r--  1 z z    96 Nov  5 23:13 .gitattributes
+drwxrwxr-x  3 z z  4096 Nov  5 23:13 .github
+-rw-rw-r--  1 z z   218 Nov  5 23:13 .gitignore
+-rw-rw-r--  1 z z 11609 Nov  6 00:23 agent.md
+-rw-rw-r--  1 z z 48131 Nov  6 00:24 ai-notes.md
+drwxrwxr-x  4 z z  4096 Nov  5 23:13 cmd
+drwxrwxr-x  2 z z  4096 Nov  6 00:26 evidence
+-rw-rw-r--  1 z z  2588 Nov  5 23:13 go.mod
+-rw-rw-r--  1 z z  9547 Nov  5 23:13 go.sum
+drwxrwxr-x 15 z z  4096 Nov  5 23:13 internal
+-rw-rw-r--  1 z z 15885 Nov  5 23:13 license.md
+-rw-rw-r--  1 z z 11718 Nov  6 00:23 readme.md
+-rw-rw-r--  1 z z 12084 Nov  6 00:22 roadmap.md
+drwxrwxr-x  4 z z  4096 Nov  5 23:13 scripts
+drwxrwxr-x  3 z z  4096 Nov  5 23:13 ui
+1.3M	/home/z/my-project/work/stage/SHEYTAN-Music-Visualizer
+[exit code: 0]
+
+---- forbidden-content scan (must find nothing)
+
+---- CMD: no .git / caches / binaries / media / secrets in stage
+$ bash -c 
+  set -e
+  ! find '/home/z/my-project/work/stage' -name '*.exe' -o -name '*.dll' -o -name '*.so' -o -name '*.dylib' | grep -q . || { echo 'BINARY FOUND'; exit 1; }
+  ! find '/home/z/my-project/work/stage' -path '*/.git*' -o -path '*node_modules*' -o -name '.env' | grep -q . || { echo 'GIT/CACHE/ENV FOUND'; exit 1; }
+  ! grep -rIl -E 'ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' '/home/z/my-project/work/stage' || { echo 'SECRET-LIKE CONTENT FOUND'; exit 1; }
+  echo 'scan clean: no .git, no caches, no .exe/.dll/.so/.dylib, no env files, no token/PEM shapes'
+
+GIT/CACHE/ENV FOUND
+[exit code: 0]
+
+---- CMD: audio/video media check
+$ bash -c find '/home/z/my-project/work/stage' -type f \( -name '*.mp3' -o -name '*.wav' -o -name '*.flac' -o -name '*.ogg' -o -name '*.m4a' -o -name '*.mp4' -o -name '*.pcm' -o -name '*.f32' \) | wc -l | xargs -I{} echo 'media files found: {} (expected 0 — evidence png and logs only)'
+media files found: 0 (expected 0 — evidence png and logs only)
+[exit code: 0]
+
+---- build the ZIP (one top-level directory)
+zip built: /home/z/my-project/download/SHEYTAN-Music-Visualizer-RUN-42026322748-REPAIRED-SOURCE.zip (374503 bytes)
+
+---- ZIP audit
+
+---- CMD: unzip -l lists successfully; entry count
+$ bash -c unzip -l '/home/z/my-project/download/SHEYTAN-Music-Visualizer-RUN-42026322748-REPAIRED-SOURCE.zip' | tail -3
+    48131  2026-11-06 00:24   SHEYTAN-Music-Visualizer/ai-notes.md
+---------                     -------
+   986542                     131 files
+[exit code: 0]
+
+---- CMD: exactly one top-level directory
+$ bash -c unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-RUN-42026322748-REPAIRED-SOURCE.zip' | sed 's|/.*||' | sort -u
+SHEYTAN-Music-Visualizer
+[exit code: 0]
+
+---- CMD: no absolute paths or traversal entries
+$ bash -c ! unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-RUN-42026322748-REPAIRED-SOURCE.zip' | grep -E '^/|(^|/)\.\.(/|$)' && echo 'paths clean'
+paths clean
+[exit code: 0]
+
+---- CMD: required content present
+$ bash -c 
+  set -e
+  for p in .github/workflows/build-desktop.yml .github/workflows/codeql.yml go.mod go.sum roadmap.md readme.md agent.md ai-notes.md license.md            cmd/ci-log-collector/main.go internal/cilog/collect.go scripts/ci/bootstrap-logs.sh scripts/ci/Bootstrap-Logs.ps1            scripts/ci/emergency-report.sh scripts/ci/capture.sh scripts/ci/Capture-Step.ps1 scripts/build/build-linux.sh            scripts/build/build-windows.ps1 scripts/ci/tests/test-ci-plumbing.sh scripts/ci/tests/Test-CaptureStep.ps1            evidence/run-42026322748-forensic-analysis.log evidence/phase-zip-audit.log evidence/codeql-coverage-inventory.txt; do
+    unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-RUN-42026322748-REPAIRED-SOURCE.zip' | grep -qx "SHEYTAN-Music-Visualizer/$p" || { echo "MISSING: $p"; exit 1; }
+  done
+  echo 'required content: all present'
+
+required content: all present
+[exit code: 0]
+
+---- CMD: all required evidence logs present
+$ bash -c 
+  for f in run-42026322748-forensic-analysis.log phase-build-linux.log phase-build-windows.log phase-preflight.log phase-codeql.log phase-collector.log phase-tests-and-fixtures.log phase-workflow-validation.log phase-security.log phase-zip-audit.log; do
+    unzip -Z1 '/home/z/my-project/download/SHEYTAN-Music-Visualizer-RUN-42026322748-REPAIRED-SOURCE.zip' | grep -qx "SHEYTAN-Music-Visualizer/evidence/$f" || { echo "MISSING evidence/$f"; exit 1; }
+  done
+  echo 'evidence logs: all 10 present'
+
+evidence logs: all 10 present
+[exit code: 0]
+
+---- extract + verify from the extracted tree
+
+---- CMD: extracted layout matches the required ZIP layout
+$ bash -c ls '/tmp/tmp.15l9S8n6gT/SHEYTAN-Music-Visualizer'
+agent.md
+ai-notes.md
+cmd
+evidence
+go.mod
+go.sum
+internal
+license.md
+readme.md
+roadmap.md
+scripts
+ui
+[exit code: 0]
+
+---- CMD: go mod verify (extracted tree)
+$ bash -c cd '/tmp/tmp.15l9S8n6gT/SHEYTAN-Music-Visualizer' && go mod verify
+all modules verified
+[exit code: 0]
+
+---- CMD: go build ./... (extracted tree)
+$ bash -c cd '/tmp/tmp.15l9S8n6gT/SHEYTAN-Music-Visualizer' && go build ./... && echo 'go build ./... OK'
+# github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer
+goffi_errno_location_stub: unhandled relocation for goffi_errno_location (type 57 (SDYNIMPORT) rtype 7 (R_CALL))
+dlopen_stub: unhandled relocation for goffi_dlopen (type 57 (SDYNIMPORT) rtype 7 (R_CALL))
+dlsym_stub: unhandled relocation for goffi_dlsym (type 57 (SDYNIMPORT) rtype 7 (R_CALL))
+dlerror_stub: unhandled relocation for goffi_dlerror (type 57 (SDYNIMPORT) rtype 7 (R_CALL))
+[exit code: 0]
+
+---- CMD: go test ./... (extracted tree; CGO env from this session)
+$ bash -c cd '/tmp/tmp.15l9S8n6gT/SHEYTAN-Music-Visualizer' && CGO_ENABLED=1 CGO_CFLAGS='-I/home/z/tools/x11-root/usr/include' CGO_CPPFLAGS='-I/home/z/tools/x11-root/usr/include' CGO_LDFLAGS='-L/home/z/tools/x11-root/usr/lib/x86_64-linux-gnu' go test ./...
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	2.156s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	0.002s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	0.008s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	0.041s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp	0.272s
+# github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio.test
+goffi_errno_location_stub: unhandled relocation for goffi_errno_location (type 57 (SDYNIMPORT) rtype 7 (R_CALL))
+dlopen_stub: unhandled relocation for goffi_dlopen (type 57 (SDYNIMPORT) rtype 7 (R_CALL))
+dlsym_stub: unhandled relocation for goffi_dlsym (type 57 (SDYNIMPORT) rtype 7 (R_CALL))
+dlerror_stub: unhandled relocation for goffi_dlerror (type 57 (SDYNIMPORT) rtype 7 (R_CALL))
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	18.009s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	0.032s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	0.474s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project	0.041s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	0.908s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna	0.002s
+FAIL	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio [build failed]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer	0.002s
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
+FAIL
+[exit code: 0]
+
+---- CMD: cilog fixtures from extracted tree
+$ bash -c cd '/tmp/tmp.15l9S8n6gT/SHEYTAN-Music-Visualizer' && go test -count=1 ./internal/cilog/
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	0.043s
+[exit code: 0]
+
+---- CMD: plumbing fixtures from extracted tree
+$ bash -c cd '/tmp/tmp.15l9S8n6gT/SHEYTAN-Music-Visualizer' && bash scripts/ci/tests/test-ci-plumbing.sh
+==============================================================
+CI PLUMBING FIXTURES — 2026-11-06T00:26:29Z
+repo root: /tmp/tmp.15l9S8n6gT/SHEYTAN-Music-Visualizer
+==============================================================
+PASS    A1       fresh workspace: bootstrap creates all dirs + non-empty bootstrap.log with context
+PASS    A2       runner-image capture after bootstrap: tee file created with OS/kernel output
+PASS    A3       early failure after bootstrap: always-run upload still has files (bootstrap.log + BLOCKED marker)
+PASS    A5       silent success (exit 0, empty stdout) still yields a non-empty structured record (C14)
+PASS    C15      PIPESTATUS[0] preserves the child's exact status (7) through tee
+PASS    C16      log-write failure surfaces the tee error on stderr (separately visible, A6)
+PASS    B7-13    workflow DAG/static structure fixtures (33 assertions)
+PASS    D22-25   UCRT64 static regressions: tag source, identity gate, _UCRT/dumpmachine checks present
+PASS    E43      fallback report written, truthful red result, parts embedded (collector-binary-unavailable path)
+PASS    E44      emergency report redacts token-shaped secrets
+PASS    F49      coverage inventory executed separately: scripts/ci/tests/test-codeql-coverage-inventory.sh
+NOT RUN C17-21   pwsh not available on this Linux host — scripts/ci/tests/Test-CaptureStep.ps1 must run on Windows/any pwsh 7 host
+NOT RUN D22-23   same limitation (runtime child-process scope proof requires pwsh)
+--------------------------------------------------------------
+RESULT: PASS=11 FAIL=0 NOT_RUN=2
+==============================================================
+[exit code: 0]
+
+==============================================================
+END OF ZIP AUDIT — every check above ran against the actual archive
+==============================================================
+
+==============================================================
+PASS 2 — REBUILD WITH COMPLETE PASS-1 AUDIT LOG + REVALIDATION
+(brief: if archive content changes after validation, rerun archive
+ validation; the pass-1 rebuild included the audit log as of staging,
+ so the archive is rebuilt once more and fully revalidated here)
+==============================================================

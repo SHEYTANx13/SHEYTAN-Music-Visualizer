@@ -61,6 +61,13 @@ const (
 	GatePass    GateStatus = "PASS"
 	GateFail    GateStatus = "FAIL"
 	GateSkipped GateStatus = "SKIPPED"
+	// GateBlocked marks a gate whose PREREQUISITE is missing (build-linux
+	// and build-windows record `BLOCKED: gate <name> (<reason>)` when e.g.
+	// the Go toolchain or the executable build is unavailable). Blocked is
+	// distinct from Skipped (intentional, configured not-run) and from
+	// FAIL (a command ran and exited nonzero) — run 42026322748 brief §10.C
+	// requires the three states to be reported separately.
+	GateBlocked GateStatus = "BLOCKED"
 )
 
 // GateRecord is one distinct gate with deduplicated provenance.
@@ -90,6 +97,7 @@ var (
 	reStepField   = regexp.MustCompile(`^STEP: (.*)$`)
 	reExitCode    = regexp.MustCompile(`^EXIT_CODE: (\d+) (PASS|FAIL)\b`)
 	reSkippedGate = regexp.MustCompile(`^SKIPPED: gate (\S+) \((.*)\)\s*$`)
+	reBlockedGate = regexp.MustCompile(`^BLOCKED: gate (\S+) \((.*)\)\s*$`)
 )
 
 // gateScan is the per-file parse result: candidate command records
@@ -113,6 +121,9 @@ type gateSkipObs struct {
 	gate   string
 	reason string
 	where  string
+	// blocked distinguishes `BLOCKED: gate ...` (missing prerequisite)
+	// from `SKIPPED: gate ...` (intentional not-run).
+	blocked bool
 }
 
 // parseGateFile scans one captured log file for structured records.
@@ -161,6 +172,15 @@ func parseGateFile(job, artifact, rel, abs string) (gateScan, error) {
 				gate:   m[1],
 				reason: m[2],
 				where:  "[" + job + " | " + artifact + "/" + rel + ":" + strconv.Itoa(lineNo) + "]",
+			})
+		case !inRecord && reBlockedGate.MatchString(line):
+			m := reBlockedGate.FindStringSubmatch(line)
+			sc.skipped = append(sc.skipped, gateSkipObs{
+				job:     job,
+				gate:    m[1],
+				reason:  m[2],
+				where:   "[" + job + " | " + artifact + "/" + rel + ":" + strconv.Itoa(lineNo) + "]",
+				blocked: true,
 			})
 		}
 	}
@@ -217,8 +237,8 @@ func ParseGates(files []logFile) ([]GateRecord, error) {
 			g.Status = GateFail
 		}
 	}
-	// Skipped lines only apply to gates that have no command record;
-	// a real record outranks a skip marker (defensive: the build
+	// Skipped/blocked lines only apply to gates that have no command
+	// record; a real record outranks a skip marker (defensive: the build
 	// scripts never emit both).
 	for _, obs := range all.skipped {
 		k := key{obs.job, obs.gate}
@@ -226,9 +246,13 @@ func ParseGates(files []logFile) ([]GateRecord, error) {
 			continue
 		}
 		g := get(k)
-		g.Status = GateSkipped
 		g.Reason = obs.reason
 		g.Wheres = appendUnique(g.Wheres, obs.where)
+		if obs.blocked {
+			g.Status = GateBlocked
+		} else {
+			g.Status = GateSkipped
+		}
 	}
 
 	out := make([]GateRecord, 0, len(order))
@@ -259,10 +283,12 @@ func gateStatusRank(s GateStatus) int {
 	switch s {
 	case GateFail:
 		return 0
-	case GateSkipped:
+	case GateBlocked:
 		return 1
-	default:
+	case GateSkipped:
 		return 2
+	default:
+		return 3
 	}
 }
 

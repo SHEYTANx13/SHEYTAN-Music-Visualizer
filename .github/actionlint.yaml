@@ -14,3 +14,11 @@
 self-hosted-runner:
   labels:
     - ubuntu-26.04
+#
+# Same DB-vintage class, expression side: `${{ github.run_started_at }}`
+# (used for the manifest start_time_utc) is a documented GitHub context
+# property, but actionlint v1.7.12's expression schema predates it and
+# reports "property is not defined". That finding is a known limitation of
+# the local linter version, NOT a workflow defect; the property is
+# authoritative GitHub context (see docs.github.com/actions/reference).
+# Do not replace it with a weaker timestamp.

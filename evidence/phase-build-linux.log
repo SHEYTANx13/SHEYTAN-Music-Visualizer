@@ -1,0 +1,489 @@
+==============================================================
+PHASE: UBUNTU-CLASS LINUX x64 BUILD — FULL VERIFICATION LADDER
+Started: 2026-11-06T00:19:35Z
+Host: Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64 / PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+Toolchain: go version go1.27.3 linux/amd64 / gcc (Debian 14.2.0-19) 14.2.0 / pkg-config 1.8.1
+CGO native prerequisites: session-local apt-downloaded X11/GL/wayland prefix
+  (no passwordless sudo on this host; CI uses the standard apt set —
+   the prefix is a verification workaround, not a repository requirement)
+Command: scripts/build/build-linux.sh --mode desktop (all gates, structured capture)
+This is the same gate runner the build-linux CI job executes.
+==============================================================
+go version go1.27.3 linux/amd64
+GOOS=linux GOARCH=amd64 CGO_ENABLED=1 GOTOOLCHAIN=local
+GOMOD=/home/z/my-project/work/repo/go.mod
+gcc (Debian 14.2.0-19) 14.2.0
+1.8.1
+ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers
+gofmt clean
+all modules verified
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	2.665s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	19.485s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio	5.053s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer	(cached)
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
+SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown by local, go1.27.3)
+© 2024–2026 Parsaetak. All rights reserved.
+Licensor / rights holder: Parsaetak — https://linktr.ee/Parsaetak
+Product / brand / project home: SHEYTAN — https://github.com/SHEYTANx13
+  version=0.1.0-dev commit=unknown go=go1.27.3
+self-check PASS buildinfo
+self-check PASS brand-identity
+  log=/home/z/my-project/work/repo/ci-logs/app-logs/app.log
+self-check PASS log-directory
+  decoders=7 (aac, alac, flac, m4a, mp3, ogg, wav)
+  ffmpeg-adapter=ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers (optional AAC/M4A family via local FFmpeg)
+self-check PASS decoder-registry
+  fixture: bass=1.00 mid=0.00 treble=0.00 rms=0.260
+self-check PASS dsp-fixture
+  modes=4 presets=4 palettes=4
+self-check PASS visualizer-config
+  backend=cpu gpu=none api=software adapter= devtype=
+  renderer detail: GPU fallback: Software Renderer (software) is not a hardware adapter; using the CPU renderer
+self-check PASS renderer-select
+  ffmpeg=ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers encoders=[libx264 h264_nvenc h264_qsv]
+self-check PASS export-env
+self-check: all foundation invariants hold
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	10.446s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	103.225s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio	29.363s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	(cached)
+=== RUN   TestExport1080p30
+    export_test.go:172: 1080p30: 90 frames, 3.00s, 165688 bytes, 2.551129031s
+--- PASS: TestExport1080p30 (2.89s)
+=== RUN   TestExport4K24
+    export_test.go:183: 4K24: 72 frames, 3.00s, 236357 bytes, 8.379371537s
+--- PASS: TestExport4K24 (8.61s)
+=== RUN   TestExportCancel
+--- PASS: TestExportCancel (4.93s)
+=== RUN   TestExportMissingEncoderFails
+--- PASS: TestExportMissingEncoderFails (0.00s)
+PASS
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	16.431s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	1.465s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	(cached)
+=== RUN   TestBackgroundLayerChangesFrame
+--- PASS: TestBackgroundLayerChangesFrame (0.00s)
+=== RUN   TestBackgroundLayerDeterministic
+--- PASS: TestBackgroundLayerDeterministic (0.00s)
+=== RUN   TestLayerFreePathUnchanged
+--- PASS: TestLayerFreePathUnchanged (0.00s)
+=== RUN   TestAllModesUsableAsBackgroundLayer
+--- PASS: TestAllModesUsableAsBackgroundLayer (0.00s)
+=== RUN   TestGPUPipelineRenderReadbackVerify
+--- PASS: TestGPUPipelineRenderReadbackVerify (0.12s)
+=== RUN   TestGPUNoopRejectedAsRealGPU
+--- PASS: TestGPUNoopRejectedAsRealGPU (0.00s)
+=== RUN   TestCPURendererAllModesAndDeterminism
+--- PASS: TestCPURendererAllModesAndDeterminism (0.00s)
+=== RUN   TestUniformLayoutMatchesWGSL
+--- PASS: TestUniformLayoutMatchesWGSL (0.00s)
+=== RUN   TestPaletteReachesGPUShader
+--- PASS: TestPaletteReachesGPUShader (0.13s)
+=== RUN   TestPreferenceParsing
+--- PASS: TestPreferenceParsing (0.00s)
+=== RUN   TestSoftwarePreferenceNeverLabelsHardware
+--- PASS: TestSoftwarePreferenceNeverLabelsHardware (0.04s)
+=== RUN   TestSelectRendererReportsHonestReason
+--- PASS: TestSelectRendererReportsHonestReason (0.00s)
+=== RUN   TestExplicitBackendMaskContract
+--- PASS: TestExplicitBackendMaskContract (0.00s)
+=== RUN   TestDeviceLossRecoveryDrill
+--- PASS: TestDeviceLossRecoveryDrill (0.00s)
+=== RUN   TestGenericGPUFailureStaysDistinguishable
+--- PASS: TestGenericGPUFailureStaysDistinguishable (0.00s)
+=== RUN   TestDeviceLossSentinelIsWgpuErrDeviceLost
+--- PASS: TestDeviceLossSentinelIsWgpuErrDeviceLost (0.00s)
+PASS
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio	3.073s
+GUI smoke PASS: the studio window survived 8 s on Xvfb and terminated
+No vulnerabilities found.
+[ladder exit code: 0 — RUN RESULT: PASS]
+==============================================================
+SHEYTAN MUSIC VISUALIZER — PHASE 2 LOCAL VERIFICATION (LINUX)
+Product:  SHEYTAN Music Visualizer (SHEYTAN™, licensor Parsaetak)
+Mode:     desktop
+Host:     Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64
+Started:  2026-11-06T00:19:35Z
+Build tag: goffi_static (Fyne + wgpu link compatibility)
+==============================================================
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: toolchain-report
+STARTED: 2026-11-06T00:19:35Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: bash -c go version; echo "GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=$(go env CGO_ENABLED) GOTOOLCHAIN=$(go env GOTOOLCHAIN)"; echo "GOMOD=$(go env GOMOD)"; gcc --version | head -1; pkg-config --version; ffmpeg -version 2>/dev/null | head -1 || echo "ffmpeg: NOT AVAILABLE"
+TOOL_CONTEXT: gate:toolchain
+--- OUTPUT (stdout+stderr from first byte) ---
+go version go1.27.3 linux/amd64
+GOOS=linux GOARCH=amd64 CGO_ENABLED=1 GOTOOLCHAIN=local
+GOMOD=/home/z/my-project/work/repo/go.mod
+gcc (Debian 14.2.0-19) 14.2.0
+1.8.1
+ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:19:35Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: gofmt-verify
+STARTED: 2026-11-06T00:19:35Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: bash -c out=$(gofmt -l .); if [ -n "$out" ]; then printf "%s\n" "$out"; echo "ERROR: gofmt reported unformatted files"; exit 1; fi; echo "gofmt clean"
+TOOL_CONTEXT: gate:gofmt
+--- OUTPUT (stdout+stderr from first byte) ---
+gofmt clean
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:19:35Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: go-mod-tidy-verify
+STARTED: 2026-11-06T00:19:35Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go mod tidy -diff
+TOOL_CONTEXT: gate:go-mod-tidy
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:19:35Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: go-mod-verify
+STARTED: 2026-11-06T00:19:35Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go mod verify
+TOOL_CONTEXT: gate:go-mod-verify
+--- OUTPUT (stdout+stderr from first byte) ---
+all modules verified
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:19:38Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: go-test
+STARTED: 2026-11-06T00:19:38Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go test -tags goffi_static ./...
+TOOL_CONTEXT: gate:go-test
+--- OUTPUT (stdout+stderr from first byte) ---
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	2.665s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	19.485s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio	5.053s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer	(cached)
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	[no test files]
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:19:58Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: go-vet
+STARTED: 2026-11-06T00:19:58Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go vet -tags goffi_static ./...
+TOOL_CONTEXT: gate:go-vet
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:19:58Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: go-build-packages
+STARTED: 2026-11-06T00:19:58Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go build -tags goffi_static ./...
+TOOL_CONTEXT: gate:go-build
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:20:01Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: build-executable
+STARTED: 2026-11-06T00:20:01Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go build -trimpath -tags goffi_static -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer
+TOOL_CONTEXT: gate:build-exe
+--- OUTPUT (stdout+stderr from first byte) ---
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:20:01Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: run-version
+STARTED: 2026-11-06T00:20:01Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: ./bin/sheytan-music-visualizer --version
+TOOL_CONTEXT: runtime:--version
+--- OUTPUT (stdout+stderr from first byte) ---
+SHEYTAN Music Visualizer 0.1.0-dev (commit unknown, built unknown by local, go1.27.3)
+© 2024–2026 Parsaetak. All rights reserved.
+Licensor / rights holder: Parsaetak — https://linktr.ee/Parsaetak
+Product / brand / project home: SHEYTAN — https://github.com/SHEYTANx13
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:20:01Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: run-self-check
+STARTED: 2026-11-06T00:20:01Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: env SHEYTAN_LOG_DIR=/home/z/my-project/work/repo/ci-logs/app-logs ./bin/sheytan-music-visualizer --self-check
+TOOL_CONTEXT: runtime:--self-check
+--- OUTPUT (stdout+stderr from first byte) ---
+  version=0.1.0-dev commit=unknown go=go1.27.3
+self-check PASS buildinfo
+self-check PASS brand-identity
+  log=/home/z/my-project/work/repo/ci-logs/app-logs/app.log
+self-check PASS log-directory
+  decoders=7 (aac, alac, flac, m4a, mp3, ogg, wav)
+  ffmpeg-adapter=ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers (optional AAC/M4A family via local FFmpeg)
+self-check PASS decoder-registry
+  fixture: bass=1.00 mid=0.00 treble=0.00 rms=0.260
+self-check PASS dsp-fixture
+  modes=4 presets=4 palettes=4
+self-check PASS visualizer-config
+  backend=cpu gpu=none api=software adapter= devtype=
+  renderer detail: GPU fallback: Software Renderer (software) is not a hardware adapter; using the CPU renderer
+self-check PASS renderer-select
+  ffmpeg=ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers encoders=[libx264 h264_nvenc h264_qsv]
+self-check PASS export-env
+self-check: all foundation invariants hold
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:20:01Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: go-test-race
+STARTED: 2026-11-06T00:20:01Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go test -race -tags goffi_static -timeout 480s ./internal/audio/... ./internal/playback/... ./internal/dsp/... ./internal/export/... ./internal/studio/... ./internal/project/... ./internal/render/...
+TOOL_CONTEXT: gate:go-test-race
+--- OUTPUT (stdout+stderr from first byte) ---
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	10.446s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	103.225s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio	29.363s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	(cached)
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:21:45Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: export-validation
+STARTED: 2026-11-06T00:21:45Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go test -tags goffi_static -timeout 560s -v -run TestExport1080p30|TestExport4K24|TestExportCancel|TestExportMissingEncoderFails ./internal/export/
+TOOL_CONTEXT: gate:export-validation
+--- OUTPUT (stdout+stderr from first byte) ---
+=== RUN   TestExport1080p30
+    export_test.go:172: 1080p30: 90 frames, 3.00s, 165688 bytes, 2.551129031s
+--- PASS: TestExport1080p30 (2.89s)
+=== RUN   TestExport4K24
+    export_test.go:183: 4K24: 72 frames, 3.00s, 236357 bytes, 8.379371537s
+--- PASS: TestExport4K24 (8.61s)
+=== RUN   TestExportCancel
+--- PASS: TestExportCancel (4.93s)
+=== RUN   TestExportMissingEncoderFails
+--- PASS: TestExportMissingEncoderFails (0.00s)
+PASS
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	16.431s
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:22:02Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: audio-validation
+STARTED: 2026-11-06T00:22:02Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go test -tags goffi_static -timeout 240s ./internal/audio/ ./internal/playback/
+TOOL_CONTEXT: gate:audio-validation
+--- OUTPUT (stdout+stderr from first byte) ---
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	1.465s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	(cached)
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:22:04Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: gpu-validation
+STARTED: 2026-11-06T00:22:04Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go test -tags goffi_static -timeout 240s -v ./internal/render/
+TOOL_CONTEXT: gate:gpu-validation
+--- OUTPUT (stdout+stderr from first byte) ---
+=== RUN   TestBackgroundLayerChangesFrame
+--- PASS: TestBackgroundLayerChangesFrame (0.00s)
+=== RUN   TestBackgroundLayerDeterministic
+--- PASS: TestBackgroundLayerDeterministic (0.00s)
+=== RUN   TestLayerFreePathUnchanged
+--- PASS: TestLayerFreePathUnchanged (0.00s)
+=== RUN   TestAllModesUsableAsBackgroundLayer
+--- PASS: TestAllModesUsableAsBackgroundLayer (0.00s)
+=== RUN   TestGPUPipelineRenderReadbackVerify
+--- PASS: TestGPUPipelineRenderReadbackVerify (0.12s)
+=== RUN   TestGPUNoopRejectedAsRealGPU
+--- PASS: TestGPUNoopRejectedAsRealGPU (0.00s)
+=== RUN   TestCPURendererAllModesAndDeterminism
+--- PASS: TestCPURendererAllModesAndDeterminism (0.00s)
+=== RUN   TestUniformLayoutMatchesWGSL
+--- PASS: TestUniformLayoutMatchesWGSL (0.00s)
+=== RUN   TestPaletteReachesGPUShader
+--- PASS: TestPaletteReachesGPUShader (0.13s)
+=== RUN   TestPreferenceParsing
+--- PASS: TestPreferenceParsing (0.00s)
+=== RUN   TestSoftwarePreferenceNeverLabelsHardware
+--- PASS: TestSoftwarePreferenceNeverLabelsHardware (0.04s)
+=== RUN   TestSelectRendererReportsHonestReason
+--- PASS: TestSelectRendererReportsHonestReason (0.00s)
+=== RUN   TestExplicitBackendMaskContract
+--- PASS: TestExplicitBackendMaskContract (0.00s)
+=== RUN   TestDeviceLossRecoveryDrill
+--- PASS: TestDeviceLossRecoveryDrill (0.00s)
+=== RUN   TestGenericGPUFailureStaysDistinguishable
+--- PASS: TestGenericGPUFailureStaysDistinguishable (0.00s)
+=== RUN   TestDeviceLossSentinelIsWgpuErrDeviceLost
+--- PASS: TestDeviceLossSentinelIsWgpuErrDeviceLost (0.00s)
+PASS
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	(cached)
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:22:04Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: studio-integration
+STARTED: 2026-11-06T00:22:04Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: go test -tags goffi_static -timeout 380s ./internal/studio/
+TOOL_CONTEXT: gate:studio-integration
+--- OUTPUT (stdout+stderr from first byte) ---
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio	3.073s
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:22:08Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: gui-smoke
+STARTED: 2026-11-06T00:22:08Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: bash -c 
+      set -u
+      Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+      XP=$!
+      sleep 1.5
+      if ! kill -0 "$XP" 2>/dev/null; then
+        echo "ERROR: Xvfb failed to start"; exit 1
+      fi
+      DISPLAY=:99 SHEYTAN_LOG_DIR="$(pwd)/ci-logs/gui-smoke-logs" ./bin/sheytan-music-visualizer >/dev/null 2>&1 &
+      AP=$!
+      sleep 8
+      ALIVE=0
+      if kill -0 "$AP" 2>/dev/null; then ALIVE=1; fi
+      kill "$AP" 2>/dev/null
+      sleep 1.5
+      kill -9 "$AP" 2>/dev/null
+      wait "$AP" 2>/dev/null
+      kill "$XP" 2>/dev/null
+      if [ "$ALIVE" -ne 1 ]; then
+        echo "ERROR: app did not stay alive on the virtual display (window/event-loop failure)"
+        exit 1
+      fi
+      echo "GUI smoke PASS: the studio window survived 8 s on Xvfb and terminated"
+    
+TOOL_CONTEXT: gate:gui-smoke
+--- OUTPUT (stdout+stderr from first byte) ---
+GUI smoke PASS: the studio window survived 8 s on Xvfb and terminated
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:22:19Z
+===== COMMAND END =====
+
+===== COMMAND BEGIN =====
+JOB: phase2-linux-build
+STEP: govulncheck
+STARTED: 2026-11-06T00:22:19Z
+WORKDIR: /home/z/my-project/work/repo
+COMMAND: govulncheck ./...
+TOOL_CONTEXT: gate:govulncheck
+--- OUTPUT (stdout+stderr from first byte) ---
+No vulnerabilities found.
+--- END OUTPUT ---
+EXIT_CODE: 0 PASS
+ENDED: 2026-11-06T00:22:24Z
+===== COMMAND END =====
+
+==============================================================
+RUN SUMMARY — phase2-linux-build
+Ended:            2026-11-06T00:22:24Z
+Mode:             desktop
+Failed gates:     0
+
+FAILURE INDEX (EXIT_CODE records with non-zero codes):
+(none — all captured commands returned exit code 0)
+
+SKIPPED/BLOCKED GATES:
+(none)
+RUN RESULT: PASS
+==============================================================
+==============================================================
+END OF LINUX LADDER EVIDENCE
+==============================================================

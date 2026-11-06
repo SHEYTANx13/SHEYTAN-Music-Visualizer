@@ -1,0 +1,103 @@
+==============================================================
+CODEQL GO-FILE COVERAGE INVENTORY (run 42026322748 evidence F)
+Generated: 2026-11-06T00:08:47Z
+Run commit analyzed by CodeQL: fcc81a0d1581817f3263cb8f161291caf147739c
+==============================================================
+AT THE RUN COMMIT (authoritative for the 40/65 report):
+1. All .go files:                  65
+2. _test.go files:                 25
+3. Production (non-test) files:    40
+4. CodeQL reported scanned:        40
+5. extract_tests=false -> scanned set should equal production set:
+   40 == 40 ?
+==============================================================
+CURRENT WORKTREE (after this repair session; fixtures added, no
+production files added):
+6. All .go files:                  66
+7. _test.go files:                 26
+8. Production (non-test) files:    40
+==============================================================
+
+PRODUCTION FILES AT THE RUN COMMIT (these 40 are exactly what the traced
+build  compiled and CodeQL extracted):
+  [PROD] cmd/ci-log-collector/main.go
+  [PROD] cmd/sheytan-music-visualizer/main.go
+  [PROD] internal/audio/audio.go
+  [PROD] internal/audio/cache.go
+  [PROD] internal/audio/convert.go
+  [PROD] internal/audio/decoders.go
+  [PROD] internal/audio/decoders_ffmpeg.go
+  [PROD] internal/audio/decoders_wavfloat.go
+  [PROD] internal/audio/fingerprint.go
+  [PROD] internal/audio/import.go
+  [PROD] internal/audio/registry.go
+  [PROD] internal/audio/resample.go
+  [PROD] internal/brand/brand.go
+  [PROD] internal/buildinfo/buildinfo.go
+  [PROD] internal/cilog/collect.go
+  [PROD] internal/cilog/gate.go
+  [PROD] internal/cilog/githubapi.go
+  [PROD] internal/cilog/redact.go
+  [PROD] internal/dsp/dsp.go
+  [PROD] internal/dsp/tempo.go
+  [PROD] internal/export/ffmpeg.go
+  [PROD] internal/export/job.go
+  [PROD] internal/export/validate.go
+  [PROD] internal/logging/logging.go
+  [PROD] internal/playback/output.go
+  [PROD] internal/playback/transport.go
+  [PROD] internal/project/project.go
+  [PROD] internal/render/cpu.go
+  [PROD] internal/render/gpu.go
+  [PROD] internal/render/renderer.go
+  [PROD] internal/render/scene.go
+  [PROD] internal/render/text.go
+  [PROD] internal/songdna/songdna.go
+  [PROD] internal/studio/studio.go
+  [PROD] internal/visualizer/config.go
+  [PROD] internal/visualizer/frame.go
+  [PROD] ui/fyne/actions.go
+  [PROD] ui/fyne/app.go
+  [PROD] ui/fyne/studio.go
+  [PROD] ui/fyne/theme.go
+
+TEST FILES AT THE RUN COMMIT (25, intentionally excluded by extract_tests=false):
+  [TEST] internal/audio/audio_test.go
+  [TEST] internal/audio/decoders_ffmpeg_test.go
+  [TEST] internal/audio/decoders_integration_test.go
+  [TEST] internal/brand/brand_test.go
+  [TEST] internal/buildinfo/buildinfo_test.go
+  [TEST] internal/cilog/collect_test.go
+  [TEST] internal/cilog/gate_test.go
+  [TEST] internal/cilog/githubapi_test.go
+  [TEST] internal/dsp/bench_test.go
+  [TEST] internal/dsp/dsp_rolloff_test.go
+  [TEST] internal/dsp/dsp_test.go
+  [TEST] internal/export/export_test.go
+  [TEST] internal/logging/logging_test.go
+  [TEST] internal/playback/transport_test.go
+  [TEST] internal/project/project_layer_sync_test.go
+  [TEST] internal/project/project_test.go
+  [TEST] internal/render/cpu_bench_test.go
+  [TEST] internal/render/cpu_layer_test.go
+  [TEST] internal/render/gpu_noop_test.go
+  [TEST] internal/render/gpu_preference_test.go
+  [TEST] internal/render/gpu_recovery_test.go
+  [TEST] internal/songdna/songdna_test.go
+  [TEST] internal/studio/studio_sync_test.go
+  [TEST] internal/studio/studio_test.go
+  [TEST] internal/visualizer/config_layer_test.go
+
+INVENTORY MATCH AT THE RUN COMMIT: 65 total = 40 production (scanned) + 25 test files.
+The 40/65 coverage report is fully explained by extract_tests=false; no production
+file is missing from the scanned set.
+CURRENT TREE: production file count unchanged (40); this repair added only tests.
+
+FILES COMPILED BY THE TRACED BUILD (go list, linux/amd64, tags goffi_static):
+  GO-LIST PROOF NOT COMPLETED: the local host lacks the CGO/pkg-config
+  prerequisites for full package resolution. Exact reason (first 400 bytes):
+  <no stderr captured>
+  This is an environment limitation, not a repository defect; the CI
+  build-linux/codeql jobs provision these prerequisites via apt.
+  Go-list evidence class: NOT RUN on this host.
+==============================================================

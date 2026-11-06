@@ -140,7 +140,7 @@ func TestFourFailuresWhileFiveGatesPassRegression(t *testing.T) {
 	if !strings.Contains(report, "Distinct skipped gates: 5") {
 		t.Fatal("report must count the five skipped gates distinctly")
 	}
-	if !strings.Contains(report, "not a command failure") {
+	if !strings.Contains(report, "neither is a") && !strings.Contains(report, "not a command failure") {
 		t.Fatal("report must state the skip rule")
 	}
 	// The gate table must show the passing gates as PASS (name, then
