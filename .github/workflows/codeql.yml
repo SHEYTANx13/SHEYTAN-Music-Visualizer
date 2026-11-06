@@ -1,44 +1,30 @@
 name: codeql
 
 # CodeQL security analysis for SHEYTAN Music Visualizer.
-# Languages: go (manual traced build with the REAL production flags:
-# CGO + -tags goffi_static + Fyne prerequisites) and actions
-# (build-mode: none).
 #
-# Invocation model (no duplicate scans, no dropped coverage):
-#   - push to main / pull_request: analyzed by build-desktop.yml, which
-#     calls this reusable workflow in the same run; its evidence flows
-#     into the single log.txt artifact of that run.
-#   - schedule (weekly) / workflow_dispatch: this workflow runs
-#     standalone and produces its own single log.txt artifact via the
-#     collect job below.
-# Push/PR triggers were removed from this file only because the same
-# events are covered through the reusable invocation; nothing was
-# silently dropped.
+# Invocation model:
+#   - push / pull_request: build-desktop.yml calls this reusable workflow
+#     in the same run and collects its two per-analysis evidence artifacts.
+#   - schedule / workflow_dispatch: this workflow runs independently and
+#     creates exactly one user-facing artifact named log.txt.
 #
-# Bootstrap contract (run 42026322748 repair): the analyze job bootstraps
-# ci-logs/ immediately after checkout so BOTH matrix legs always upload a
-# real log part (bootstrap.log + structured command records), even when a
-# later setup step fails. The go leg's pre-tracing vet and the manual
-# traced build run under scripts/ci/capture.sh, so a silent successful
-# `go build` still yields a structured record with command, tool version,
-# start/end time and `EXIT_CODE: 0 PASS` — an empty stdout is never
-# mistaken for missing command evidence (run 42026322748 evidence G).
+# Go analysis is a manual traced build using the production-relevant
+# CGO_ENABLED=1, CC=gcc and goffi_static build tag. Test-file extraction is
+# explicitly disabled (CodeQL's Go extractor default) and the live source
+# inventory is logged on every run rather than hard-coding an old file count.
 #
-# Coverage note (run 42026322748 evidence F): the Go analysis reported
-# 40 of 65 repository .go files scanned; the repository holds exactly 40
-# non-test .go files and 25 _test.go files, and the extractor runs with
-# extract_tests=false, so the 25-file difference is the test-file set —
-# see scripts/ci/tests/test-codeql-coverage-inventory.sh and
-# evidence/codeql-coverage-inventory.txt for the reproducible inventory.
-# Test-file extraction stays default OFF unless a verified configuration
-# materially improves security analysis (prompt §8.9).
+# The analyze jobs deliberately have read-only Actions permission. The
+# standalone collector needs actions:write only to delete its temporary
+# evidence artifacts after log.txt has been uploaded. Consequently the
+# reusable-workflow caller (build-desktop.yml) must grant actions:write to
+# the codeql reusable-workflow job; permissions cannot be elevated inside a
+# reusable-workflow call. The analyze jobs retain their narrower permissions.
 
 on:
   workflow_call:
     inputs:
       called:
-        description: "Internal: true when invoked from build-desktop.yml (the caller aggregates the evidence)"
+        description: "Internal: true when build-desktop.yml aggregates this run's evidence"
         required: false
         type: boolean
         default: false
@@ -50,65 +36,49 @@ permissions:
   contents: read
 
 jobs:
-  analyze:
-    name: Analyze (${{ matrix.language }})
-    # Explicit ubuntu-26.04 (deliberate stable OS choice — never an
-    # ambiguous ubuntu-latest). Cache policy: the CodeQL analysis cache
-    # is managed by the codeql-action itself; setup-go caching is
-    # DISABLED here so this job can never collide with build-linux's
-    # Go build cache key (one saving job per identical key).
+  analyze_go:
+    name: CodeQL Analyze (Go, manual traced build)
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     permissions:
       actions: read
       contents: read
       security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - language: go
-            build-mode: manual
-          - language: actions
-            build-mode: none
+    env:
+      CGO_ENABLED: '1'
+      CC: gcc
+      CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS: 'false'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # BOOTSTRAP FIRST: guaranteed ci-logs/ layout + bootstrap.log on both
-      # matrix legs, before any step that writes into ci-logs/.
       - name: Bootstrap CI log directories (guaranteed evidence)
         run: bash scripts/ci/bootstrap-logs.sh
 
-      - name: Setup Go (go matrix only)
-        if: matrix.language == 'go'
+      - name: Setup Go (go.mod toolchain is the version authority)
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: false # cache policy: only build-linux/build-windows save caches
+          cache: false # only build-linux/build-windows save Go caches
 
-      # goffi_static: required when Fyne (CGO) and wgpu (goffi FFI) link
-      # in one binary; the traced build must match the production build.
-      # Each install is independently status-tracked (one failed group
-      # must not mask the others; the step result is real).
-      - name: Install Fyne native prerequisites (go matrix only)
-        if: matrix.language == 'go'
+      # Keep the install result in a file because this block is piped to tee
+      # and therefore executes in a subshell. The `||` captures the complete
+      # pipefail result without allowing `set -e` to exit before it is logged.
+      - name: Install Fyne native prerequisites
         run: |
           set -Eeuo pipefail
-          # Status tracking uses a FILE, not a shell variable: the { ... } |
-          # tee pipeline runs its left side in a subshell, so a counter
-          # modified there would be lost (actionlint SC2030/SC2031 — caught
-          # during the run-42026322748 repair validation).
           status_file=ci-logs/prereq-status.txt
           : > "$status_file"
+          pipeline_status=0
           {
             echo "=== apt-get update ==="
             if ! sudo apt-get update; then
               echo "ERROR: apt-get update failed"
               echo fail >> "$status_file"
             fi
+
             echo "=== apt-get install Fyne prerequisites ==="
             if ! sudo apt-get install -y --no-install-recommends \
               gcc pkg-config \
@@ -118,6 +88,7 @@ jobs:
               echo "ERROR: Fyne prerequisite install failed"
               echo fail >> "$status_file"
             fi
+
             echo "=== pkg-config modules ==="
             if pkg-config --modversion gl egl x11 xrandr xinerama xcursor xi xxf86vm wayland-client xkbcommon; then
               echo "pkg-config modules: OK"
@@ -125,18 +96,43 @@ jobs:
               echo "ERROR: pkg-config module check failed"
               echo fail >> "$status_file"
             fi
-          } 2>&1 | tee ci-logs/codeql-prereq.log
-          st=${PIPESTATUS[0]}
-          if grep -q '^fail$' "$status_file" || [ "$st" -ne 0 ]; then exit 1; fi
-          exit 0
 
-      # Pre-tracing quality gate under the structured capture contract:
-      # the record carries command, working directory, tool context,
-      # timestamps and the exact exit code (PASS even with empty stdout).
-      - name: go vet quality gate (before tracing, go matrix only)
-        if: matrix.language == 'go'
+            echo "=== CGO compiler identity ==="
+            if [ "$CGO_ENABLED" != "1" ]; then
+              echo "ERROR: CGO_ENABLED must be 1 for the traced desktop build"
+              echo fail >> "$status_file"
+            fi
+            if command -v "$CC" >/dev/null 2>&1 && "$CC" --version | sed -n '1p'; then
+              echo "C compiler identity: OK ($CC)"
+            else
+              echo "ERROR: configured C compiler '$CC' is not executable"
+              echo fail >> "$status_file"
+            fi
+          } 2>&1 | tee ci-logs/codeql-prereq.log || pipeline_status=$?
+
+          if grep -q '^fail$' "$status_file" || [ "$pipeline_status" -ne 0 ]; then
+            echo "ERROR: Fyne prerequisites or evidence pipeline failed"
+            exit 1
+          fi
+
+      - name: Record Go source inventory (diagnostic, not an extraction claim)
+        run: |
+          set -Eeuo pipefail
+          total_go=$(find . -type d -name vendor -prune -o -type f -name '*.go' -print | wc -l)
+          test_go=$(find . -type d -name vendor -prune -o -type f -name '*_test.go' -print | wc -l)
+          non_test_go=$((total_go - test_go))
+          {
+            echo "tracked-worktree Go source inventory (vendor directories excluded)"
+            echo "go_files_total=$total_go"
+            echo "go_test_files=$test_go"
+            echo "go_non_test_files=$non_test_go"
+            echo "CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS=$CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS"
+            echo "Note: these are source inventory counts, not a claim that every file was extracted."
+          } | tee ci-logs/codeql-go-source-inventory.log
+
+      - name: go vet quality gate (before CodeQL tracing)
         env:
-          CI_JOB_ID: analyze (go)
+          CI_JOB_ID: analyze-go
         run: |
           set -Eeuo pipefail
           export CI_LOG_FILE="$PWD/ci-logs/codeql-go-vet.log"
@@ -144,42 +140,21 @@ jobs:
           # shellcheck source=../ci/capture.sh
           source scripts/ci/capture.sh
           rc=0
-          CI_TOOL_CONTEXT="gate:codeql-pre-trace-vet (pre-INIT quality gate; go $(go version 2>/dev/null | awk '{print $3}' || echo '?'))" \
+          CI_TOOL_CONTEXT="gate:codeql-pre-trace-vet (CGO_ENABLED=1 CC=gcc; go $(go version 2>/dev/null | awk '{print $3}' || echo '?'))" \
             ci_capture "$CI_JOB_ID" codeql-go-vet go vet -tags goffi_static ./... || rc=$?
           exit "$rc"
 
-      # Evidence marker for the actions matrix leg (build-mode: none has
-      # no traced build and normally produces no ci-logs files; this
-      # structured record makes the leg's log part exist and state its
-      # config with an explicit PASS record).
-      - name: Record actions analysis evidence (actions matrix only)
-        if: matrix.language == 'actions'
-        env:
-          CI_JOB_ID: analyze (actions)
-        run: |
-          set -Eeuo pipefail
-          export CI_LOG_FILE="$PWD/ci-logs/codeql-actions.log"
-          : > "$CI_LOG_FILE"
-          # shellcheck source=../ci/capture.sh
-          source scripts/ci/capture.sh
-          CI_TOOL_CONTEXT="config:codeql-actions (build-mode none; workflow definitions only)" \
-            ci_capture "$CI_JOB_ID" codeql-actions-config bash -c 'echo "language: actions"; echo "build-mode: none"; echo "note: actions analysis extracts workflow definitions; no traced build runs"'
-
-      - name: Initialize CodeQL
+      - name: Initialize CodeQL (Go)
         uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
+          languages: go
+          build-mode: manual
 
-      # Manual traced build with the exact production configuration, so
-      # the extractor captures the code that actually ships. This runs
-      # INSIDE the CodeQL tracing context (after init). A successful
-      # `go build` usually prints nothing: the structured record below is
-      # the evidence that the traced build ran and passed.
-      - name: Manual traced build (go matrix only)
-        if: matrix.language == 'go' && matrix.build-mode == 'manual'
+      # This command runs inside CodeQL's tracing context. The environment
+      # matches the production-relevant CGO/compiler/tag configuration above.
+      - name: Manual traced Go build
         env:
-          CI_JOB_ID: analyze (go)
+          CI_JOB_ID: analyze-go
         run: |
           set -Eeuo pipefail
           export CI_LOG_FILE="$PWD/ci-logs/codeql-go-build.log"
@@ -187,59 +162,119 @@ jobs:
           # shellcheck source=../ci/capture.sh
           source scripts/ci/capture.sh
           rc=0
-          CI_TOOL_CONTEXT="gate:codeql-traced-build (INSIDE CodeQL tracing; CGO_ENABLED=1 goffi_static; production build command)" \
+          CI_TOOL_CONTEXT="gate:codeql-traced-build (INSIDE CodeQL tracing; CGO_ENABLED=1; CC=gcc; -tags goffi_static)" \
             ci_capture "$CI_JOB_ID" codeql-go-build-traced go build -tags goffi_static ./... || rc=$?
           exit "$rc"
 
-      - name: Perform CodeQL Analysis
+      - name: Perform CodeQL Analysis (Go)
         uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
-          category: '/language:${{ matrix.language }}'
+          category: '/language:go'
 
-      # Temporary internal artifacts; the aggregator (collect-logs in
-      # build-desktop.yml for called runs, the collect job below for
-      # standalone runs) deletes them after producing the single
-      # log.txt. Names are unique PER MATRIX DIMENSION AND ATTEMPT so
-      # two matrix legs can never collide or overwrite identically named
-      # files (run-41915116613 review item; run-42026322748 repair adds
-      # the attempt identity). The bootstrap guarantees non-empty parts,
-      # so if-no-files-found: error is honest on BOTH legs.
-      - name: Upload CodeQL log part (temporary internal artifact, per matrix leg)
-        if: always()
+      # This status marker is deliberately before artifact upload, and uses
+      # !cancelled() so it records both success and earlier failures.
+      - name: Record Go analysis outcome
+        if: ${{ !cancelled() }}
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-logs
+          {
+            echo "analysis_job_status=$JOB_STATUS"
+            if [ "$JOB_STATUS" = success ]; then
+              echo "CodeQL Go analysis completed successfully."
+            else
+              echo "BLOCKED: CodeQL Go analysis job did not complete successfully; inspect preceding step logs."
+            fi
+            date -u '+recorded_utc=%Y-%m-%dT%H:%M:%SZ'
+          } | tee ci-logs/codeql-go-result.log
+
+      - name: Upload Go CodeQL log part (temporary internal artifact)
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: codeql-logs-part-${{ matrix.language }}-attempt${{ github.run_attempt }}
+          name: codeql-logs-part-go-attempt${{ github.run_attempt }}
           path: ci-logs
           if-no-files-found: error
 
-      # Explicit BLOCKED marker whenever this job ends red (e.g. CodeQL
-      # init/analyze failure): the uploaded part then states the fact.
-      - name: Record analysis failure as BLOCKED evidence (never silent)
-        if: failure()
+  analyze_actions:
+    name: CodeQL Analyze (GitHub Actions workflows)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Bootstrap CI log directories (guaranteed evidence)
+        run: bash scripts/ci/bootstrap-logs.sh
+
+      - name: Record Actions analysis configuration
+        env:
+          CI_JOB_ID: analyze-actions
         run: |
           set -Eeuo pipefail
-          bash scripts/ci/bootstrap-logs.sh >/dev/null 2>&1 || mkdir -p ci-logs
-          {
-            echo "BLOCKED marker: job analyze (${{ matrix.language }}) run ${GITHUB_RUN_ID:-unknown} attempt ${GITHUB_RUN_ATTEMPT:-unknown} has at least one failed step (see the failing step above)."
-            echo "Captured ci-logs records remain authoritative for what ran."
-            date -u '+blocked_utc=%Y-%m-%dT%H:%M:%SZ'
-          } | tee ci-logs/setup-blocked.log
+          export CI_LOG_FILE="$PWD/ci-logs/codeql-actions.log"
+          : > "$CI_LOG_FILE"
+          # shellcheck source=../ci/capture.sh
+          source scripts/ci/capture.sh
+          CI_TOOL_CONTEXT="config:codeql-actions (build-mode none; workflow definitions only)" \
+            ci_capture "$CI_JOB_ID" codeql-actions-config bash -c 'echo "language: actions"; echo "build-mode: none"; echo "note: workflow definitions are analyzed; no traced build is required"'
 
-  # Standalone runs (schedule / workflow_dispatch) still get ONE
-  # consolidated, truthful log.txt artifact. When called from
-  # build-desktop.yml this job is skipped and the caller aggregates.
+      - name: Initialize CodeQL (Actions)
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: actions
+          build-mode: none
+
+      - name: Perform CodeQL Analysis (Actions)
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: '/language:actions'
+
+      - name: Record Actions analysis outcome
+        if: ${{ !cancelled() }}
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-logs
+          {
+            echo "analysis_job_status=$JOB_STATUS"
+            if [ "$JOB_STATUS" = success ]; then
+              echo "CodeQL Actions analysis completed successfully."
+            else
+              echo "BLOCKED: CodeQL Actions analysis job did not complete successfully; inspect preceding step logs."
+            fi
+            date -u '+recorded_utc=%Y-%m-%dT%H:%M:%SZ'
+          } | tee ci-logs/codeql-actions-result.log
+
+      - name: Upload Actions CodeQL log part (temporary internal artifact)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: codeql-logs-part-actions-attempt${{ github.run_attempt }}
+          path: ci-logs
+          if-no-files-found: error
+
+  # Only standalone schedule/dispatch runs collect here. Reusable invocations
+  # are collected by build-desktop.yml, which owns the single run-level log.txt.
   collect:
-    name: collect-logs (standalone codeql evidence)
-    # always() preserves the report path after failed analysis;
-    # !cancelled() avoids pointless collection on user cancellation.
-    needs: analyze
+    name: collect-logs (standalone CodeQL evidence)
+    needs: [analyze_go, analyze_actions]
     if: ${{ always() && !cancelled() && inputs.called != true }}
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
-      actions: write # delete the temporary codeql-logs-part after aggregation
-      security-events: read # fetch open code scanning alerts for the analyzed commit
+      actions: write # delete temporary CodeQL log parts after log.txt is uploaded
+      security-events: read # best-effort code-scanning alert retrieval
     steps:
       - name: Checkout (collector source)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -249,21 +284,26 @@ jobs:
       - name: Bootstrap CI log directories (guaranteed evidence)
         run: bash scripts/ci/bootstrap-logs.sh
 
-      - name: Setup Go
+      - name: Setup Go (collector build only)
+        id: setup_go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          cache: false # cache policy: only build-linux/build-windows save caches
+          cache: false
 
-      - name: Download log parts (namespaced, never flattened)
+      - name: Download this attempt's CodeQL log parts
         id: download
+        if: ${{ !cancelled() }}
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          pattern: codeql-logs-part-*-attempt${{ github.run_attempt }}
           path: ci-parts
           merge-multiple: false
 
-      - name: Write run manifest
+      - name: Write run manifest and download diagnostics
+        id: manifest
+        if: ${{ !cancelled() }}
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -273,56 +313,91 @@ jobs:
           REPO: ${{ github.repository }}
           RUNNER_OS_LABEL: ${{ runner.os }}
           STARTED_AT: ${{ github.run_started_at }}
-          RESULT_ANALYZE: ${{ needs.analyze.result }}
+          RESULT_ANALYZE_GO: ${{ needs.analyze_go.result }}
+          RESULT_ANALYZE_ACTIONS: ${{ needs.analyze_actions.result }}
         run: |
           set -Eeuo pipefail
           mkdir -p ci-parts
           {
-            echo "=== download step outcome: ${{ steps.download.outcome }} conclusion: ${{ steps.download.conclusion }} ==="
-            ls -laR ci-parts || true
-          } | tee ci-parts/download-diagnostics.txt || true
-          cat > ci-parts/manifest.json <<MANIFEST
-          {
-            "product": "SHEYTAN Music Visualizer",
-            "repository": "${REPO}",
-            "workflow": "codeql.yml",
-            "run_id": "${RUN_ID}",
-            "attempt": "${RUN_ATTEMPT}",
-            "commit_sha": "${COMMIT_SHA}",
-            "ref": "${REF}",
-            "event": "${EVENT}",
-            "runner_os": "${RUNNER_OS_LABEL}",
-            "start_time_utc": "${STARTED_AT}",
-            "codeql": {
-              "workflow": "codeql.yml",
-              "job": "analyze",
-              "result": "${RESULT_ANALYZE}"
-            },
-            "jobs": [
-              {"name": "analyze (go)",      "result": "${RESULT_ANALYZE}", "artifact": "codeql-logs-part-go-attempt${{ github.run_attempt }}",      "required": true},
-              {"name": "analyze (actions)", "result": "${RESULT_ANALYZE}", "artifact": "codeql-logs-part-actions-attempt${{ github.run_attempt }}", "required": true}
-            ]
-          }
-          MANIFEST
-          cat ci-parts/manifest.json
+            echo "download_outcome=${{ steps.download.outcome }}"
+            echo "download_conclusion=${{ steps.download.conclusion }}"
+            find ci-parts -maxdepth 4 -type f -print | sort || true
+          } | tee ci-parts/download-diagnostics.txt
 
+          if [ "$RESULT_ANALYZE_GO" = success ] && [ "$RESULT_ANALYZE_ACTIONS" = success ]; then
+            result_codeql=success
+          else
+            result_codeql=failure
+          fi
+
+          jq -n \
+            --arg product "SHEYTAN Music Visualizer" \
+            --arg repository "$REPO" \
+            --arg workflow "codeql.yml" \
+            --arg run_id "$RUN_ID" \
+            --arg attempt "$RUN_ATTEMPT" \
+            --arg commit_sha "$COMMIT_SHA" \
+            --arg ref "$REF" \
+            --arg event "$EVENT" \
+            --arg runner_os "$RUNNER_OS_LABEL" \
+            --arg started_at "$STARTED_AT" \
+            --arg result_codeql "$result_codeql" \
+            --arg result_go "$RESULT_ANALYZE_GO" \
+            --arg result_actions "$RESULT_ANALYZE_ACTIONS" \
+            --arg artifact_go "codeql-logs-part-go-attempt${RUN_ATTEMPT}" \
+            --arg artifact_actions "codeql-logs-part-actions-attempt${RUN_ATTEMPT}" \
+            '{
+              product: $product,
+              repository: $repository,
+              workflow: $workflow,
+              run_id: $run_id,
+              attempt: $attempt,
+              commit_sha: $commit_sha,
+              ref: $ref,
+              event: $event,
+              runner_os: $runner_os,
+              start_time_utc: $started_at,
+              codeql: {
+                workflow: $workflow,
+                job: "aggregate",
+                result: $result_codeql
+              },
+              jobs: [
+                {name: "analyze (go)", result: $result_go, artifact: $artifact_go, required: true},
+                {name: "analyze (actions)", result: $result_actions, artifact: $artifact_actions, required: true}
+              ]
+            }' > ci-parts/manifest.json
+
+          jq . ci-parts/manifest.json
+
+      # Run even after setup/manifest failures so the attempt is recorded in
+      # the job log; the report fallback below remains the recovery path.
       - name: Build collector binary
+        if: ${{ !cancelled() && steps.setup_go.outcome == 'success' }}
         run: |
           set -Eeuo pipefail
+          mkdir -p bin ci-logs
+          build_output="$PWD/ci-logs/collector-build-output.log"
           rc=0
-          go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector || rc=$?
+          if go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector >"$build_output" 2>&1; then
+            rc=0
+          else
+            rc=$?
+          fi
           printf '%s\n' "$rc" > collector-build.rc
           {
             echo "command: go build -trimpath -o bin/ci-log-collector ./cmd/ci-log-collector"
             echo "exit_code: $rc"
+            cat "$build_output" || true
             date -u '+utc=%Y-%m-%dT%H:%M:%SZ'
           } | tee ci-logs/collector-build.log
           if [ "$rc" -ne 0 ]; then
-            echo "ERROR: collector binary build failed (rc=$rc); the emergency fallback path will still produce a truthful log.txt"
+            echo "ERROR: collector build failed (rc=$rc); emergency report fallback will run."
           fi
           exit "$rc"
 
       - name: Run collector
+        id: collector
         if: ${{ !cancelled() }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -330,88 +405,156 @@ jobs:
           set +e
           mkdir -p ci-out
           rc=2
-          if [ -x bin/ci-log-collector ]; then
+          if [ -x bin/ci-log-collector ] && [ -s ci-parts/manifest.json ]; then
             ./bin/ci-log-collector \
               --report ci-out/log.txt \
               --parts-root ci-parts \
               --manifest ci-parts/manifest.json \
-              --github-repo "${GITHUB_REPOSITORY}" \
-              --run-id "${GITHUB_RUN_ID}" \
-              --attempt "${GITHUB_RUN_ATTEMPT}"
+              --github-repo "$GITHUB_REPOSITORY" \
+              --run-id "$GITHUB_RUN_ID" \
+              --attempt "$GITHUB_RUN_ATTEMPT"
             rc=$?
           else
             {
-              echo "BLOCKED: collector binary unavailable (build rc=$(cat collector-build.rc 2>/dev/null || echo unknown))"
+              echo "BLOCKED: collector binary or manifest unavailable."
+              echo "collector_build_rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
+              echo "manifest_present=$([ -s ci-parts/manifest.json ] && echo true || echo false)"
             } | tee ci-logs/collector-run.log
             rc=2
           fi
-          echo "$rc" > collector.rc
-          echo "collector exit code: $rc"
+          printf '%s\n' "$rc" > collector.rc
+          echo "collector exit code: $rc (0=complete, 1=incomplete, 2=hard error, 3=required analysis failed)"
           exit 0
 
-      - name: Emergency fallback report (collector binary unavailable or hard-failed)
+      - name: Emergency fallback report (collector missing or report absent)
+        id: fallback_report
         if: ${{ !cancelled() }}
+        env:
+          RESULT_ANALYZE_GO: ${{ needs.analyze_go.result }}
+          RESULT_ANALYZE_ACTIONS: ${{ needs.analyze_actions.result }}
         run: |
           set -Eeuo pipefail
           if [ -s ci-out/log.txt ]; then
             echo "collector report present; emergency fallback not needed"
             exit 0
           fi
-          reason="collector rc=$(cat collector.rc 2>/dev/null || echo unknown); build rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
+
+          if [ "$RESULT_ANALYZE_GO" = success ] && [ "$RESULT_ANALYZE_ACTIONS" = success ]; then
+            result_codeql=success
+          else
+            result_codeql=failure
+          fi
+          reason="collector_rc=$(cat collector.rc 2>/dev/null || echo unknown); collector_build_rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
+
           bash scripts/ci/emergency-report.sh \
             --out ci-out/log.txt \
             --parts-root ci-parts \
             --manifest ci-parts/manifest.json \
             --reason "$reason" \
-            --result-codeql "${RESULT_ANALYZE:-unknown}"
+            --result-codeql "$result_codeql"
           printf 'used\n' > collector-fallback.used
 
       - name: Validate final log.txt before upload
+        id: validate_report
+        if: ${{ !cancelled() }}
         run: |
+          set -Eeuo pipefail
           test -s ci-out/log.txt || { echo "ERROR: consolidated log.txt missing or empty"; exit 1; }
+          file_count=$(find ci-out -mindepth 1 -maxdepth 1 -type f | wc -l)
+          test "$file_count" -eq 1 || { echo "ERROR: ci-out must contain exactly one file (log.txt); found $file_count"; exit 1; }
           size=$(stat -c%s ci-out/log.txt)
           echo "log.txt validated: $size bytes"
 
       - name: Upload the single consolidated diagnostics artifact
-        if: always()
+        id: upload_report
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: log.txt
           path: ci-out/log.txt
           if-no-files-found: error
 
-      - name: Delete temporary log-part artifacts (single-artifact guarantee)
+      # Treat cleanup as part of the single-artifact contract: a failed list
+      # or deletion is not silently reported as a clean run.
+      - name: Delete temporary CodeQL log-part artifacts
+        id: cleanup_parts
+        if: ${{ !cancelled() && steps.upload_report.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set +e
+          set -Eeuo pipefail
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
           tmp=$(mktemp)
-          curl -sfL --retry 2 -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-            "${api}?per_page=100" -o "$tmp"
-          if [ ! -s "$tmp" ]; then
-            echo "WARNING: could not list artifacts for cleanup (report already uploaded); temporary part artifacts may remain visible."
-            exit 0
+          trap 'rm -f "$tmp"' EXIT
+
+          if ! curl -fsSL --retry 2 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${api}?per_page=100" -o "$tmp"; then
+            echo "ERROR: unable to list run artifacts for temporary cleanup."
+            exit 1
           fi
-          ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | test("-logs-part(-attempt[0-9]+)?$")) or (.name | startswith("codeql-logs-part-")) or (.name == "consolidated-run-log")) | .id' "$tmp")
-          for id in $ids; do
+          jq -e '.artifacts | type == "array"' "$tmp" >/dev/null
+
+          mapfile -t ids < <(jq -r '.artifacts[]? | select(.name | test("^codeql-logs-part-(go|actions)-attempt[0-9]+$")) | .id' "$tmp")
+          cleanup_failed=0
+          for id in "${ids[@]}"; do
+            if [[ ! "$id" =~ ^[0-9]+$ ]]; then
+              echo "ERROR: invalid artifact id returned by GitHub: $id"
+              cleanup_failed=1
+              continue
+            fi
             url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
-            if curl -sf -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$url"; then
-              echo "deleted temporary artifact ${id}"
+            if curl -fsS -X DELETE \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" "$url"; then
+              echo "deleted temporary CodeQL artifact ${id}"
             else
-              echo "WARNING: deleting artifact ${id} failed; it may remain visible (report is unaffected)."
+              echo "ERROR: failed to delete temporary CodeQL artifact ${id}"
+              cleanup_failed=1
             fi
           done
-          rm -f "$tmp"
+
+          if [ "$cleanup_failed" -ne 0 ]; then
+            exit 1
+          fi
+          echo "temporary CodeQL artifact cleanup completed; preserved log.txt"
 
       - name: Fail closed after the report upload attempt
-        if: always()
+        if: ${{ !cancelled() }}
+        env:
+          VALIDATE_OUTCOME: ${{ steps.validate_report.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload_report.outcome }}
+          CLEANUP_OUTCOME: ${{ steps.cleanup_parts.outcome }}
         run: |
+          set -Eeuo pipefail
           rc="$(cat collector.rc 2>/dev/null || echo 2)"
-          if [ -f collector-fallback.used ]; then
-            echo "EMERGENCY FALLBACK REPORT WAS USED: consolidated coverage is unverified;"
-            echo "the collecting job fails even though a truthful log.txt was uploaded."
-            if [ "$rc" -eq 0 ]; then rc=1; fi
+          if [[ ! "$rc" =~ ^[0-3]$ ]]; then
+            echo "ERROR: invalid collector exit code '$rc'; treating as hard failure."
+            rc=2
           fi
-          echo "collector exit code: $rc"
-          exit "$rc"
+
+          fail=0
+          if [ -f collector-fallback.used ]; then
+            echo "EMERGENCY FALLBACK REPORT WAS USED: collector coverage is unverified."
+            fail=1
+          fi
+          if [ "$VALIDATE_OUTCOME" != success ]; then
+            echo "ERROR: report validation did not succeed (outcome=$VALIDATE_OUTCOME)."
+            fail=1
+          fi
+          if [ "$UPLOAD_OUTCOME" != success ]; then
+            echo "ERROR: log.txt artifact upload did not succeed (outcome=$UPLOAD_OUTCOME)."
+            fail=1
+          fi
+          if [ "$CLEANUP_OUTCOME" != success ]; then
+            echo "ERROR: temporary-artifact cleanup did not succeed (outcome=$CLEANUP_OUTCOME)."
+            fail=1
+          fi
+
+          if [ "$rc" -ne 0 ] || [ "$fail" -ne 0 ]; then
+            echo "CodeQL collector exit code: $rc (0=complete, 1=incomplete, 2=hard error, 3=required analysis failed)"
+            if [ "$rc" -eq 0 ]; then rc=1; fi
+            exit "$rc"
+          fi
+          echo "CodeQL standalone collection, report validation, upload and cleanup all succeeded."
