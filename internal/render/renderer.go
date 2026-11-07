@@ -49,6 +49,13 @@ type BackendInfo struct {
 	// DeviceType is the honest adapter class (discrete-gpu,
 	// integrated-gpu, virtual-gpu, cpu, other) when the API exposes it.
 	DeviceType string `json:"deviceType,omitempty"`
+	// DeviceClass is the honest hardware/software classification derived
+	// from adapter PROPERTIES (PCI identity, device type, backend):
+	// hardware / software / virtual / unknown (run 42231355353 repair:
+	// a software adapter — e.g. Microsoft Basic Render Driver / WARP —
+	// is never represented as physical GPU acceleration, whatever the
+	// underlying API reports as its device type).
+	DeviceClass string `json:"deviceClass,omitempty"`
 	// VendorID/DeviceID are the PCI identifiers when available.
 	VendorID uint32 `json:"vendorId,omitempty"`
 	DeviceID uint32 `json:"deviceId,omitempty"`
@@ -72,8 +79,13 @@ type Renderer interface {
 // hardware adapter can be proven, otherwise CPU. Software/noop wgpu
 // adapters are deliberately refused as "GPU" — they execute pipeline
 // semantics on the CPU and labeling them GPU would be dishonest. The
-// returned info always reflects the actual decision, including the
-// exact reason when the GPU path was unavailable or refused.
+// refusal is PROPERTY-based (run 42231355353 repair): the adapter must
+// classify as hardware (DeviceClass) AND report a real driver backend
+// API AND have created a device. A dx12-reported Microsoft Basic Render
+// Driver / WARP adapter fails the DeviceClass check and falls back to
+// the CPU renderer with the exact reason recorded. The returned info
+// always reflects the actual decision, including the exact reason when
+// the GPU path was unavailable or refused.
 func SelectRenderer() (Renderer, BackendInfo) {
 	pref, fromEnv, envErr := PreferenceFromEnv()
 	if envErr != nil {
@@ -85,7 +97,7 @@ func SelectRenderer() (Renderer, BackendInfo) {
 	g, attemptInfo := newGPURendererFull(pref)
 	if g != nil {
 		info := g.Info()
-		if info.GpuState == GpuAvailable && isHardwareBackend(info.BackendAPI) {
+		if info.GpuState == GpuAvailable && isHardwareBackend(info.BackendAPI) && info.DeviceClass == DeviceClassHardware {
 			if fromEnv {
 				info.Detail = "GPU preference from SHEYTAN_GPU_PREFERENCE=" + string(pref)
 			}
@@ -96,8 +108,12 @@ func SelectRenderer() (Renderer, BackendInfo) {
 		ci := c.Info()
 		switch {
 		case attemptInfo.Adapter != "":
+			class := attemptInfo.DeviceClass
+			if class == "" {
+				class = DeviceClassUnknown
+			}
 			ci.Detail = "GPU fallback: " + attemptInfo.Adapter + " (" + attemptInfo.BackendAPI +
-				") is not a hardware adapter; using the CPU renderer"
+				", device class " + class + ") is not a proven hardware adapter; using the CPU renderer"
 		case attemptInfo.Detail != "":
 			ci.Detail = "GPU fallback: " + attemptInfo.Detail
 		}

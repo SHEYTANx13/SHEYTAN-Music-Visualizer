@@ -124,7 +124,7 @@ CI regression fixtures (deterministic, no GitHub credentials needed):
 
 ```bash
 scripts/ci/tests/test-ci-plumbing.sh                 # bootstrap/capture/DAG/UCRT64-static/fallback fixtures
-scripts/ci/tests/test-codeql-coverage-inventory.sh   # CodeQL 40/65 file-coverage proof
+scripts/ci/tests/test-codeql-coverage-inventory.sh   # CodeQL 40/66 file-coverage proof
 scripts/ci/tests/Test-CaptureStep.ps1                # PowerShell capture fixtures (needs pwsh 7)
 go test ./internal/cilog/                            # collector correctness fixtures
 ```

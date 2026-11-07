@@ -107,6 +107,96 @@ func deviceTypeName(t gputypes.DeviceType) string {
 	}
 }
 
+// Adapter device classes (run 42231355353 GPU evidence repair). The
+// class is reported next to the raw device type so a software adapter
+// can never be represented as physical GPU acceleration, no matter how
+// the underlying API labels its device type.
+const (
+	DeviceClassHardware = "hardware" // proven physical adapter on a real driver backend
+	DeviceClassSoftware = "software" // CPU/WARP/llvmpipe-class renderer — never hardware
+	DeviceClassVirtual  = "virtual"  // virtual GPU (VM/remote) — never physical hardware
+	DeviceClassUnknown  = "unknown"  // properties do not prove hardware — never labeled hardware
+)
+
+// Microsoft's software-adapter PCI identity. DXGI marks this adapter
+// with DXGI_ADAPTER_FLAG_SOFTWARE; the wgpu D3D layer can still report
+// it as an integrated GPU. Microsoft ships no physical GPUs, so the
+// Microsoft vendor id alone identifies the software adapter; the
+// 0x1414/0x008c pair is the canonical Basic Render Driver / WARP
+// identity. A physical primary adapter can carry a similar NAME when
+// the display driver is broken, so names never decide the class —
+// properties do (DXGI_ADAPTER_FLAG_SOFTWARE semantics).
+const (
+	// msSoftwareVendorID is Microsoft's PCI vendor id (0x1414). Microsoft
+	// ships no physical GPUs — the vendor id alone identifies the software
+	// adapter (the Basic Render Driver / WARP device id is 0x008c) even
+	// when the D3D layer mislabels its device type.
+	msSoftwareVendorID uint32 = 0x1414
+)
+
+// softwareAdapterNames are adapter names that ARE software rasterizers
+// by construction (Mesa/SwiftShader software implementations identify
+// themselves; this is not display-name guessing but the renderer's own
+// identity). "Microsoft Basic Render Driver" is deliberately NOT in
+// this list: its name alone cannot distinguish the software adapter
+// from a primary adapter with a broken display driver.
+var softwareAdapterNames = []string{
+	"llvmpipe", "lavapipe", "softpipe", "swiftshader", "swrast",
+}
+
+// classifyAdapterInfo assigns the honest device class from adapter
+// PROPERTIES (PCI identity, device type, backend), never from the
+// display name alone. First match wins:
+//
+//   - DeviceType CPU, the Microsoft software PCI identity (0x1414, and
+//     specifically 0x1414/0x008c), or a self-identified software
+//     rasterizer name → software;
+//   - a wgpu noop/empty backend → software (the GoGPU software/noop
+//     adapter reports BackendEmpty);
+//   - a discrete GPU on a real driver backend → hardware;
+//   - an integrated GPU on a real driver backend with a non-Microsoft
+//     PCI vendor → hardware; with Microsoft's vendor id it is the
+//     software adapter mislabeled by the D3D layer → software;
+//   - a virtual GPU → virtual;
+//   - everything else (missing IDs, unknown type) → unknown.
+func classifyAdapterInfo(info gputypes.AdapterInfo) string {
+	if info.DeviceType == gputypes.DeviceTypeCPU {
+		return DeviceClassSoftware
+	}
+	if info.VendorID == msSoftwareVendorID {
+		// Microsoft ships no physical GPUs; 0x1414(/0x008c) is the WARP
+		// Basic Render Driver identity even when the type is mislabeled.
+		return DeviceClassSoftware
+	}
+	name := info.Name
+	for _, sw := range softwareAdapterNames {
+		if containsFold(name, sw) {
+			return DeviceClassSoftware
+		}
+	}
+	api := backendName(info.Backend)
+	switch info.DeviceType {
+	case gputypes.DeviceTypeDiscreteGPU:
+		if isHardwareBackend(api) {
+			return DeviceClassHardware
+		}
+		return DeviceClassUnknown
+	case gputypes.DeviceTypeIntegratedGPU:
+		if isHardwareBackend(api) {
+			return DeviceClassHardware
+		}
+		return DeviceClassUnknown
+	case gputypes.DeviceTypeVirtualGPU:
+		return DeviceClassVirtual
+	default:
+		if info.Backend == gputypes.BackendEmpty {
+			// The GoGPU software/noop adapter reports no backend.
+			return DeviceClassSoftware
+		}
+		return DeviceClassUnknown
+	}
+}
+
 // wgslShader is the Radial Spectrum fragment shader. It mirrors the
 // CPU radial renderer's math (base radius driven by bass + beat, 64
 // mirrored bins, palette ramp) inside the brand palette.
@@ -285,7 +375,11 @@ func newGPURendererFull(p Preference, opts ...*wgpu.RequestAdapterOptions) (*GPU
 		Adapter: info.Name, Vendor: info.Vendor, Driver: info.Driver,
 		BackendAPI: api,
 		DeviceType: deviceTypeName(info.DeviceType),
-		VendorID:   info.VendorID, DeviceID: info.DeviceID,
+		// DeviceClass is the honest hardware/software classification
+		// derived from adapter PROPERTIES (PCI identity, device type,
+		// backend) — never from the adapter display name alone.
+		DeviceClass: classifyAdapterInfo(info),
+		VendorID:    info.VendorID, DeviceID: info.DeviceID,
 	}
 	dev, err := adapter.RequestDevice(nil)
 	if err != nil {

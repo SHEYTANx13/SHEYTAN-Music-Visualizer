@@ -233,24 +233,32 @@ func checkRendererSelect(out io.Writer) error {
 	if img == nil || img.Bounds().Empty() {
 		return fmt.Errorf("empty frame")
 	}
-	fmt.Fprintf(out, "  backend=%s gpu=%s api=%s adapter=%s devtype=%s\n",
-		info.Backend, info.GpuState, info.BackendAPI, info.Adapter, info.DeviceType)
+	fmt.Fprintf(out, "  backend=%s gpu=%s api=%s adapter=%s devtype=%s class=%s\n",
+		info.Backend, info.GpuState, info.BackendAPI, info.Adapter, info.DeviceType, info.DeviceClass)
+	if info.DeviceClass != render.DeviceClassHardware {
+		fmt.Fprintf(out, "  device class: %s — NOT proven physical GPU acceleration\n", info.DeviceClass)
+	}
 	if info.Detail != "" {
 		fmt.Fprintf(out, "  renderer detail: %s\n", info.Detail)
 	}
 	return nil
 }
 
-// checkExportEnv reports the local FFmpeg environment honestly
-// (informational only — a missing FFmpeg is not a failure of the
-// application foundation).
+// checkExportEnv reports the local FFmpeg environment honestly.
+// Semantics (run 42231355353 repair): a PASS of this check means the
+// OPTIONAL FFmpeg environment was HANDLED CORRECTLY — it never implies
+// MP4 export capability. FFmpeg absent is the optional-dependency
+// fallback path: reported explicitly as not available with the exact
+// actionable reason, while any export capability claim stays unproven.
 func checkExportEnv(out io.Writer) error {
 	env, err := export.DetectEnv(false)
 	if err != nil {
 		fmt.Fprintf(out, "  ffmpeg: NOT AVAILABLE (%v)\n", err)
+		fmt.Fprintf(out, "  export capability: NOT PROVEN — MP4 export cannot run without the optional local FFmpeg; this check only proves the absence is handled without crashing\n")
 		return nil
 	}
 	fmt.Fprintf(out, "  ffmpeg=%s encoders=%v\n", env.Version, env.EncoderList(false))
+	fmt.Fprintf(out, "  export capability: local FFmpeg present; actual MP4 export is proven only by the executed export tests (ffprobe-validated)\n")
 	return nil
 }
 

@@ -109,6 +109,23 @@ type JobSpec struct {
 	// Required marks jobs whose failure must fail the whole run. Empty
 	// or false keeps the job informational (e.g. evidence collectors).
 	Required bool `json:"required,omitempty"`
+	// Kind states what this row IS in the workflow model, so manifest
+	// evidence records are never presented as workflow jobs:
+	//
+	//      "workflow-job"                — a top-level job of the calling workflow;
+	//      "nested-reusable-workflow-job" — a job inside a reusable workflow called
+	//                                       by this run; the manifest carries the
+	//                                       CALLER's aggregate result, per-language
+	//                                       conclusions come from the job's own
+	//                                       artifact/API observation.
+	//      "standalone-collector-job"    — the evidence collection job itself.
+	//
+	// Empty means "workflow-job" (the historical shape).
+	Kind string `json:"kind,omitempty"`
+	// ResultBasis documents WHERE the declared result came from (e.g.
+	// "needs.build-windows.result", "caller aggregate needs.codeql.result"),
+	// so an aggregate value is never mistaken for a per-job observation.
+	ResultBasis string `json:"result_basis,omitempty"`
 }
 
 // CodeQLSpec carries the manifest-declared CodeQL evidence for the
@@ -709,6 +726,13 @@ func deriveFailedSteps(meta RunMeta, apiJobs []JobConclusion) []string {
 // matchDeclaredJob maps an API job name onto a declared manifest job.
 // The workflow declares short names ("build-windows") while the API
 // reports the display name ("build-windows (windows-latest, x64, UCRT64)").
+// Nested reusable-workflow rows use evidence-record names like
+// "analyze (go)" while the API reports the real nested job name
+// ("CodeQL Analyze (Go, manual traced build)"); an ordered whole-token
+// comparison resolves those without conflating distinct languages
+// ("analyze (go)" never matches the actions analysis job, and the
+// reusable-workflow caller wrapper "codeql (reusable analysis)" never
+// matches a declared analysis row).
 func matchDeclaredJob(jobs []JobSpec, apiName string) (JobSpec, bool) {
 	an := strings.ToLower(strings.TrimSpace(apiName))
 	for _, j := range jobs {
@@ -717,7 +741,57 @@ func matchDeclaredJob(jobs []JobSpec, apiName string) (JobSpec, bool) {
 			return j, true
 		}
 	}
+	for _, j := range jobs {
+		if tokenSubsequence(apiName, j.Name) {
+			return j, true
+		}
+	}
 	return JobSpec{}, false
+}
+
+// tokenSubsequence reports whether every whole alphanumeric token of
+// want appears in have, in order (lower-cased, punctuation-boundary
+// tokens). Requires want to have at least two tokens, so short generic
+// names can never sweep unrelated jobs.
+func tokenSubsequence(have, want string) bool {
+	ht := tokenizeTokens(have)
+	wt := tokenizeTokens(want)
+	if len(wt) < 2 || len(wt) > len(ht) {
+		return false
+	}
+	i := 0
+	for _, w := range wt {
+		found := false
+		for ; i < len(ht); i++ {
+			if ht[i] == w {
+				found = true
+				i++
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func tokenizeTokens(s string) []string {
+	var out []string
+	cur := strings.Builder{}
+	for _, r := range strings.ToLower(s) {
+		isAlnum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAlnum {
+			cur.WriteRune(r)
+		} else if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
 }
 
 func jobIndex(jobs []JobSpec, name string) int {
@@ -783,9 +857,19 @@ func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, fil
 		}
 	}
 	fmt.Fprintf(w, "\n%s\n2. JOB STATUS TABLE\n%s\n", separator, separator)
-	fmt.Fprintf(w, "Declared jobs: %d (succeeded %d, failed %d, cancelled %d, skipped %d)\n\n",
+	// Explicit job model (run 42231355353 reconciliation repair): the
+	// manifest declares EVIDENCE RECORDS, which are not the same thing
+	// as the workflow's top-level jobs or the jobs nested inside a
+	// reusable workflow. Every row states its own kind and where its
+	// declared result came from, so an aggregate value is never
+	// presented as a per-job observation.
+	fmt.Fprintf(w, "Manifest evidence records: %d (succeeded %d, failed %d, cancelled %d, skipped %d)\n",
 		res.JobsExpected, jobsSucceeded, jobsFailed, jobsCancelled, jobsSkipped)
-	fmt.Fprintf(w, "%-28s %-12s %-22s %-14s %s\n", "JOB", "REQUIRED", "CONCLUSION (workflow)", "API CONCLUSION", "LOG SOURCE")
+	fmt.Fprintf(w, "Row kinds: workflow-job = top-level job of the calling workflow; nested-reusable-workflow-job = a job\n")
+	fmt.Fprintf(w, "inside a reusable workflow called by this run (the row carries the CALLER's aggregate conclusion; the\n")
+	fmt.Fprintf(w, "per-language conclusion comes from that row's own artifact and/or API observation). The reusable-workflow\n")
+	fmt.Fprintf(w, "caller wrapper and every other API-observed job are listed separately below the declared rows.\n\n")
+	fmt.Fprintf(w, "%-28s %-30s %-9s %-22s %-14s %s\n", "JOB", "KIND", "REQUIRED", "CONCLUSION (workflow)", "API CONCLUSION", "LOG SOURCE")
 	for _, j := range meta.Jobs {
 		req := "yes"
 		if !j.Required {
@@ -829,10 +913,18 @@ func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, fil
 		if apiObs != nil {
 			apiConc = orNote(apiObs.Conclusion, "none (status "+apiObs.Status+")")
 		}
-		fmt.Fprintf(w, "%-28s %-12s %-22s %-14s %s\n", j.Name, req, j.Result, apiConc, src)
+		kind := j.Kind
+		if kind == "" {
+			kind = "workflow-job"
+		}
+		fmt.Fprintf(w, "%-28s %-30s %-9s %-22s %-14s %s\n", j.Name, kind, req, j.Result, apiConc, src)
+		if j.ResultBasis != "" {
+			fmt.Fprintf(w, "%-28s %-30s declared result basis: %s\n", "", "", j.ResultBasis)
+		}
 	}
 	if len(apiJobs) > 0 {
 		fmt.Fprintln(w)
+		fmt.Fprintln(w, "API-observed workflow jobs NOT represented as manifest evidence records (reusable-workflow caller wrapper, collection job, ...):")
 		for _, aj := range apiJobs {
 			if _, ok := matchDeclaredJob(meta.Jobs, aj.Name); !ok {
 				fmt.Fprintf(w, "OBSERVED (not declared in manifest): %s → conclusion %s\n", aj.Name, orNote(aj.Conclusion, "none (status "+aj.Status+")"))
@@ -1042,7 +1134,24 @@ func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, fil
 				}
 			}
 		}
-		fmt.Fprintf(w, "API-observed conclusion: %s\n", orNote(observed, "unavailable (see API ENRICHMENT LIMITATION above)"))
+		// Classified API-observation note (run 42231355353 repair): the
+		// note must never point at an "API ENRICHMENT LIMITATION" section
+		// that was not actually emitted. The three unavailable reasons are
+		// distinct: an API fetch error (the section above exists), no API
+		// client configured, and an API response that matched no declared
+		// record.
+		note := ""
+		switch {
+		case observed != "":
+			// an authoritative observation exists; no note needed
+		case res.APIError != "":
+			note = "unavailable (see API ENRICHMENT LIMITATION above)"
+		case len(apiJobs) == 0:
+			note = "unavailable (API enrichment not configured — no API client/token for this collection)"
+		default:
+			note = "unavailable (no API-observed job matched this declared record; see the OBSERVED rows above)"
+		}
+		fmt.Fprintf(w, "API-observed conclusion: %s\n", orNote(observed, note))
 		sarif := "unknown"
 		for _, aj := range apiJobs {
 			for _, st := range aj.Steps {
@@ -1107,8 +1216,9 @@ func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, fil
 		}
 	}
 	if len(reconciled) == 0 {
-		fmt.Fprintf(w, "Reconciled job rows:           (none)\n")
+		fmt.Fprintf(w, "Reconciled job rows:           0 — no manifest evidence record was an aggregate/stale row that the API proved successful.\n")
 	} else {
+		fmt.Fprintf(w, "Reconciled job rows:           %d (aggregate/stale manifest rows proven successful by the API; never counted as failures)\n", len(reconciled))
 		for _, r := range reconciled {
 			fmt.Fprintf(w, "RECONCILED: %s\n", r)
 		}

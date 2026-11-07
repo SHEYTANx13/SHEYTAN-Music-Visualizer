@@ -1,0 +1,54 @@
+=== 1. static/workflow checks ===
+OK  yaml-parse .github/workflows/build-desktop.yml
+OK  yaml-parse .github/workflows/codeql.yml
+PASS    yaml-parse               both workflows parse (or structural fallback when pyyaml absent)
+PASS    bash-syntax              all shell scripts pass bash -n
+PASS    gofmt                    all Go files gofmt-clean
+PASS    go-vet-internal          go vet -tags goffi_static ./internal/... exit 0
+=== 2. go test (full module, production goffi_static tag) ===
+FAIL	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer [build failed]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	2.221s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	0.121s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	20.002s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna	(cached)
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio	5.495s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer	(cached)
+FAIL	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne [build failed]
+FAIL
+BLOCKED go-test-all              cmd/ui packages cannot compile on this host (no root: Fyne GL/wayland dev headers absent); all other packages: 13 ok
+=== 3. CI fixture suites ===
+PASS    ci-plumbing              ==============================================================
+PASS    pwsh-fixtures            RESULT: PASS=11 FAIL=0
+PASS    codeql-inventory         ==============================================================
+=== 4. metadata chain end-to-end proof through Capture-Step (repaired pattern) ===
+PASS    metadata-e2e             METADATA-E2E: PASS (repaired pattern verified by the real gate body; defective pattern rejected by it)
+=== 5. failure injections ===
+  CASE1_RC=1
+  CASE1_SEES_SHADOW=True
+  CASE1_LOGS_BOTH=False
+  CASE2_RC=1
+  CASE2_MSG=True
+INJECT-OK   1    shadowed compiler path: helper exits 1 and names the stale toolchain (both paths logged)
+INJECT-OK   2    missing UCRT header/runtime evidence: helper exits 1 with actionable diagnosis
+INJECT-OK   3    uninvoked script block fixture C22 proves the false-green class is caught
+INJECT-OK   4    native exit 7 with stdout+stderr: output AND true exit code recorded (EXIT_CODE: 7 FAIL)
+INJECT-OK   5    missing tags: Go gate fails loudly; the unrelated ZIP gate in the SAME run still executed (EXIT_CODE: 0 PASS)
+INJECT-OK   6    metadata absent (defective -X assembly): the REAL verify-build-metadata gate body fails with precise errors; repaired build passes it
+INJECT-OK   7    software/WARP adapter (0x1414, llvmpipe, name-only MSRDR) classified software/virtual/unknown — never hardware
+INJECT-OK   8    FFmpeg absent (PATH without it): export job refuses to start with the actionable optional-dependency error (TestExportJobRequiresFFmpeg)
+INJECT-OK   9    window-mapping assertions cannot run without x11 tooling: the gui-smoke gate records BLOCKED (never a pass) — the mapping-failure paths themselves need the CI runner's x11-utils
+INJECT-OK   10   alerts API 403/404/429: report says NOT RETRIEVED with the reason — never 'zero open alerts'
+INJECT-OK   11   missing/malformed collector inputs: coverage INCOMPLETE (exit-code 1 contract) or hard error — fail closed
+INJECT-OK   12   a failed required job keeps OVERALL RESULT: FAIL even with complete coverage and a successful collector
+==============================================================
+FAILURE-INJECTION RESULT: OK=12 FAIL=0
+PASS    failure-injections       all injected-failure cases behaved truthfully
+==============================================================
+REGRESSION RESULT: PASS=9 FAIL=0 BLOCKED=1

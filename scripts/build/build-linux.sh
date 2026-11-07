@@ -221,36 +221,149 @@ if [ "$MODE" = "desktop" ]; then
   CI_TOOL_CONTEXT="gate:studio-integration" ci_capture "$JOB" studio-integration go test $GO_TAGS -timeout 380s ./internal/studio/ ||
     fail_gate studio-integration
 
-  # GUI smoke on a virtual display when Xvfb is available (roadmap:
-  # the window launch was historically never observed on a screen).
-  # SKIPPED honestly when no display tooling exists on this host.
-  if command -v Xvfb >/dev/null 2>&1; then
-    CI_TOOL_CONTEXT="gate:gui-smoke" ci_capture "$JOB" gui-smoke bash -c '
+  # Virtual-display GUI smoke (roadmap: the window launch was
+  # historically never observed on a screen). The gate PROVES a mapped
+  # application window and a graceful close; it is virtual-display
+  # evidence only and never establishes real display-driver or physical
+  # GPU execution. A live process alone is NOT a pass: without a mapped
+  # window the gate fails even when the process survives.
+  # Blocked honestly when the display/inspection tooling is missing —
+  # never passed without tooling.
+  if command -v Xvfb >/dev/null 2>&1 && command -v xdpyinfo >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then
+    CI_TOOL_CONTEXT="gate:gui-smoke (virtual display Xvfb; mapping + graceful-close proof)" ci_capture "$JOB" gui-smoke bash -c '
       set -u
-      Xvfb :99 -screen 0 1280x800x24 >/dev/null 2>&1 &
+      SMOKE_DIR="ci-logs/gui-smoke"
+      mkdir -p "$SMOKE_DIR"
+      echo "VIRTUAL-DISPLAY GUI SMOKE — proves a mapped X11 window and graceful close on Xvfb;"
+      echo "it does NOT establish real display-driver or physical-GPU execution."
+      echo "xvfb_identity=$(Xvfb -version 2>&1 | head -1 || echo unknown)"
+      DISPLAY_NUM=99
+      export DISPLAY=":${DISPLAY_NUM}"
+      echo "display=:${DISPLAY_NUM}"
+
+      # 1) X server readiness: bounded polling, no fixed startup sleep.
+      Xvfb :${DISPLAY_NUM} -screen 0 1280x800x24 >"$SMOKE_DIR/xvfb.log" 2>&1 &
       XP=$!
-      sleep 1.5
-      if ! kill -0 "$XP" 2>/dev/null; then
-        echo "ERROR: Xvfb failed to start"; exit 1
-      fi
-      DISPLAY=:99 SHEYTAN_LOG_DIR="$(pwd)/ci-logs/gui-smoke-logs" ./bin/sheytan-music-visualizer >/dev/null 2>&1 &
-      AP=$!
-      sleep 8
-      ALIVE=0
-      if kill -0 "$AP" 2>/dev/null; then ALIVE=1; fi
-      kill "$AP" 2>/dev/null
-      sleep 1.5
-      kill -9 "$AP" 2>/dev/null
-      wait "$AP" 2>/dev/null
-      kill "$XP" 2>/dev/null
-      if [ "$ALIVE" -ne 1 ]; then
-        echo "ERROR: app did not stay alive on the virtual display (window/event-loop failure)"
+      X_READY=0
+      for _ in $(seq 1 60); do
+        if ! kill -0 "$XP" 2>/dev/null; then
+          echo "ERROR: Xvfb exited during startup (see $SMOKE_DIR/xvfb.log)"
+          tail -5 "$SMOKE_DIR/xvfb.log" 2>/dev/null || true
+          exit 1
+        fi
+        if xdpyinfo >/dev/null 2>&1; then X_READY=1; break; fi
+        sleep 0.1
+      done
+      if [ "$X_READY" -ne 1 ]; then
+        echo "ERROR: X server did not become ready within the bounded deadline (xdpyinfo poll)"
+        kill "$XP" 2>/dev/null || true
         exit 1
       fi
-      echo "GUI smoke PASS: the studio window survived 8 s on Xvfb and terminated"
+      echo "xvfb_ready=true pid=$XP"
+
+      # 2) App launch + bounded readiness polling for a MAPPED window of
+      #    THIS application (title contains the product name), with early
+      #    exit detection. A live process without a mapped window FAILS.
+      SHEYTAN_LOG_DIR="$(pwd)/$SMOKE_DIR/app-logs" ./bin/sheytan-music-visualizer >"$SMOKE_DIR/app.log" 2>&1 &
+      AP=$!
+      echo "app_pid=$AP"
+      WINDOW_MAPPED=0
+      WINDOW_ID=""
+      for _ in $(seq 1 200); do
+        if ! kill -0 "$AP" 2>/dev/null; then
+          echo "ERROR: application exited before its window mapped (see $SMOKE_DIR/app.log)"
+          tail -20 "$SMOKE_DIR/app.log" 2>/dev/null || true
+          kill "$XP" 2>/dev/null || true
+          exit 1
+        fi
+        WID=$(xwininfo -root -tree 2>/dev/null | grep -i "SHEYTAN Music Visualizer" | head -1 | grep -oE "0x[0-9a-f]+" | head -1 || true)
+        if [ -n "$WID" ]; then
+          WINDOW_ID="$WID"
+          WINDOW_MAPPED=1
+          break
+        fi
+        sleep 0.1
+      done
+      if [ "$WINDOW_MAPPED" -ne 1 ]; then
+        echo "ERROR: no mapped application window within the bounded deadline (xwininfo root tree had no SHEYTAN window)"
+        xwininfo -root -tree 2>/dev/null | head -20 || true
+        kill "$AP" 2>/dev/null || true
+        sleep 1
+        kill -9 "$AP" 2>/dev/null || true
+        kill "$XP" 2>/dev/null || true
+        exit 1
+      fi
+      echo "window_mapped=true id=$WINDOW_ID"
+      xwininfo -id "$WINDOW_ID" -stats >"$SMOKE_DIR/window-stats.txt" 2>&1 || true
+      grep -E "Map State|Width|Height" "$SMOKE_DIR/window-stats.txt" | tr "\n" " " | sed "s/^/window_geometry=/" || true
+      head -1 "$SMOKE_DIR/window-stats.txt" || true
+
+      # 3) Event-loop health: the window must STAY mapped for a bounded
+      #    observation window (device-loss/early-destroy detection).
+      STILL_MAPPED=1
+      for _ in $(seq 1 30); do
+        if ! kill -0 "$AP" 2>/dev/null; then
+          echo "ERROR: application died while the window was expected to stay mapped (see $SMOKE_DIR/app.log)"
+          tail -20 "$SMOKE_DIR/app.log" 2>/dev/null || true
+          kill "$XP" 2>/dev/null || true
+          exit 1
+        fi
+        if ! xwininfo -id "$WINDOW_ID" >/dev/null 2>&1; then
+          STILL_MAPPED=0
+          break
+        fi
+        sleep 0.1
+      done
+      if [ "$STILL_MAPPED" -ne 1 ]; then
+        echo "ERROR: the application window was destroyed or unmapped during the observation window"
+        kill "$AP" 2>/dev/null || true
+        sleep 1
+        kill -9 "$AP" 2>/dev/null || true
+        kill "$XP" 2>/dev/null || true
+        exit 1
+      fi
+      echo "window_stayed_mapped=true (3 s observation)"
+
+      # 4) UI log errors: a panic/fatal in the app log fails the smoke
+      #    even when the process survived.
+      if grep -qiE "panic:|fatal error:" "$SMOKE_DIR/app.log" 2>/dev/null; then
+        echo "ERROR: application log contains panic/fatal output (see $SMOKE_DIR/app.log)"
+        grep -iE "panic:|fatal error:" "$SMOKE_DIR/app.log" | head -5 || true
+        kill "$AP" 2>/dev/null || true
+        sleep 1
+        kill -9 "$AP" 2>/dev/null || true
+        kill "$XP" 2>/dev/null || true
+        exit 1
+      fi
+      echo "ui_log_clean=true (no panic/fatal markers)"
+
+      # 5) Graceful close through the supported shutdown path (SIGTERM;
+      #    no window manager runs on Xvfb, so WM_DELETE is unavailable
+      #    and the process signal IS the supported path here), with a
+      #    bounded wait. kill -9 is cleanup-only: if it is ever needed,
+      #    the graceful-shutdown assertion has FAILED and the gate fails.
+      kill -TERM "$AP" 2>/dev/null || true
+      CLOSED_GRACEFULLY=0
+      for _ in $(seq 1 100); do
+        if ! kill -0 "$AP" 2>/dev/null; then CLOSED_GRACEFULLY=1; break; fi
+        sleep 0.1
+      done
+      if [ "$CLOSED_GRACEFULLY" -ne 1 ]; then
+        echo "ERROR: application did not exit within the bounded graceful-shutdown deadline; SIGKILL cleanup follows (graceful-shutdown assertion FAILED)"
+        kill -9 "$AP" 2>/dev/null || true
+        wait "$AP" 2>/dev/null || true
+        kill "$XP" 2>/dev/null || true
+        exit 1
+      fi
+      wait "$AP" 2>/dev/null
+      APP_RC=$?
+      kill "$XP" 2>/dev/null || true
+      wait "$XP" 2>/dev/null || true
+      echo "graceful_close=true term_exit_code=$APP_RC"
+      echo "GUI smoke PASS: window mapped, stayed mapped, UI log clean, closed gracefully on the virtual display"
     ' || fail_gate gui-smoke
   else
-    skip_gate gui-smoke "Xvfb not available on this host"
+    blocked_gate gui-smoke "Xvfb/xdpyinfo/xwininfo unavailable on this host (window mapping cannot be proven without tooling)"
   fi
 
   # govulncheck when available

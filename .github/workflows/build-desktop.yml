@@ -220,75 +220,24 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $ucrt
           Write-Output "UCRT64 bin prepended to PATH: $ucrt"
 
-      # Hard toolchain gate: identity of the FIRST compiler on PATH,
-      # not merely its existence. Fails fast on the stale C:\mingw64 /
-      # Strawberry toolchains, with the full evidence in the log part.
+      # Hard toolchain gate — EXECUTED, never quoted. Run 42231355353
+      # piped a bare `{ ... }` script-block literal into Tee-Object here:
+      # PowerShell treats that as a VALUE, so the block's SOURCE TEXT was
+      # written to windows-compiler.log, no assertion ran, $fail stayed
+      # $false and the step printed PASSED (false green). The helper is
+      # invoked as a FILE; its already-executed output lines (evaluated
+      # gcc identity, header-aware CRT probe, pkgconf identity, Go
+      # identity) are teed into the log part, and the REAL exit code —
+      # captured before the cmdlets can touch $LASTEXITCODE — decides
+      # the step. A script block is never piped uninvoked again.
       - name: Verify UCRT64 toolchain (identity gate)
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
           $ucrt = Join-Path "${{ steps.msys2.outputs.msys2-location }}" 'ucrt64\bin'
-          $fail = $false
-          {
-            Write-Output "=== expected UCRT64 bin ==="
-            Write-Output $ucrt
-            Write-Output "=== gcc identity ==="
-            $gcc = Get-Command gcc -ErrorAction SilentlyContinue
-            if ($null -eq $gcc) {
-              Write-Output "ERROR: gcc not found on PATH"
-              $script:fail = $true
-            } else {
-              Write-Output "gcc source: $($gcc.Source)"
-              if (-not ($gcc.Source -like "$ucrt*")) {
-                Write-Output "ERROR: first gcc on PATH is NOT the UCRT64 toolchain (stale shadowing toolchain detected)"
-                $script:fail = $true
-              }
-              # $(...) captures the FULL output first; piping a native
-              # tool into `Select-Object -First 1` can terminate the
-              # producer early and mask its real behavior.
-              "gcc: $((gcc --version)[0])"
-              $dumpmachine = (gcc -dumpmachine)
-              Write-Output "gcc -dumpmachine: $dumpmachine"
-              $defines = 'int main(void){return 0;}' | gcc -E -dM -xc -
-              if (-not ($defines | Select-String -SimpleMatch '_UCRT')) {
-                Write-Output "ERROR: compiler does not define _UCRT (not a UCRT64 toolchain)"
-                $script:fail = $true
-              } else {
-                Write-Output "UCRT runtime confirmed (_UCRT defined)"
-              }
-              if ($dumpmachine -ne 'x86_64-w64-mingw32') {
-                Write-Output "ERROR: unexpected gcc -dumpmachine (want x86_64-w64-mingw32)"
-                $script:fail = $true
-              }
-            }
-            Write-Output "=== pkg-config identity ==="
-            $pc = Get-Command pkg-config -ErrorAction SilentlyContinue
-            if ($null -eq $pc) {
-              Write-Output "ERROR: pkg-config not found on PATH"
-              $script:fail = $true
-            } else {
-              Write-Output "pkg-config source: $($pc.Source)"
-              if (-not ($pc.Source -like "$ucrt*")) {
-                Write-Output "ERROR: pkg-config is not the UCRT64 pkgconf"
-                $script:fail = $true
-              }
-              $ver = (pkg-config --version)
-              Write-Output "pkg-config version: $ver"
-              $majors = $ver.Split('.')
-              if ([int]$majors[0] -lt 1 -or ([int]$majors[0] -eq 1 -and [int]$majors[1] -lt 8)) {
-                Write-Output "ERROR: pkg-config too old (want >= 1.8 from UCRT64 pkgconf)"
-                $script:fail = $true
-              }
-            }
-            Write-Output "=== go identity ==="
-            go version
-            go env GOOS GOARCH CGO_ENABLED GOTOOLCHAIN
-          } 2>&1 | Tee-Object -FilePath ci-logs/windows-compiler.log
-          if ($fail) {
-            Write-Output "ERROR: UCRT64 toolchain identity gate FAILED (see ci-logs/windows-compiler.log)"
-            exit 1
-          }
-          Write-Output "UCRT64 toolchain identity gate PASSED"
+          $evidence = ./scripts/ci/Verify-UCRT64.ps1 -ExpectedBin $ucrt
+          $rc = $LASTEXITCODE
+          $evidence | Tee-Object -FilePath ci-logs/windows-compiler.log
+          exit $rc
 
       - name: Record build date
         id: meta
@@ -416,6 +365,14 @@ jobs:
             echo "=== distro FFmpeg for export integration tests (external to the product) ==="
             if ! sudo apt-get install -y --no-install-recommends ffmpeg; then
               echo "ERROR: FFmpeg install failed (export integration tests will report their exact missing-encoder behavior)"
+              echo fail >> "$status_file"
+            fi
+            echo "=== virtual-display GUI smoke tooling (Xvfb + X11 inspection) ==="
+            # The GUI smoke gate must be able to PROVE a mapped window, not
+            # merely an alive process: xvfb provides the display, x11-utils
+            # provides xdpyinfo (server readiness) and xwininfo (window map).
+            if ! sudo apt-get install -y --no-install-recommends xvfb x11-utils; then
+              echo "ERROR: Xvfb/x11-utils install failed (GUI smoke will be recorded BLOCKED, never passed without tooling)"
               echo fail >> "$status_file"
             fi
             echo "=== pkg-config modules ==="
@@ -635,7 +592,7 @@ jobs:
           } | tee ci-parts/download-diagnostics.txt
           # Build JSON with jq --arg so unusual refs/metadata cannot corrupt the manifest.
           jq -n \
-            --arg product 'SHEYТAN Music Visualizer' \
+            --arg product 'SHEYTAN Music Visualizer' \
             --arg repository "$REPO" \
             --arg workflow 'build-desktop.yml' \
             --arg run_id "$RUN_ID" \
@@ -672,6 +629,8 @@ jobs:
               start_time_utc: $start_time_utc,
               codeql: {
                 workflow: "codeql.yml",
+                # "analyze" identifies the nested reusable-workflow jobs as a
+                # pair; the caller only observes their AGGREGATE result.
                 job: "analyze",
                 result: $codeql_result
               },
@@ -683,11 +642,11 @@ jobs:
                 {artifact: $codeql_actions_artifact, outcome: $codeql_actions_download}
               ],
               jobs: [
-                {name: "preflight", result: $preflight_result, artifact: $preflight_artifact, required: true},
-                {name: "build-windows", result: $windows_result, artifact: $windows_artifact, required: true},
-                {name: "build-linux", result: $linux_result, artifact: $linux_artifact, required: true},
-                {name: "analyze (go)", result: $codeql_result, artifact: $codeql_go_artifact, required: true},
-                {name: "analyze (actions)", result: $codeql_result, artifact: $codeql_actions_artifact, required: true}
+                {name: "preflight", kind: "workflow-job", result: $preflight_result, result_basis: "needs.preflight.result (workflow conclusion)", artifact: $preflight_artifact, required: true},
+                {name: "build-windows", kind: "workflow-job", result: $windows_result, result_basis: "needs.build-windows.result (workflow conclusion)", artifact: $windows_artifact, required: true},
+                {name: "build-linux", kind: "workflow-job", result: $linux_result, result_basis: "needs.build-linux.result (workflow conclusion)", artifact: $linux_artifact, required: true},
+                {name: "analyze (go)", kind: "nested-reusable-workflow-job", result: $codeql_result, result_basis: "caller aggregate needs.codeql.result; per-language conclusion from this row's own artifact/API observation", artifact: $codeql_go_artifact, required: true},
+                {name: "analyze (actions)", kind: "nested-reusable-workflow-job", result: $codeql_result, result_basis: "caller aggregate needs.codeql.result; per-language conclusion from this row's own artifact/API observation", artifact: $codeql_actions_artifact, required: true}
               ]
             }' > ci-parts/manifest.json
           jq . ci-parts/manifest.json

@@ -52,11 +52,11 @@ restrained. Black dominates; red is the accent. Identity tokens live in
 | Go/Fyne application scaffold, identity, buildinfo, logging authorities | DELIVERED | `internal/*`, `cmd/*`, `ui/fyne`; `go build ./...`, `go test ./...` PASS |
 | `--version` / `--self-check` CLI contracts | DELIVERED | captured in `evidence/phase1-build.log` |
 | Build scripts with first-byte capture and true exit codes (Linux + Windows) | DELIVERED (Linux executed; Windows script statically validated, NOT RUN — no Windows host) | `evidence/phase1-build.log` |
-| `build-desktop.yml` (preflight, Windows x64 UCRT64, Linux x64, collect-logs) | DELIVERED as workflow definition; 2026-11-06 repair: guaranteed log bootstrap in every job, fully independent evidence DAG (a failed preflight can no longer skip Windows/Linux), attempt-suffixed artifact identity, emergency fallback report, GATES NOT REACHED semantics. HOSTED CI: NOT RUN (no push was made) | actionlint + YAML parse + semantic spot checks + `scripts/ci/tests/test-ci-plumbing.sh` PASS (`evidence/phase-workflow-validation.log`) |
-| `codeql.yml` (go manual + actions none) | DELIVERED as workflow definition; 2026-11-06 repair: structured capture for the traced build, per-leg attempt-suffixed parts, least-privilege caller. Go-file coverage 40/65 explained: 65 = 40 production + 25 test files (extract_tests=false); `scripts/ci/tests/test-codeql-coverage-inventory.sh` reproduces the proof. CodeQL execution itself: NOT RUN (no push) | `evidence/codeql-coverage-inventory.txt`, `evidence/phase-codeql.log` |
+| `build-desktop.yml` (preflight, Windows x64 UCRT64, Linux x64, collect-logs) | DELIVERED as workflow definition; 2026-11-06 repair: guaranteed log bootstrap in every job, fully independent evidence DAG (a failed preflight can no longer skip Windows/Linux), attempt-suffixed artifact identity, emergency fallback report, GATES NOT REACHED semantics. 2026-11-07 repair (run 42231355353): the "Verify UCRT64 toolchain" step is EXECUTED (scripts/ci/Verify-UCRT64.ps1 invoked as a file — the bare script-block-into-Tee-Object false green is gone), manifest rows carry kind + result basis, and the Linux job installs xvfb + x11-utils so the GUI smoke can prove a mapped window. HOSTED CI: NOT RUN (no push was made) | actionlint + YAML parse + semantic spot checks + `scripts/ci/tests/test-ci-plumbing.sh` PASS (`evidence/phase-workflow-validation.log`) |
+| `codeql.yml` (go manual + actions none) | DELIVERED as workflow definition; 2026-11-06 repair: structured capture for the traced build, per-leg attempt-suffixed parts, least-privilege caller. Go-file coverage 40/66 explained: 66 = 40 production + 26 test files (extract_tests=false); `scripts/ci/tests/test-codeql-coverage-inventory.sh` reproduces the proof. CodeQL execution itself: NOT RUN (no push) | `evidence/codeql-coverage-inventory.txt`, `evidence/phase-codeql.log` |
 | Log capture + consolidation subsystem with fixture tests | DELIVERED | `internal/cilog` tests PASS |
 | Source archive + external handoff note | DELIVERED | ZIP integrity + extracted-tree verification |
-| Minimal window actually launched on screen | DELIVERED as observed behavior on a virtual display (Xvfb): the studio window was MAPPED, survived the event loop and exited cleanly on SIGTERM; screenshot captured. Physical-desktop observation on real hardware remains open. | `evidence/gui-smoke-xvfb.png`, `evidence/log.txt` (gui-smoke gate), `ai-notes.md` |
+| Virtual-display GUI smoke with window proof | DELIVERED: the gui-smoke gate polls Xvfb readiness (xdpyinfo, bounded), asserts a MAPPED application window (xwininfo root tree, product-title match), keeps it under observation, scans the UI log for panics and closes gracefully via SIGTERM with a bounded wait; SIGKILL is cleanup-only and recorded as a failed graceful-close assertion. Tooling (xvfb, x11-utils) is installed by the Linux CI job. It is virtual-display evidence and never real display-driver/physical-GPU evidence. | `scripts/build/build-linux.sh` (gui-smoke gate), `scripts/ci/tests/test-ci-plumbing.sh` D26 |
 
 ## Phase 2 — studio and media implementation (Phase 2 slice, 2026-11-04)
 
@@ -112,10 +112,18 @@ from what still requires hardware or hosts this session never had.
    `github.com/gogpu/wgpu` v0.34.7 renders the Radial Spectrum mode
    through a WGSL fragment shader with submit + verified readback; the
    full pipeline proof passes on the software adapter and the renderer
-   refuses to label software/noop adapters as GPU. Hardware-GPU execution
-   (Vulkan/DX12/Metal): **NOT AVAILABLE** — the verification host has no
-   GPU/display; must be proven on real hardware before any acceleration
-   claim. CPU fallback always available and verified.
+   refuses to label software/noop adapters as GPU. 2026-11-07 repair
+   (run 42231355353): adapter classification is PROPERTY-based
+   (`classifyAdapterInfo`: PCI identity — Microsoft's 0x1414/0x008c
+   software adapter — device type, backend) and every renderer reports a
+   device class of hardware / software / virtual / unknown; only
+   `hardware` can ever be selected as the GPU backend, so a dx12-reported
+   "Microsoft Basic Render Driver" (WARP) can never be presented as
+   physical GPU acceleration even when the D3D layer mislabels its device
+   type. Hardware-GPU execution (Vulkan/DX12/Metal): **NOT AVAILABLE** —
+   the verification host has no GPU/display; must be proven on real
+   hardware before any acceleration claim. CPU fallback always available
+   and verified.
 8. **Export pipeline** — DELIVERED (Linux). Deterministic frame schedule,
    streamed RGBA to local FFmpeg, canonical-WAV audio, H.264/AAC,
    720p/1080p/1440p/4K at 24/30/60, quality presets, real progress,

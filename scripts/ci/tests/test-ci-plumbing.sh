@@ -30,6 +30,9 @@ report() { # report <PASS|FAIL|NOT RUN> <fixture-id> <detail>
 assert_contains() { # assert_contains <file> <needle> <what>
   if grep -qF -- "$2" "$1" 2>/dev/null; then return 0; else echo "  missing in $1: $2 ($3)"; return 1; fi
 }
+assert_not_contains() { # assert_not_contains <file> <needle> <what>
+  if grep -qF -- "$2" "$1" 2>/dev/null; then echo "  forbidden text present in $1: $2 ($3)"; return 1; else return 0; fi
+}
 
 BD=".github/workflows/build-desktop.yml"
 CQ=".github/workflows/codeql.yml"
@@ -166,8 +169,11 @@ check("B11-collector-needs-all",
       "needs: [preflight, build-windows, build-linux, codeql]" in bd)
 check("B11-collector-always", "if: ${{ always() && !cancelled() }}" in bd)
 
-# B10: CodeQL legs independent; fail-fast false inside codeql.yml
-check("B10-failfast-false", "fail-fast: false" in cq)
+# B10: CodeQL legs independent. The reusable workflow declares the two
+# language analyses as SEPARATE top-level jobs (no matrix), so neither
+# leg can cancel the other and each keeps its own evidence artifact.
+check("B10-independent-codeql-legs",
+      "analyze_go:" in cq and "analyze_actions:" in cq)
 
 # B12: no in-progress cancellation
 check("B12-no-cancel-in-progress", "cancel-in-progress: false" in bd)
@@ -187,7 +193,8 @@ for name in ["preflight-logs-part-attempt${{ github.run_attempt }}",
              "windows-logs-part-attempt${{ github.run_attempt }}",
              "linux-logs-part-attempt${{ github.run_attempt }}"]:
     check("identity-" + name.split("-")[0], name in bd, name)
-check("identity-codeql", "codeql-logs-part-${{ matrix.language }}-attempt${{ github.run_attempt }}" in cq)
+check("identity-codeql-go", "codeql-logs-part-go-attempt${{ github.run_attempt }}" in cq)
+check("identity-codeql-actions", "codeql-logs-part-actions-attempt${{ github.run_attempt }}" in cq)
 
 # upload the directory, not a brittle glob
 check("upload-dir-not-glob", "          path: ci-logs\n" in bd and "          path: ci-logs\n" in cq,
@@ -200,13 +207,26 @@ check("fallback-script-exists", open("scripts/ci/emergency-report.sh").read().st
 # fail-closed after upload
 check("fail-closed", "Fail closed after the report upload attempt" in bd)
 
-# manifest ↔ artifact name agreement (build-desktop)
-check("manifest-agreement", '"artifact": "preflight-logs-part-attempt${{ github.run_attempt }}"' in bd)
+# manifest ↔ artifact name agreement (build-desktop): the jq manifest
+# builds each artifact name via --arg from RUN_ATTEMPT, and the download
+# steps use the same attempt-suffixed names — both spellings must exist.
+check("manifest-agreement",
+      '--arg preflight_artifact "preflight-logs-part-attempt${RUN_ATTEMPT}"' in bd
+      and 'name: preflight-logs-part-attempt${{ github.run_attempt }}' in bd)
 
-# least privilege: caller codeql job grants actions: read (not write)
+# least privilege: the CALLER must grant actions: write because the called
+# workflow's standalone collect job (skipped when called) declares
+# actions: write for artifact cleanup — a reusable-workflow call cannot
+# elevate permissions inside, so GitHub requires the caller to cover it.
+# The security property that must hold: the NESTED analysis jobs stay
+# narrowed to actions: read.
 sec = re.search(r"  codeql:\n(?:    .*\n|      .*\n)*?    permissions:\n      actions: (\S+)", bd)
-check("least-privilege-codeql-caller", sec is not None and sec.group(1) == "read",
+check("caller-covers-reusable-permissions", sec is not None and sec.group(1) == "write",
       "" if sec is None else "grants actions: " + sec.group(1))
+check("least-privilege-nested-analyze",
+      re.search(r"analyze_go:\n(?:.*\n)*?      actions: read", cq) is not None
+      and re.search(r"analyze_actions:\n(?:.*\n)*?      actions: read", cq) is not None,
+      "nested CodeQL analysis jobs must remain actions: read")
 
 # E. ubuntu-26.04 on every Linux job; no ubuntu-latest; no 24.04
 u2604 = len(re.findall(r"runs-on: ubuntu-26\.04", bd)) + len(re.findall(r"runs-on: ubuntu-26\.04", cq))
@@ -247,18 +267,43 @@ else
   report FAIL "B7-13" "static structure assertions failed:"; cat "$T/dag.txt"
 fi
 
-# ---------- D22/D24-25: UCRT64 static regression assertions ----------------
+# ---------- D22-25: UCRT64 regression assertions (repaired contract) ------
+# The workflow gate must be EXECUTED (a helper invoked as a file — the
+# run-42231355353 defect piped a bare script-block literal into
+# Tee-Object, logging source text instead of running the checks), and
+# the CRT probe must be HEADER-AWARE (_UCRT is established by _mingw.h,
+# not by GCC built-ins, so a no-header translation unit cannot test it).
 BW="scripts/build/build-windows.ps1"
-if assert_contains "$BD" 'mingw-w64-ucrt-x86_64-gcc' "UCRT64 gcc package (workflow install list)" \
-   && assert_contains "$BW" "x86_64-w64-mingw32" "dumpmachine target" \
-   && assert_contains "$BW" "_UCRT" "UCRT runtime define check" \
-   && assert_contains ".github/workflows/build-desktop.yml" "x86_64-w64-mingw32" "workflow identity gate" \
-   && assert_contains ".github/workflows/build-desktop.yml" "stale shadowing toolchain detected" "stale compiler rejection" \
+VUC="scripts/ci/Verify-UCRT64.ps1"
+if [ -f "$VUC" ] \
+   && assert_contains "$BD" 'mingw-w64-ucrt-x86_64-gcc' "UCRT64 gcc package (workflow install list)" \
+   && assert_contains "$BD" 'scripts/ci/Verify-UCRT64.ps1 -ExpectedBin' "workflow invokes the executed toolchain helper" \
+   && assert_not_contains "$BD" '} 2>&1 | Tee-Object' "no uninvoked script-block pipe into Tee-Object in the workflow" \
+   && assert_contains "$VUC" 'x86_64-w64-mingw32' "helper: dumpmachine target" \
+   && assert_contains "$VUC" '#include <stdio.h>' "helper: header-aware CRT probe" \
+   && assert_contains "$VUC" '_UCRT' "helper: UCRT runtime define check" \
+   && assert_contains "$VUC" 'stale shadowing toolchain detected' "stale compiler rejection" \
+   && assert_contains "$BW" 'x86_64-w64-mingw32' "build script dumpmachine target" \
+   && assert_contains "$BW" '#include <stdio.h>' "build script: header-aware CRT probe" \
+   && assert_contains "$BW" '"-X ${bi}.version=' "build script: every -X flag carries its own -X token (metadata root cause)" \
+   && assert_contains "$BW" 'verify-build-metadata' "build script: enforced metadata acceptance gate" \
    && assert_contains "$BW" 'SHEYTAN_GO_TAGS' "single documented tag source" \
-   && assert_contains "scripts/ci/Capture-Step.ps1" 'SHEYTAN_GO_TAGS -split' "per-gate goTags initialization"; then
-  report PASS "D22-25" "UCRT64 static regressions: tag source, identity gate, _UCRT/dumpmachine checks present"
+   && assert_contains "scripts/ci/Capture-Step.ps1" 'SHEYTAN_GO_TAGS -split' "per-gate goTags initialization" \
+   && assert_contains "scripts/ci/Capture-Step.ps1" '[switch]$GoTags' "tag preamble is opt-in (gate isolation)"; then
+  report PASS "D22-25" "UCRT64 static regressions: executed helper gate, header-aware probe, -X ldflags contract, opt-in tag preamble"
 else
   report FAIL "D22-25" "UCRT64 static assertions failed"
+fi
+
+# ---------- D26: GUI smoke must prove window mapping, not process life ----
+BL="scripts/build/build-linux.sh"
+if assert_contains "$BL" 'xwininfo -root -tree' "GUI smoke inspects the real window tree" \
+   && assert_contains "$BL" 'xdpyinfo' "GUI smoke polls X server readiness" \
+   && assert_contains "$BL" 'graceful_close=true' "GUI smoke asserts graceful close" \
+   && assert_not_contains "$BL" 'sleep 8' "no fixed startup sleep in the GUI smoke"; then
+  report PASS "D26" "GUI smoke: readiness polling + window-mapping proof + bounded graceful close"
+else
+  report FAIL "D26" "GUI smoke static assertions failed"
 fi
 
 # ---------- E43/E44: emergency fallback report + redaction -----------------

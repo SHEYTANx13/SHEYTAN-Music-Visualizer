@@ -1,7 +1,10 @@
 # Capture-Step — command-capture helper (PowerShell side).
 #
 # Dot-source this file, ensure $env:CI_LOG_FILE is set, then call:
-#   Capture-Step -Job <job> -Step <step> -Command { <native command> }
+#   Capture-Step -Job <job> -Step <step> -Command { <native command> } [-GoTags]
+#
+# -GoTags is OPT-IN: only gates that run Go commands consuming build
+# tags (go test/vet/build and the executable build) may pass it.
 #
 # Contract:
 #   - Capture native stdout AND stderr from the first byte into
@@ -11,18 +14,26 @@
 #     NOT "terminate the whole build script". (The in-process form
 #     previously unwound build-windows.ps1 at the first `exit 0`.)
 #   - Each generated gate script is SELF-CONTAINED: a child pwsh
-#     process cannot see the caller's PowerShell variables, so every
-#     gate initializes and validates its own local $goTags argument
-#     array from the single documented source $env:SHEYTAN_GO_TAGS.
-#     (Run 41915116613 root cause 1: four gates referenced the
-#     parent-only $goTags and failed under StrictMode with "The
-#     variable '$goTags' cannot be retrieved because it has not been
-#     set.") A missing or malformed tag source fails the gate loudly
-#     instead of silently building without tags.
+#     process cannot see the caller's PowerShell variables. Gates
+#     called with -GoTags initialize and validate their own local
+#     $goTags argument array from the single documented source
+#     $env:SHEYTAN_GO_TAGS. (Run 41915116613 root cause 1: four gates
+#     referenced the parent-only $goTags and failed under StrictMode
+#     with "The variable '$goTags' cannot be retrieved because it has
+#     not been set.") A missing or malformed tag source fails such a
+#     gate loudly instead of silently building without tags.
+#     Tag isolation (run 42231355353 repair): the tag preamble is
+#     generated ONLY for -GoTags gates. Gates that never run a
+#     tag-consuming Go command (UCRT identity, gofmt, module hygiene,
+#     runtime output checks, portable staging, PE/ZIP validation) must
+#     not be blocked by a missing build-tag variable.
 #   - The generated script carries an EXIT-CODE EPILOGUE: pwsh -File
 #     exits 0 when a script ends normally without `exit`, so a failing
 #     native command at script end would otherwise be recorded as a
 #     passing gate. (Root cause class 3: lost native exit codes.)
+#     Gate bodies must still check $LASTEXITCODE after every native
+#     command whose result matters; a gate must never `exit 0` across
+#     a failed native command (the gofmt-verify early-exit class).
 #   - Return the original exit code AND NOTHING ELSE on the output
 #     stream. The child's console output is forwarded through
 #     Write-Host (information stream), never through the success
@@ -47,7 +58,10 @@ function Capture-Step {
         [Parameter(Mandatory = $true)][string]$Job,
         [Parameter(Mandatory = $true)][string]$Step,
         [Parameter(Mandatory = $true)][scriptblock]$Command,
-        [string]$ToolContext = "-"
+        [string]$ToolContext = "-",
+        # Opt-in: generate the SHEYTAN_GO_TAGS initialization preamble.
+        # Only tag-consuming Go gates may set this (see header notes).
+        [switch]$GoTags
     )
     if (-not $env:CI_LOG_FILE) {
         throw "Capture-Step: `$env:CI_LOG_FILE must be set before the first call."
@@ -74,16 +88,23 @@ function Capture-Step {
     $scriptDir = Join-Path (Split-Path -Parent $env:CI_LOG_FILE) "step-scripts"
     New-Item -ItemType Directory -Force -Path $scriptDir | Out-Null
     $scriptFile = Join-Path $scriptDir ("gate-{0}.ps1" -f $slug)
-    $preamble = @'
+    $strictHeader = @'
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
+'@
+    # Single-quoted epilogue: it must reach the generated file verbatim.
+    $epilogue = 'if (Test-Path Variable:LASTEXITCODE) { exit $LASTEXITCODE } else { exit 0 }'
+    if ($GoTags) {
+        $goTagsPreamble = @'
 
 # Initialize this gate's OWN local Go tag argument array from the
 # documented environment source (a child pwsh process never inherits
-# the caller's PowerShell variables).
+# the caller's PowerShell variables). ONLY tag-consuming Go gates are
+# generated with this preamble; generic gates must not depend on a
+# build-tag variable (run 42231355353 gate-isolation repair).
 if ([string]::IsNullOrWhiteSpace($env:SHEYTAN_GO_TAGS)) {
-    Write-Output "ERROR: SHEYTAN_GO_TAGS is not set; each gate must initialize its own Go tag array from this documented source (the goffi_static build tag is required when Fyne and wgpu link together)."
+    Write-Output "ERROR: SHEYTAN_GO_TAGS is not set; each Go gate must initialize its own Go tag array from this documented source (the goffi_static build tag is required when Fyne and wgpu link together)."
     exit 1
 }
 $goTags = @($env:SHEYTAN_GO_TAGS -split '\s+' | Where-Object { $_ -ne '' })
@@ -98,9 +119,11 @@ foreach ($tagToken in $goTags) {
     }
 }
 '@
-    # Single-quoted epilogue: it must reach the generated file verbatim.
-    $epilogue = 'if (Test-Path Variable:LASTEXITCODE) { exit $LASTEXITCODE } else { exit 0 }'
-    Set-Content -Path $scriptFile -Value ($preamble + "`n" + $Command.ToString().Trim() + "`n" + $epilogue + "`n") -Encoding utf8NoBOM
+        Set-Content -Path $scriptFile -Value ($strictHeader + "`n" + $goTagsPreamble + "`n" + $Command.ToString().Trim() + "`n" + $epilogue + "`n") -Encoding utf8NoBOM
+    }
+    else {
+        Set-Content -Path $scriptFile -Value ($strictHeader + "`n" + $Command.ToString().Trim() + "`n" + $epilogue + "`n") -Encoding utf8NoBOM
+    }
 
     $rc = $null
     $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)

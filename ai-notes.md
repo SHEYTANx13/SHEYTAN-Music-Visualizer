@@ -721,3 +721,79 @@ label note).
    and re-derive the claim before touching CodeQL config.
 4. Run `scripts/ci/tests/Test-CaptureStep.ps1` on any pwsh 7 host to close
    the PowerShell fixture gap recorded above.
+
+## Session 2026-11-07 — CI repair for run 42231355353 (no push made)
+
+Evidence run 42231355353 (commit dbedaa455dd3e5704452dc64bd1f56b02fc8e42c,
+branch main, push). Live HEAD at session start equaled the evidence commit;
+work stayed local. Confirmed root causes, all reproduced locally:
+
+1. **Windows build metadata (commit unknown, built unknown by local)** —
+   `build-windows.ps1` built the single `-ldflags` value WITHOUT the `-X `
+   flag tokens (`pkg.version=main pkg.commit=...`). The Go tool silently
+   ignores such tokens (exit 0), so the binary kept its defaults while the
+   build gate stayed green. Reproduced both directions with a minimal
+   module through the real Capture-Step chain: no `-X` tokens → defaults
+   with exit 0; `-X` per element → full metadata. Linux was unaffected
+   because `build-linux.sh` always included `-X` per element.
+2. **False-green "Verify UCRT64 toolchain" step** — the workflow piped a
+   bare `{ ... }` script-block literal into Tee-Object: PowerShell wrote
+   the block's SOURCE TEXT to windows-compiler.log, ran nothing, and the
+   step printed PASSED. Reproduced live with pwsh 7.4.6.
+3. **Defective `_UCRT` probe** — a no-header `int main(void){return 0;}`
+   translation unit only exposes GCC built-ins; mingw-w64 establishes
+   `_UCRT` in the CRT header configuration (`_mingw.h`,
+   `__MSVCRT_VERSION__ >= 0xE00/0x1400`), so the run-42231355353
+   desktop-env-check failure was the probe, not proof of MINGW64.
+4. **Gate tag coupling** — Capture-Step injected the `SHEYTAN_GO_TAGS`
+   preamble into EVERY generated gate; a missing tag variable blocked
+   unrelated gates (reproduced: run-version-style gate blocked).
+5. **gofmt gate early exit** — the success path `exit 0` never checked
+   gofmt's own `$LASTEXITCODE`; a crashed gofmt (empty output) reported
+   "clean".
+6. **Collector report reconciliation** — "Declared jobs" mislabeled
+   manifest evidence records; the CodeQL note referenced an "API
+   ENRICHMENT LIMITATION" section that the writer only emits when an API
+   error exists (dangling reference when no client is configured); the
+   nested CodeQL rows carried only the caller aggregate; API job names
+   never matched the declared "analyze (go)/(actions)" rows.
+7. **GPU evidence** — a dx12-reported "Microsoft Basic Render Driver"
+   (WARP) adapter with `devtype=integrated-gpu` was accepted as GPU.
+   Classification is now property-based (PCI identity 0x1414/0x008c,
+   device type, backend) with classes hardware/software/virtual/unknown;
+   SelectRenderer refuses everything not proven hardware.
+
+Repairs (files): `scripts/build/build-windows.ps1` (-X contract, enforced
+`verify-build-metadata` gate, header-aware probe, gofmt exit handling,
+Go-argv + env-presence diagnostics), `scripts/ci/Verify-UCRT64.ps1` (new,
+executed helper), `scripts/ci/Capture-Step.ps1` (opt-in `-GoTags`),
+`.github/workflows/build-desktop.yml` (helper invocation, manifest kind/
+result_basis, Cyrillic homoglyph in the manifest product string fixed,
+xvfb+x11-utils prereqs), `internal/cilog/collect.go` (job model labels,
+conditional API notes, token-subsequence matching for nested reusable
+jobs), `internal/render/{gpu,renderer}.go` + new
+`gpu_adapter_class_test.go`, `cmd/sheytan-music-visualizer/main.go`
+(self-check prints device class + explicit export-capability semantics),
+`scripts/build/build-linux.sh` (GUI smoke: bounded readiness polling,
+window-mapping proof via xwininfo, 3 s stay-mapped observation, panic
+scan, bounded graceful SIGTERM close; SIGKILL only as recorded cleanup),
+`scripts/ci/tests/{Test-CaptureStep.ps1,test-ci-plumbing.sh}` (fixtures
+updated + new C22/D24/D25/D26; stale assertions replaced with current
+contracts), `internal/cilog/collect_reconcile_test.go` (new), plus
+`roadmap.md`/`readme.md` inventory numbers.
+
+Verification matrix (this host: Linux sandbox, go1.27.3, pwsh 7.4.6):
+
+| Check | Result |
+|---|---|
+| gofmt -l . | PASS (clean) |
+| go vet -tags goffi_static ./internal/... | PASS |
+| go test -tags goffi_static ./... | 13 packages ok; cmd + ui/fyne BLOCKED (host lacks root: Fyne GL/wayland dev headers cannot be installed) |
+| scripts/ci/tests/test-ci-plumbing.sh | PASS (17 fixture groups incl. new D26) |
+| scripts/ci/tests/Test-CaptureStep.ps1 | PASS 11/11 (C17-C22, D22-D25, D23b) |
+| scripts/ci/tests/test-codeql-coverage-inventory.sh | PASS |
+| Metadata E2E through the REAL verify-build-metadata body | PASS both directions (repaired passes; defective rejected with 6 precise errors) |
+| Failure injections 1-12 | ALL OK |
+| Hosted GitHub Actions re-run | NOT RUN (no push permitted) |
+| GitHub API run status/artifacts for 42231355353 | BLOCKED (unauthenticated REST 403 rate-limited on this host) |
+| CodeQL raw diagnostics retrieval | BLOCKED (no API access; never invented) |
