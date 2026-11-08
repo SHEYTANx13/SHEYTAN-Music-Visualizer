@@ -230,16 +230,50 @@ if [ "$MODE" = "desktop" ]; then
   # Blocked honestly when the display/inspection tooling is missing —
   # never passed without tooling.
   if command -v Xvfb >/dev/null 2>&1 && command -v xdpyinfo >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then
-    CI_TOOL_CONTEXT="gate:gui-smoke (virtual display Xvfb; mapping + graceful-close proof)" ci_capture "$JOB" gui-smoke bash -c '
+    CI_TOOL_CONTEXT="gate:gui-smoke (virtual display Xvfb; IsViewable proof + graceful-close proof)" ci_capture "$JOB" gui-smoke bash -c '
       set -u
       SMOKE_DIR="ci-logs/gui-smoke"
       mkdir -p "$SMOKE_DIR"
-      echo "VIRTUAL-DISPLAY GUI SMOKE — proves a mapped X11 window and graceful close on Xvfb;"
-      echo "it does NOT establish real display-driver or physical-GPU execution."
-      echo "xvfb_identity=$(Xvfb -version 2>&1 | head -1 || echo unknown)"
+      echo "VIRTUAL-DISPLAY GUI SMOKE — proves a VIEWABLE (Map State: IsViewable) X11 window and graceful close on Xvfb;"
+      echo "it does NOT establish real display-driver or physical-GPU execution, and never physical audio playback."
+      echo "run-42376176493 contract: an XID listed in the root tree is NOT a mapped window; only IsViewable passes."
+
+      # 0) Xvfb identity from the PACKAGE DATABASE. The unsupported
+      #    "-version" option prints an Unrecognized-option error and was
+      #    previously mislabeled a successful identity string; a help
+      #    probe is at most a fallback identity hint and is never
+      #    reported as a version check.
+      XVFB_IDENT="unknown"
+      XVFB_IDENT_METHOD="none"
+      if command -v dpkg-query >/dev/null 2>&1; then
+        XVFB_IDENT="$(dpkg-query -W xvfb 2>/dev/null | head -1 || true)"
+        [ -n "$XVFB_IDENT" ] && XVFB_IDENT_METHOD="dpkg-query"
+      fi
+      if [ "$XVFB_IDENT_METHOD" = "none" ]; then
+        XVFB_IDENT="$(Xvfb -help 2>&1 | head -1 || true)"
+        [ -n "$XVFB_IDENT" ] && XVFB_IDENT_METHOD="help-probe (identity hint only, NOT a version check)"
+      fi
+      echo "xvfb_identity=$XVFB_IDENT method=$XVFB_IDENT_METHOD"
+      echo "xvfb_version_option_supported=no (the -version option is unsupported on this build; identity source recorded above)"
       DISPLAY_NUM=99
       export DISPLAY=":${DISPLAY_NUM}"
       echo "display=:${DISPLAY_NUM}"
+
+      # 0b) Test-only headless audio configuration, scoped to THIS smoke:
+      #     route the ALSA default PCM to the null device so the app can
+      #     initialize playback without a sound card. The null device
+      #     discards samples; this is CI evidence hygiene, NEVER physical
+      #     audio playback proof, and never a global stderr suppression.
+      ALSA_NULL_CONF="$SMOKE_DIR/asound-null.conf"
+      {
+        printf "%s\n" "# Test-only headless-CI audio configuration (gui-smoke process scope only)."
+        printf "%s\n" "# Routes the ALSA default PCM to the null device: written samples are discarded."
+        printf "%s\n" "# This is CI evidence hygiene, NOT physical audio playback proof."
+        printf "%s\n" "pcm.!default {"
+        printf "%s\n" "  type null"
+        printf "%s\n" "}"
+      } > "$ALSA_NULL_CONF"
+      echo "alsa_null_pcm_config=$ALSA_NULL_CONF scope=gui-smoke-app-process-only"
 
       # 1) X server readiness: bounded polling, no fixed startup sleep.
       Xvfb :${DISPLAY_NUM} -screen 0 1280x800x24 >"$SMOKE_DIR/xvfb.log" 2>&1 &
@@ -261,17 +295,21 @@ if [ "$MODE" = "desktop" ]; then
       fi
       echo "xvfb_ready=true pid=$XP"
 
-      # 2) App launch + bounded readiness polling for a MAPPED window of
+      # 2) App launch + bounded readiness polling for a VIEWABLE window of
       #    THIS application (title contains the product name), with early
-      #    exit detection. A live process without a mapped window FAILS.
-      SHEYTAN_LOG_DIR="$(pwd)/$SMOKE_DIR/app-logs" ./bin/sheytan-music-visualizer >"$SMOKE_DIR/app.log" 2>&1 &
+      #    exit detection. An XID in the root tree is only an EXISTENCE
+      #    signal; map state must reach IsViewable to pass. A live process
+      #    without a viewable window FAILS — including the
+      #    run-42376176493 case where the XID existed but stayed IsUnMapped.
+      ALSA_CONFIG_PATH="$PWD/$ALSA_NULL_CONF" SHEYTAN_LOG_DIR="$(pwd)/$SMOKE_DIR/app-logs" ./bin/sheytan-music-visualizer >"$SMOKE_DIR/app.log" 2>&1 &
       AP=$!
       echo "app_pid=$AP"
       WINDOW_MAPPED=0
       WINDOW_ID=""
+      LAST_STATE="UNKNOWN"
       for _ in $(seq 1 200); do
         if ! kill -0 "$AP" 2>/dev/null; then
-          echo "ERROR: application exited before its window mapped (see $SMOKE_DIR/app.log)"
+          echo "ERROR: application exited before its window became viewable (see $SMOKE_DIR/app.log)"
           tail -20 "$SMOKE_DIR/app.log" 2>/dev/null || true
           kill "$XP" 2>/dev/null || true
           exit 1
@@ -279,50 +317,84 @@ if [ "$MODE" = "desktop" ]; then
         WID=$(xwininfo -root -tree 2>/dev/null | grep -i "SHEYTAN Music Visualizer" | head -1 | grep -oE "0x[0-9a-f]+" | head -1 || true)
         if [ -n "$WID" ]; then
           WINDOW_ID="$WID"
-          WINDOW_MAPPED=1
-          break
+          ms_out="$(bash scripts/ci/x11-window-mapstate.sh "$WID" 2>&1)"
+          ms_rc=$?
+          LAST_STATE="$(printf "%s\n" "$ms_out" | sed -n "s/^map_state=\([^ ]*\).*/\1/p" | head -1)"
+          [ -n "$LAST_STATE" ] || LAST_STATE="UNKNOWN"
+          if [ "$ms_rc" -eq 0 ]; then
+            WINDOW_MAPPED=1
+            break
+          fi
         fi
         sleep 0.1
       done
       if [ "$WINDOW_MAPPED" -ne 1 ]; then
-        echo "ERROR: no mapped application window within the bounded deadline (xwininfo root tree had no SHEYTAN window)"
+        echo "ERROR: no VIEWABLE application window within the bounded deadline (last map_state=$LAST_STATE)"
+        if [ -n "$WINDOW_ID" ]; then
+          echo "window_id_seen=$WINDOW_ID (XID existed but never reached IsViewable)"
+          bash scripts/ci/x11-window-mapstate.sh "$WINDOW_ID" 2>&1 || true
+        else
+          echo "no SHEYTAN window id appeared in the root tree at all"
+        fi
         xwininfo -root -tree 2>/dev/null | head -20 || true
+        tail -20 "$SMOKE_DIR/app.log" 2>/dev/null || true
         kill "$AP" 2>/dev/null || true
         sleep 1
         kill -9 "$AP" 2>/dev/null || true
         kill "$XP" 2>/dev/null || true
         exit 1
       fi
-      echo "window_mapped=true id=$WINDOW_ID"
+      echo "window_mapped=true id=$WINDOW_ID map_state=IsViewable (XID existence alone was never sufficient)"
       xwininfo -id "$WINDOW_ID" -stats >"$SMOKE_DIR/window-stats.txt" 2>&1 || true
       grep -E "Map State|Width|Height" "$SMOKE_DIR/window-stats.txt" | tr "\n" " " | sed "s/^/window_geometry=/" || true
       head -1 "$SMOKE_DIR/window-stats.txt" || true
+      WIDTH="$(sed -n "s/^ *Width: *//p" "$SMOKE_DIR/window-stats.txt" | head -1)"
+      HEIGHT="$(sed -n "s/^ *Height: *//p" "$SMOKE_DIR/window-stats.txt" | head -1)"
+      case "${WIDTH:-}" in ""|*[!0-9]*) WIDTH=0 ;; esac
+      case "${HEIGHT:-}" in ""|*[!0-9]*) HEIGHT=0 ;; esac
+      if [ "$WIDTH" -le 0 ] || [ "$HEIGHT" -le 0 ]; then
+        echo "ERROR: implausible viewable-window geometry (width=$WIDTH height=$HEIGHT)"
+        kill "$AP" 2>/dev/null || true
+        sleep 1
+        kill -9 "$AP" 2>/dev/null || true
+        kill "$XP" 2>/dev/null || true
+        exit 1
+      fi
+      echo "window_geometry_sane=true width=$WIDTH height=$HEIGHT"
+      echo "map_state_at_ready=$(bash scripts/ci/x11-window-mapstate.sh "$WINDOW_ID" 2>/dev/null | head -1 || true)"
 
-      # 3) Event-loop health: the window must STAY mapped for a bounded
-      #    observation window (device-loss/early-destroy detection).
+      # 3) Event-loop health: the window must STAY viewable for a bounded
+      #    observation window. Map state is RE-QUERIED on every poll; a
+      #    surviving but unmapped/unviewable XID (the run-42376176493
+      #    false-positive class) now FAILS the gate.
       STILL_MAPPED=1
       for _ in $(seq 1 30); do
         if ! kill -0 "$AP" 2>/dev/null; then
-          echo "ERROR: application died while the window was expected to stay mapped (see $SMOKE_DIR/app.log)"
+          echo "ERROR: application died while the window was expected to stay viewable (see $SMOKE_DIR/app.log)"
           tail -20 "$SMOKE_DIR/app.log" 2>/dev/null || true
           kill "$XP" 2>/dev/null || true
           exit 1
         fi
-        if ! xwininfo -id "$WINDOW_ID" >/dev/null 2>&1; then
+        ms_out="$(bash scripts/ci/x11-window-mapstate.sh "$WINDOW_ID" 2>&1)"
+        ms_rc=$?
+        if [ "$ms_rc" -ne 0 ]; then
+          echo "ERROR: the application window lost IsViewable during the observation window: $(printf "%s\n" "$ms_out" | head -1)"
           STILL_MAPPED=0
           break
         fi
         sleep 0.1
       done
       if [ "$STILL_MAPPED" -ne 1 ]; then
-        echo "ERROR: the application window was destroyed or unmapped during the observation window"
+        echo "ERROR: the application window was destroyed, unmapped or unviewable during the observation window"
+        tail -20 "$SMOKE_DIR/app.log" 2>/dev/null || true
         kill "$AP" 2>/dev/null || true
         sleep 1
         kill -9 "$AP" 2>/dev/null || true
         kill "$XP" 2>/dev/null || true
         exit 1
       fi
-      echo "window_stayed_mapped=true (3 s observation)"
+      echo "window_stayed_viewable=true map_state=IsViewable (3 s observation, map state re-queried on every poll)"
+      echo "map_state_after_observation=$(bash scripts/ci/x11-window-mapstate.sh "$WINDOW_ID" 2>/dev/null | head -1 || true)"
 
       # 4) UI log errors: a panic/fatal in the app log fails the smoke
       #    even when the process survived.
@@ -342,6 +414,7 @@ if [ "$MODE" = "desktop" ]; then
       #    and the process signal IS the supported path here), with a
       #    bounded wait. kill -9 is cleanup-only: if it is ever needed,
       #    the graceful-shutdown assertion has FAILED and the gate fails.
+      echo "map_state_before_shutdown=$(bash scripts/ci/x11-window-mapstate.sh "$WINDOW_ID" 2>/dev/null | head -1 || true)"
       kill -TERM "$AP" 2>/dev/null || true
       CLOSED_GRACEFULLY=0
       for _ in $(seq 1 100); do
@@ -360,10 +433,24 @@ if [ "$MODE" = "desktop" ]; then
       kill "$XP" 2>/dev/null || true
       wait "$XP" 2>/dev/null || true
       echo "graceful_close=true term_exit_code=$APP_RC"
-      echo "GUI smoke PASS: window mapped, stayed mapped, UI log clean, closed gracefully on the virtual display"
+
+      # 6) Headless-audio diagnostics (structured, honest, non-failing):
+      #    a hosted runner has no physical audio card. ALSA messages are
+      #    recorded as an explicit environment limitation with the null-PCM
+      #    configuration noted; real decode/playback test failures remain
+      #    the responsibility of the audio-validation gate, and a
+      #    panic/fatal (checked above) still fails this gate.
+      if grep -qiE "ALSA|snd_pcm|cannot find card|Unknown PCM" "$SMOKE_DIR/app.log" 2>/dev/null; then
+        echo "audio_headless_diagnostic: ALSA-related messages present in the app log:"
+        grep -iE "ALSA|snd_pcm|cannot find card|Unknown PCM" "$SMOKE_DIR/app.log" | head -5 || true
+        echo "audio_classification=environment-limitation (no physical audio device in headless CI; test-only null PCM config was $ALSA_NULL_CONF; never physical-playback evidence)"
+      else
+        echo "audio_classification=clean (no ALSA device errors under the test-only null PCM configuration; still NOT physical-playback evidence)"
+      fi
+      echo "GUI smoke PASS: window viewable (IsViewable at readiness, after observation and before shutdown), geometry sane, UI log clean, closed gracefully on the virtual display"
     ' || fail_gate gui-smoke
   else
-    blocked_gate gui-smoke "Xvfb/xdpyinfo/xwininfo unavailable on this host (window mapping cannot be proven without tooling)"
+    blocked_gate gui-smoke "Xvfb/xdpyinfo/xwininfo unavailable on this host (window viewability cannot be proven without tooling)"
   fi
 
   # govulncheck when available

@@ -177,6 +177,30 @@ explicit research gate with measurable requirements:
 
 ---
 
+## CI repair sessions (runs 42231355353 / 42376176493)
+
+The run-42231355353 repairs (Windows build-metadata `-X` contract, executed
+UCRT64 identity gate, header-aware `_UCRT` probe, gate tag isolation,
+gofmt exit handling, collector report reconciliation) are recorded in
+`ai-notes.md` (2026-11-07 session).
+
+The run-42376176493 repairs (2026-11-08, all local, no push) close three
+further CI-integrity defects: (1) the manifest is now written by a
+deterministic, atomic, self-validating writer (`scripts/ci/write-manifest.py`)
+so a missing JSON tool can never again leave an empty manifest behind and
+fail the primary collector (rc=2) the way this run did; (2) the UCRT64
+gate locates `_mingw.h` at the UCRT64 target header root (verified against
+the pacman package database) instead of GCC's private include directory,
+with a separate compile/link probe — the run's false negative class is
+covered by runtime fixtures; (3) the Linux GUI smoke asserts the real
+X11 viewability contract (`Map State: IsViewable` at readiness, through
+the observation window and before shutdown) instead of XID existence, and
+records headless audio as a structured environment limitation with a
+test-only null-PCM configuration. Verification:
+`evidence/local-verification-run-42376176493-repair.log`. Hosted
+confirmation on the exact repair commit remains NOT RUN (no push was
+made).
+
 ## CI repair session (2026-11-06, run 42026322748)
 
 The consolidated-log/workflow repair for GitHub Actions run 42026322748 is

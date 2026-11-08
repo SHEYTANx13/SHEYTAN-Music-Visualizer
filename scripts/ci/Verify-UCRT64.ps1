@@ -8,14 +8,28 @@
 # therefore contained script text instead of compiler evidence — a
 # false-green verification.
 #
+# Run 42376176493 defect this file ALSO repairs (header-location false
+# negative): the CRT header check looked for `_mingw.h` inside
+# `gcc -print-file-name=include` — GCC's PRIVATE internal include
+# directory (`<msys2>\ucrt64\lib\gcc\x86_64-w64-mingw32\<version>\include`).
+# The mingw-w64 UCRT64 `headers` package installs `_mingw.h` at the
+# TARGET header root `<msys2>\ucrt64\include\_mingw.h` (GCC finds it via
+# its own target search path, not via `-print-file-name=include`). The
+# run's windows-compiler.log proved a working UCRT64 GCC (correct
+# executable path, target triple, `_UCRT` after including <stdio.h>,
+# UCRT64 pkgconf) yet failed the gate purely on that wrong path. This
+# file now resolves the UCRT64 target root from the compiler location,
+# checks `_mingw.h` THERE, records GCC's private include dir as a
+# clearly-labeled diagnostic, and verifies package ownership through
+# the MSYS2 pacman database.
+#
 # This script is INVOKED as a file (never piped as a script block) and
 # performs the real checks. Every native command's exit code is
 # captured immediately via $LASTEXITCODE; any failure returns non-zero
 # after the full evidence set was recorded. The log contains evaluated
 # values only — never PowerShell source text.
 #
-# Checks (multiple independent evidence sources, per the
-# run-42231355353 UCRT64 research contract):
+# Checks (multiple independent evidence sources):
 #   1. gcc identity: first resolved gcc.exe must live inside the
 #      expected MSYS2 <msys2>\ucrt64\bin directory;
 #   2. gcc --version and -dumpmachine (x86_64-w64-mingw32);
@@ -26,10 +40,18 @@
 #      unit cannot establish which CRT the headers select (the
 #      run-42231355353 desktop-env-check failure was that defective
 #      probe form);
-#   4. the installed CRT configuration header _mingw.h must exist in
-#      the compiler's own include directory under the ucrt64 prefix;
-#   5. pkg-config identity: must be the UCRT64 pkgconf, version >= 1.8;
-#   6. Go toolchain identity.
+#   4. the installed CRT configuration header _mingw.h must exist at
+#      the UCRT64 TARGET header root <msys2>\ucrt64\include\_mingw.h
+#      (NOT in GCC's private include directory — run 42376176493);
+#   5. package-database verification (pacman -Q): the gcc, headers,
+#      crt and pkgconf UCRT64 packages are installed, and pacman -Qo
+#      attributes /ucrt64/include/_mingw.h to the headers package;
+#   6. compile/link probe with the selected compiler and the UCRT64
+#      headers (separate from the product build): exit code, PE MZ
+#      header of the probe binary, and on Windows hosts the probe's
+#      own execution output;
+#   7. pkg-config identity: must be the UCRT64 pkgconf, version >= 1.8;
+#   8. Go toolchain identity.
 #
 # Usage:
 #   pwsh ./scripts/ci/Verify-UCRT64.ps1 -ExpectedBin <msys2>\ucrt64\bin
@@ -59,9 +81,24 @@ function Fail([string]$message) {
 $started = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 Write-Output "=== UCRT64 toolchain identity verification (executed) ==="
 Write-Output "started_utc: $started"
+
+# --- Root resolution ---------------------------------------------------------
+# ExpectedBin is the workflow contract: <msys2>\ucrt64\bin. The UCRT64
+# TARGET root (where the mingw-w64 headers package installs _mingw.h) is
+# its parent directory: <msys2>\ucrt64. Trailing separators are trimmed so
+# Split-Path yields real parents on both Windows and POSIX hosts.
+$ExpectedBinNorm = $ExpectedBin.Trim().TrimEnd('\', '/')
+if (-not ($ExpectedBinNorm -match '[\\/](ucrt64)[\\/](bin)$')) {
+    Fail "expected UCRT64 bin directory must end in ucrt64/bin (got: $ExpectedBin)"
+}
+$UcrtRoot = Split-Path -Parent $ExpectedBinNorm   # <msys2>\ucrt64
+$MsysRoot = Split-Path -Parent $UcrtRoot          # <msys2>
 Write-Output "expected_ucrt64_bin: $ExpectedBin"
-if (-not (Test-Path (Join-Path $ExpectedBin 'gcc.exe'))) {
-    Fail "expected UCRT64 bin directory does not contain gcc.exe: $ExpectedBin"
+Write-Output "ucrt64_target_root: $UcrtRoot"
+Write-Output "msys2_root: $MsysRoot"
+if (-not (Test-Path (Join-Path $ExpectedBinNorm 'gcc.exe')) -and
+    -not (Test-Path (Join-Path $ExpectedBinNorm 'gcc'))) {
+    Fail "expected UCRT64 bin directory does not contain gcc: $ExpectedBin"
 }
 
 Write-Output "=== gcc identity ==="
@@ -71,7 +108,7 @@ if ($null -eq $gcc) {
 }
 else {
     Write-Output "gcc source: $($gcc.Source)"
-    if (-not ($gcc.Source -like "$ExpectedBin*")) {
+    if (-not ($gcc.Source -like "$ExpectedBinNorm*")) {
         Fail "first gcc on PATH is NOT the UCRT64 toolchain (stale shadowing toolchain detected): $($gcc.Source)"
     }
     # $(...) captures the FULL output first; piping a native tool into
@@ -109,23 +146,123 @@ else {
     else {
         Write-Output "UCRT runtime confirmed (_UCRT defined after including <stdio.h>)"
     }
-    $incDir = (gcc -print-file-name=include).Trim()
+
+    Write-Output "=== CRT header location (run-42376176493 false-negative repair) ==="
+    # GCC's PRIVATE internal include directory is a diagnostic only. It is
+    # NEVER the mingw-w64 CRT header location and is never searched for
+    # _mingw.h; the authoritative location is the UCRT64 target root.
+    # Null-safe capture: a failing/empty -print-file-name must produce a
+    # structured FAIL record, never a PowerShell crash on a null method call.
+    $incDir = ("$(gcc -print-file-name=include)").Trim()
     $incRc = $LASTEXITCODE
     if ($incRc -ne 0 -or [string]::IsNullOrWhiteSpace($incDir)) {
         Fail "gcc -print-file-name=include failed (rc=$incRc)"
     }
     else {
-        Write-Output "gcc include dir: $incDir"
+        Write-Output "gcc private internal include dir (diagnostic only — NOT the CRT header location): $incDir"
         if ($incDir -notmatch '[\\/]ucrt64[\\/]') {
-            Fail "compiler include dir is not inside a ucrt64 prefix: $incDir"
+            Fail "compiler private include dir is not inside a ucrt64 prefix: $incDir"
         }
-        $mingwHdr = Join-Path $incDir "_mingw.h"
-        if (-not (Test-Path $mingwHdr)) {
-            Fail "CRT header _mingw.h not found at $mingwHdr (incomplete UCRT64 headers install)"
+        if (Test-Path (Join-Path $incDir "_mingw.h")) {
+            Write-Output "note: _mingw.h is also present in the gcc private include dir (atypical install); the target-root check below stays authoritative"
+        }
+    }
+    # Authoritative CRT header check: the UCRT64 TARGET header root.
+    $targetHeader = Join-Path $UcrtRoot 'include/_mingw.h'
+    if (-not (Test-Path $targetHeader)) {
+        Fail "CRT header _mingw.h not found at the UCRT64 target root: $targetHeader (expected owner: mingw-w64-ucrt-x86_64-headers; verify with pacman -Qo /ucrt64/include/_mingw.h)"
+    }
+    else {
+        Write-Output "CRT header _mingw.h present at the UCRT64 target root: $targetHeader"
+    }
+}
+
+Write-Output "=== UCRT64 package database (pacman) ==="
+$pacman = Join-Path $MsysRoot 'usr/bin/pacman.exe'
+if (-not (Test-Path $pacman)) {
+    Fail "MSYS2 pacman not found at $pacman — the UCRT64 package database cannot be verified"
+}
+else {
+    foreach ($pkg in @(
+            'mingw-w64-ucrt-x86_64-gcc',
+            'mingw-w64-ucrt-x86_64-headers',
+            'mingw-w64-ucrt-x86_64-crt',
+            'mingw-w64-ucrt-x86_64-pkgconf'
+        )) {
+        $pkgOut = (& $pacman -Q $pkg 2>&1) -join '; '
+        $pkgRc = $LASTEXITCODE
+        if ($pkgRc -ne 0) {
+            Fail "pacman -Q $pkg failed (rc=$pkgRc): $pkgOut"
         }
         else {
-            Write-Output "CRT header _mingw.h present: $mingwHdr"
+            Write-Output "pacman: $pkgOut"
         }
+    }
+    $ownOut = (& $pacman -Qo '/ucrt64/include/_mingw.h' 2>&1) -join '; '
+    $ownRc = $LASTEXITCODE
+    if ($ownRc -ne 0) {
+        Fail "pacman -Qo /ucrt64/include/_mingw.h failed (rc=$ownRc): $ownOut"
+    }
+    else {
+        Write-Output "pacman ownership: $ownOut"
+    }
+}
+
+Write-Output "=== UCRT64 compile/link probe (separate from the product build) ==="
+if ($null -eq $gcc) {
+    Fail "compile/link probe skipped: gcc not found"
+}
+else {
+    $probeDir = Join-Path ([System.IO.Path]::GetTempPath()) ("ucrt64-probe-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
+    try {
+        $probeSrc = Join-Path $probeDir 'probe.c'
+        Set-Content -Path $probeSrc -Value "#include <stdio.h>`r`nint main(void){puts(`"ucrt64-probe-ok`"); return 0;}`r`n" -Encoding ascii
+        $probeExe = Join-Path $probeDir 'probe.exe'
+        $probeCompilerOut = (& gcc -Wall -O0 -o $probeExe $probeSrc 2>&1)
+        $probeRc2 = $LASTEXITCODE
+        if ($probeRc2 -ne 0) {
+            $joined = ($probeCompilerOut | ForEach-Object { "$_" }) -join '; '
+            Fail "compile/link probe failed (rc=$probeRc2): $joined"
+        }
+        else {
+            Write-Output "compile/link probe: rc=0"
+            if ($probeCompilerOut) {
+                $probeCompilerOut | ForEach-Object { Write-Output "probe compiler note: $_" }
+            }
+            $probeBytes = [System.IO.File]::ReadAllBytes($probeExe)
+            if ($probeBytes.Length -ge 2 -and $probeBytes[0] -eq 77 -and $probeBytes[1] -eq 90) {
+                Write-Output "probe PE MZ header confirmed ($($probeBytes.Length) bytes)"
+            }
+            else {
+                Fail "probe output is not a PE executable (missing MZ header)"
+            }
+            # Executing the probe requires a Windows host (the runner's
+            # UCRT64 bin is on PATH, so the UCRT runtime resolves). On a
+            # non-Windows validation host the compile + PE-header evidence
+            # is recorded and the execution step is explicitly skipped —
+            # never reported as executed.
+            if ($IsWindows) {
+                $probeRunOut = (& $probeExe 2>&1)
+                $probeRunRc = $LASTEXITCODE
+                if ($probeRunRc -ne 0) {
+                    $joined = ($probeRunOut | ForEach-Object { "$_" }) -join '; '
+                    Fail "probe executable failed to run (rc=$probeRunRc): $joined"
+                }
+                elseif (-not (($probeRunOut | ForEach-Object { "$_" }) -join ' ').Contains('ucrt64-probe-ok')) {
+                    Fail "probe executable printed unexpected output: $(($probeRunOut | ForEach-Object { "$_" }) -join '; ')"
+                }
+                else {
+                    Write-Output "probe executable ran on the UCRT64 runtime and printed the expected marker"
+                }
+            }
+            else {
+                Write-Output "probe execution skipped (non-Windows validation host); compile + PE header evidence recorded above"
+            }
+        }
+    }
+    finally {
+        Remove-Item -Recurse -Force $probeDir -ErrorAction SilentlyContinue
     }
 }
 
@@ -136,7 +273,7 @@ if ($null -eq $pc) {
 }
 else {
     Write-Output "pkg-config source: $($pc.Source)"
-    if (-not ($pc.Source -like "$ExpectedBin*")) {
+    if (-not ($pc.Source -like "$ExpectedBinNorm*")) {
         Fail "pkg-config is not the UCRT64 pkgconf (found $($pc.Source))"
     }
     $ver = (pkg-config --version)

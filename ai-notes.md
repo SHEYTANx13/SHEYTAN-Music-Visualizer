@@ -797,3 +797,82 @@ Verification matrix (this host: Linux sandbox, go1.27.3, pwsh 7.4.6):
 | Hosted GitHub Actions re-run | NOT RUN (no push permitted) |
 | GitHub API run status/artifacts for 42231355353 | BLOCKED (unauthenticated REST 403 rate-limited on this host) |
 | CodeQL raw diagnostics retrieval | BLOCKED (no API access; never invented) |
+
+## Session 2026-11-08 — CI repair for run 42376176493 (no push made)
+
+Evidence run 42376176493 (commit bf50c8e5f6b1866c64a274f610fc3f7a6359d289,
+branch main, push, 2026-11-07 13:16-13:19 UTC). Live HEAD at session start
+equaled the evidence commit with a clean tree; work stayed local. The
+run's user report was provided as the runbook text only (the raw
+log42376176493.txt was not attached); run API metadata, raw job logs and
+artifacts were NOT RETRIEVED (unauthenticated api.github.com 403
+rate-limited on this host). Confirmed root causes, all reproduced locally
+from the checked-out source (scripts/repro-manifest-failure.sh output:
+ci-logs/repro-run-42376176493/):
+
+1. **Manifest producer failure (primary collector rc=2)** — the manifest
+   steps built JSON exclusively with `jq -n ... > ci-parts/manifest.json`.
+   The `>` redirect creates the file before jq runs, so with jq
+   unavailable the step failed and left a ZERO-BYTE manifest, while
+   ci-parts/download-diagnostics.txt was already written (five successful
+   downloads recorded — exactly the run's evidence). The collector guard
+   `[ -s ci-parts/manifest.json ]` correctly refused (rc=2) and the
+   emergency fallback published environment-derived results with coverage
+   UNVERIFIED. Repair: scripts/ci/write-manifest.py (stdlib json,
+   env-only inputs, temp file + fsync + schema validation + atomic
+   rename, diagnostics with allowlisted summary); jq is no longer
+   load-bearing in either workflow; a missing python3 fails closed
+   instead of leaving an empty manifest.
+2. **UCRT64 header-location false negative** — the gates searched
+   `_mingw.h` in `gcc -print-file-name=include` (GCC's private internal
+   include dir); the mingw-w64-ucrt-x86_64-headers package installs it at
+   the UCRT64 TARGET header root <msys2>\ucrt64\include\_mingw.h. A
+   healthy UCRT64 installation therefore failed the gate. Repair:
+   target-root check derived from the compiler location, private dir
+   demoted to a labeled diagnostic, pacman -Q/-Qo package-ownership
+   verification, separate compile/link probe with PE MZ validation
+   (Verify-UCRT64.ps1 + build-windows.ps1 desktop-env-check).
+3. **GUI smoke false positive** — WINDOW_MAPPED=1 was set because the
+   title appeared in `xwininfo -root -tree` and "stayed mapped" only
+   re-queried the XID, while window-stats.txt said Map State: IsUnMapped.
+   Repair: scripts/ci/x11-window-mapstate.sh requires IsViewable
+   (case-insensitive: xwininfo prints "IsUnMapped", Xlib says IsUnmapped
+   — the run's exact spelling), map state re-queried every poll and
+   captured at readiness/after observation/before shutdown, plausible
+   geometry required, Xvfb identity from dpkg-query (never the
+   unsupported -version option), test-only ALSA null-PCM config scoped to
+   the app process, ALSA messages recorded as a structured environment
+   limitation (never suppressed; panic/fatal still fails).
+4. **Collector observability** — collector stdout/stderr now captured
+   verbatim into ci-logs/collector-run.log with the original rc preserved
+   (no pipeline masking); the Go binary emits distinct HARD_ERROR
+   manifest-missing / manifest-empty / manifest-invalid causes; the
+   numeric 0/1/2/3 exit contract is unchanged.
+
+Files: scripts/ci/write-manifest.py (new), scripts/ci/x11-window-mapstate.sh
+(new), scripts/ci/tests/Test-UCRT64Fixture.ps1 (new), scripts/ci/Verify-UCRT64.ps1,
+scripts/build/build-windows.ps1, scripts/build/build-linux.sh,
+scripts/ci/emergency-report.sh, cmd/ci-log-collector/main.go,
+.github/workflows/build-desktop.yml, .github/workflows/codeql.yml,
+scripts/ci/tests/test-ci-plumbing.sh (D27/G28/G29/H30/H31/H32/D33),
+evidence/local-verification-run-42376176493-repair.log.
+
+Verification (this host: Linux sandbox, go1.27.3, pwsh 7.6.9 — Fyne CGO
+compiled via a user-space dpkg -x sysroot with the full GL/EGL/X11/
+wayland header set; real x11-utils extracted the same way):
+
+| Check | Result |
+|---|---|
+| gofmt / tidy -diff / mod verify / vet | PASS (clean) |
+| go test -tags goffi_static ./... | 13 packages ok (export = real FFmpeg) |
+| go test -race (7 core trees) | PASS |
+| build-desktop ladder (--mode desktop) | RUN RESULT: PASS incl. corrected GUI smoke on Xvfb: window 0x400020 "SHEYTAN Music Visualizer" Map State: IsViewable at readiness/after observation/before shutdown (1440x860), graceful SIGTERM close rc=0, audio classification clean under the null-PCM config |
+| govulncheck v1.9.0 ./... | "No vulnerabilities found." |
+| test-ci-plumbing.sh | PASS 20/20 fixtures |
+| Test-UCRT64Fixture.ps1 | PASS 10/10 (incl. the run's exact false-negative shape) |
+| Test-CaptureStep.ps1 | PASS 11/11 |
+| Deterministic manifest/collector repro | PASS (old writer + jq-less PATH -> rc=127 + 0-byte manifest + diagnostics present; guard -> 2; repaired writer -> collector runs, coverage INCOMPLETE named, rc=1 fail-closed) |
+| actionlint 1.7.12 | 3 findings, all pre-existing hosted-runner features this workflow already used (concurrency `queue: max`, github.run_started_at x2); linter schema older than the runner features; repaired regions clean |
+| YAML duplicate-key parse / shellcheck / pwsh parser | PASS / PASS / PASS; PSScriptAnalyzer NOT AVAILABLE |
+| Hosted re-run | NOT RUN (no push permitted) |
+| CodeQL open-alert count | NOT RETRIEVED (API 403; collector NOT RETRIEVED semantics preserved) |

@@ -590,66 +590,23 @@ jobs:
             echo "=== downloaded evidence tree ==="
             find ci-parts -maxdepth 4 -type f -printf '%P\n' | sort || true
           } | tee ci-parts/download-diagnostics.txt
-          # Build JSON with jq --arg so unusual refs/metadata cannot corrupt the manifest.
-          jq -n \
-            --arg product 'SHEYTAN Music Visualizer' \
-            --arg repository "$REPO" \
-            --arg workflow 'build-desktop.yml' \
-            --arg run_id "$RUN_ID" \
-            --arg attempt "$RUN_ATTEMPT" \
-            --arg commit_sha "$COMMIT_SHA" \
-            --arg ref "$REF" \
-            --arg event "$EVENT" \
-            --arg runner_os "$RUNNER_OS_LABEL" \
-            --arg start_time_utc "$STARTED_AT" \
-            --arg codeql_result "$RESULT_CODEQL" \
-            --arg preflight_result "$RESULT_PREFLIGHT" \
-            --arg windows_result "$RESULT_WINDOWS" \
-            --arg linux_result "$RESULT_LINUX" \
-            --arg preflight_download "$DOWNLOAD_PREFLIGHT" \
-            --arg windows_download "$DOWNLOAD_WINDOWS" \
-            --arg linux_download "$DOWNLOAD_LINUX" \
-            --arg codeql_go_download "$DOWNLOAD_CODEQL_GO" \
-            --arg codeql_actions_download "$DOWNLOAD_CODEQL_ACTIONS" \
-            --arg preflight_artifact "preflight-logs-part-attempt${RUN_ATTEMPT}" \
-            --arg windows_artifact "windows-logs-part-attempt${RUN_ATTEMPT}" \
-            --arg linux_artifact "linux-logs-part-attempt${RUN_ATTEMPT}" \
-            --arg codeql_go_artifact "codeql-logs-part-go-attempt${RUN_ATTEMPT}" \
-            --arg codeql_actions_artifact "codeql-logs-part-actions-attempt${RUN_ATTEMPT}" \
-            '{
-              product: $product,
-              repository: $repository,
-              workflow: $workflow,
-              run_id: $run_id,
-              attempt: $attempt,
-              commit_sha: $commit_sha,
-              ref: $ref,
-              event: $event,
-              runner_os: $runner_os,
-              start_time_utc: $start_time_utc,
-              codeql: {
-                workflow: "codeql.yml",
-                # "analyze" identifies the nested reusable-workflow jobs as a
-                # pair; the caller only observes their AGGREGATE result.
-                job: "analyze",
-                result: $codeql_result
-              },
-              downloads: [
-                {artifact: $preflight_artifact, outcome: $preflight_download},
-                {artifact: $windows_artifact, outcome: $windows_download},
-                {artifact: $linux_artifact, outcome: $linux_download},
-                {artifact: $codeql_go_artifact, outcome: $codeql_go_download},
-                {artifact: $codeql_actions_artifact, outcome: $codeql_actions_download}
-              ],
-              jobs: [
-                {name: "preflight", kind: "workflow-job", result: $preflight_result, result_basis: "needs.preflight.result (workflow conclusion)", artifact: $preflight_artifact, required: true},
-                {name: "build-windows", kind: "workflow-job", result: $windows_result, result_basis: "needs.build-windows.result (workflow conclusion)", artifact: $windows_artifact, required: true},
-                {name: "build-linux", kind: "workflow-job", result: $linux_result, result_basis: "needs.build-linux.result (workflow conclusion)", artifact: $linux_artifact, required: true},
-                {name: "analyze (go)", kind: "nested-reusable-workflow-job", result: $codeql_result, result_basis: "caller aggregate needs.codeql.result; per-language conclusion from this row's own artifact/API observation", artifact: $codeql_go_artifact, required: true},
-                {name: "analyze (actions)", kind: "nested-reusable-workflow-job", result: $codeql_result, result_basis: "caller aggregate needs.codeql.result; per-language conclusion from this row's own artifact/API observation", artifact: $codeql_actions_artifact, required: true}
-              ]
-            }' > ci-parts/manifest.json
-          jq . ci-parts/manifest.json
+          # Deterministic manifest via scripts/ci/write-manifest.py (stdlib
+          # json, env-only inputs, temp-file + fsync + atomic rename, self-
+          # validated, diagnostics emitted). Run-42376176493 root cause: the
+          # previous jq-only writer left a ZERO-BYTE manifest.json behind
+          # when jq was unavailable on the runner (the `>` redirect creates
+          # the file before jq runs), the collector's `[ -s ]` guard
+          # correctly refused (rc=2), and the emergency fallback published
+          # environment-derived results with coverage UNVERIFIED. jq is no
+          # longer load-bearing anywhere in this step; a missing tool can
+          # no longer produce a plausible-but-empty manifest.
+          command -v python3 >/dev/null 2>&1 || {
+            echo "ERROR: python3 not found on PATH — manifest cannot be written; failing closed instead of leaving an empty manifest"
+            exit 127
+          }
+          python3 scripts/ci/write-manifest.py --profile caller --out ci-parts/manifest.json
+          echo "final manifest check: $(wc -c < ci-parts/manifest.json) bytes, path $PWD/ci-parts/manifest.json"
+          test -s ci-parts/manifest.json || { echo "ERROR: manifest missing or empty after validated write (unreachable fail-closed)"; exit 1; }
 
       # Run even after setup-go fails; the rc is recorded so the emergency
       # non-Go fallback can still publish a truthful report.
@@ -680,18 +637,50 @@ jobs:
           mkdir -p ci-out ci-logs
           rc=2
           if [ -x bin/ci-log-collector ] && [ -s ci-parts/manifest.json ]; then
+            # Verbatim stdout/stderr capture with the ORIGINAL exit code
+            # preserved (no pipeline masking): collector-run.log records
+            # command, cwd, absolute manifest path, byte count, UTC window
+            # and rc, then the collector's own output, unmodified.
+            cap="$(mktemp)"
+            start_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             ./bin/ci-log-collector \
               --report ci-out/log.txt \
               --parts-root ci-parts \
               --manifest ci-parts/manifest.json \
               --github-repo "${GITHUB_REPOSITORY}" \
               --run-id "${GITHUB_RUN_ID}" \
-              --attempt "${GITHUB_RUN_ATTEMPT}"
+              --attempt "${GITHUB_RUN_ATTEMPT}" >"$cap" 2>&1
             rc=$?
-          else
+            end_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             {
-              echo "BLOCKED: collector binary or manifest unavailable (build rc=$(cat collector-build.rc 2>/dev/null || echo unknown))"
-              echo "the emergency fallback report step will write ci-out/log.txt"
+              echo "command: ./bin/ci-log-collector --report ci-out/log.txt --parts-root ci-parts --manifest ci-parts/manifest.json --github-repo ${GITHUB_REPOSITORY} --run-id ${GITHUB_RUN_ID} --attempt ${GITHUB_RUN_ATTEMPT}"
+              echo "cwd: $PWD"
+              echo "manifest_path_absolute: $PWD/ci-parts/manifest.json"
+              echo "manifest_bytes: $(wc -c < ci-parts/manifest.json)"
+              echo "report_path_absolute: $PWD/ci-out/log.txt"
+              echo "run_id: ${GITHUB_RUN_ID} attempt: ${GITHUB_RUN_ATTEMPT}"
+              echo "started_utc: $start_utc"
+              echo "ended_utc: $end_utc"
+              echo "collector_rc: $rc (0=complete, 1=incomplete coverage, 2=hard error, 3=required job failed)"
+              echo "--- collector stdout+stderr (verbatim) ---"
+              cat "$cap"
+            } | tee ci-logs/collector-run.log
+            rm -f "$cap"
+          else
+            # Precise diagnosis instead of one combined message (the
+            # run-42376176493 fallback could only say "missing or empty").
+            build_rc="$(cat collector-build.rc 2>/dev/null || echo unknown)"
+            if [ ! -x bin/ci-log-collector ]; then
+              diag="collector binary missing/not executable at $PWD/bin/ci-log-collector (build rc=$build_rc)"
+            elif [ ! -e ci-parts/manifest.json ]; then
+              diag="manifest file absent: $PWD/ci-parts/manifest.json (the manifest step did not create it)"
+            else
+              diag="manifest file EMPTY (0 bytes): $PWD/ci-parts/manifest.json (the manifest writer failed after file creation; see manifest-diagnostics.txt)"
+            fi
+            {
+              echo "BLOCKED: collector cannot run — $diag"
+              echo "collector_build_rc=$build_rc"
+              echo "the emergency fallback report step will write ci-out/log.txt; the job still fails closed"
             } | tee ci-logs/collector-run.log
             rc=2
           fi

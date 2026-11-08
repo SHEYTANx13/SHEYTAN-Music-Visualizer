@@ -324,51 +324,23 @@ jobs:
             find ci-parts -maxdepth 4 -type f -print | sort || true
           } | tee ci-parts/download-diagnostics.txt
 
-          if [ "$RESULT_ANALYZE_GO" = success ] && [ "$RESULT_ANALYZE_ACTIONS" = success ]; then
-            result_codeql=success
-          else
-            result_codeql=failure
-          fi
+          # The aggregate CodeQL result (success only when BOTH analyze jobs
+          # succeeded) is derived and validated inside write-manifest.py.
 
-          jq -n \
-            --arg product "SHEYTAN Music Visualizer" \
-            --arg repository "$REPO" \
-            --arg workflow "codeql.yml" \
-            --arg run_id "$RUN_ID" \
-            --arg attempt "$RUN_ATTEMPT" \
-            --arg commit_sha "$COMMIT_SHA" \
-            --arg ref "$REF" \
-            --arg event "$EVENT" \
-            --arg runner_os "$RUNNER_OS_LABEL" \
-            --arg started_at "$STARTED_AT" \
-            --arg result_codeql "$result_codeql" \
-            --arg result_go "$RESULT_ANALYZE_GO" \
-            --arg result_actions "$RESULT_ANALYZE_ACTIONS" \
-            --arg artifact_go "codeql-logs-part-go-attempt${RUN_ATTEMPT}" \
-            --arg artifact_actions "codeql-logs-part-actions-attempt${RUN_ATTEMPT}" \
-            '{
-              product: $product,
-              repository: $repository,
-              workflow: $workflow,
-              run_id: $run_id,
-              attempt: $attempt,
-              commit_sha: $commit_sha,
-              ref: $ref,
-              event: $event,
-              runner_os: $runner_os,
-              start_time_utc: $started_at,
-              codeql: {
-                workflow: $workflow,
-                job: "aggregate",
-                result: $result_codeql
-              },
-              jobs: [
-                {name: "analyze (go)", result: $result_go, artifact: $artifact_go, required: true},
-                {name: "analyze (actions)", result: $result_actions, artifact: $artifact_actions, required: true}
-              ]
-            }' > ci-parts/manifest.json
-
-          jq . ci-parts/manifest.json
+          # Deterministic manifest via scripts/ci/write-manifest.py (stdlib
+          # json, env-only inputs, temp-file + fsync + atomic rename, self-
+          # validated). Run-42376176493 repair: the jq-only writer in the
+          # caller workflow produced a zero-byte manifest when jq was
+          # unavailable; the same class of failure is impossible here, and
+          # a missing python3 fails the step instead of leaving an empty
+          # manifest behind.
+          command -v python3 >/dev/null 2>&1 || {
+            echo "ERROR: python3 not found on PATH — manifest cannot be written; failing closed instead of leaving an empty manifest"
+            exit 127
+          }
+          python3 scripts/ci/write-manifest.py --profile codeql --out ci-parts/manifest.json
+          echo "final manifest check: $(wc -c < ci-parts/manifest.json) bytes, path $PWD/ci-parts/manifest.json"
+          test -s ci-parts/manifest.json || { echo "ERROR: manifest missing or empty after validated write (unreachable fail-closed)"; exit 1; }
 
       # Run even after setup/manifest failures so the attempt is recorded in
       # the job log; the report fallback below remains the recovery path.
@@ -406,17 +378,42 @@ jobs:
           mkdir -p ci-out
           rc=2
           if [ -x bin/ci-log-collector ] && [ -s ci-parts/manifest.json ]; then
+            # Verbatim stdout/stderr capture with the ORIGINAL exit code
+            # preserved (no pipeline masking), mirroring the caller
+            # workflow's run-42376176493 collector-run.log contract.
+            cap="$(mktemp)"
+            start_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             ./bin/ci-log-collector \
               --report ci-out/log.txt \
               --parts-root ci-parts \
               --manifest ci-parts/manifest.json \
               --github-repo "$GITHUB_REPOSITORY" \
               --run-id "$GITHUB_RUN_ID" \
-              --attempt "$GITHUB_RUN_ATTEMPT"
+              --attempt "$GITHUB_RUN_ATTEMPT" >"$cap" 2>&1
             rc=$?
-          else
+            end_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             {
-              echo "BLOCKED: collector binary or manifest unavailable."
+              echo "command: ./bin/ci-log-collector --report ci-out/log.txt --parts-root ci-parts --manifest ci-parts/manifest.json --github-repo $GITHUB_REPOSITORY --run-id $GITHUB_RUN_ID --attempt $GITHUB_RUN_ATTEMPT"
+              echo "cwd: $PWD"
+              echo "manifest_path_absolute: $PWD/ci-parts/manifest.json"
+              echo "manifest_bytes: $(wc -c < ci-parts/manifest.json)"
+              echo "started_utc: $start_utc ended_utc: $end_utc"
+              echo "collector_rc: $rc (0=complete, 1=incomplete, 2=hard error, 3=required analysis failed)"
+              echo "--- collector stdout+stderr (verbatim) ---"
+              cat "$cap"
+            } | tee ci-logs/collector-run.log
+            rm -f "$cap"
+          else
+            build_rc="$(cat collector-build.rc 2>/dev/null || echo unknown)"
+            if [ ! -x bin/ci-log-collector ]; then
+              diag="collector binary missing/not executable at $PWD/bin/ci-log-collector (build rc=$build_rc)"
+            elif [ ! -e ci-parts/manifest.json ]; then
+              diag="manifest file absent: $PWD/ci-parts/manifest.json (the manifest step did not create it)"
+            else
+              diag="manifest file EMPTY (0 bytes): $PWD/ci-parts/manifest.json (the manifest writer failed after file creation)"
+            fi
+            {
+              echo "BLOCKED: collector cannot run — $diag"
               echo "collector_build_rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
               echo "manifest_present=$([ -s ci-parts/manifest.json ] && echo true || echo false)"
             } | tee ci-logs/collector-run.log

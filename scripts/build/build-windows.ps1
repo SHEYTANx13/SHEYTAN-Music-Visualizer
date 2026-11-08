@@ -192,26 +192,34 @@ $rc = Capture-Step -Job $job -Step "desktop-env-check" -ToolContext "gate:env" -
         exit 1
     }
     Write-Output "UCRT runtime confirmed via header-aware probe (_UCRT defined after including <stdio.h>)"
-    # Header-chain evidence (evidence source 4): the installed CRT
-    # configuration header must exist inside the compiler's own include
-    # directory under the UCRT64 prefix.
+    # Header-chain evidence (evidence source 4, run-42376176493 repair):
+    # the installed CRT configuration header must exist at the UCRT64
+    # TARGET header root <msys2>\ucrt64\include\_mingw.h - installed there
+    # by the mingw-w64-ucrt-x86_64-headers package. GCC's private internal
+    # include directory (gcc -print-file-name=include) does NOT contain
+    # _mingw.h; the run-42376176493 gate turned that fact into a false
+    # negative and failed an otherwise-proven UCRT64 installation. The
+    # private directory stays a clearly-labeled diagnostic only and is
+    # never searched for _mingw.h.
     $incDir = (gcc -print-file-name=include).Trim()
     $incRc = $LASTEXITCODE
     if ($incRc -ne 0 -or [string]::IsNullOrWhiteSpace($incDir)) {
         Write-Output "ERROR: gcc -print-file-name=include failed (rc=$incRc)"
         exit 1
     }
-    Write-Output "gcc include dir: $incDir"
+    Write-Output "gcc private internal include dir (diagnostic only - NOT the CRT header location): $incDir"
     if ($incDir -notmatch '[\\/]ucrt64[\\/]') {
-        Write-Output "ERROR: compiler include dir is not inside a ucrt64 prefix: $incDir"
+        Write-Output "ERROR: compiler private include dir is not inside a ucrt64 prefix: $incDir"
         exit 1
     }
-    $mingwHdr = Join-Path $incDir "_mingw.h"
-    if (-not (Test-Path $mingwHdr)) {
-        Write-Output "ERROR: CRT header _mingw.h not found at $mingwHdr (incomplete UCRT64 headers install)"
+    $ucrtRoot = Split-Path -Parent (Split-Path -Parent $gcc.Source)
+    $targetHeader = Join-Path $ucrtRoot "include/_mingw.h"
+    if (-not (Test-Path $targetHeader)) {
+        Write-Output "ERROR: CRT header _mingw.h not found at the UCRT64 target root: $targetHeader"
+        Write-Output "ERROR: expected owner: mingw-w64-ucrt-x86_64-headers (verify with: pacman -Qo /ucrt64/include/_mingw.h)"
         exit 1
     }
-    Write-Output "CRT header _mingw.h present: $mingwHdr"
+    Write-Output "CRT header _mingw.h present at the UCRT64 target root: $targetHeader"
     # pkg-config identity (evidence source 5).
     $pc = Get-Command pkg-config -ErrorAction SilentlyContinue
     if ($null -eq $pc) {

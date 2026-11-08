@@ -210,9 +210,14 @@ check("fail-closed", "Fail closed after the report upload attempt" in bd)
 # manifest ↔ artifact name agreement (build-desktop): the jq manifest
 # builds each artifact name via --arg from RUN_ATTEMPT, and the download
 # steps use the same attempt-suffixed names — both spellings must exist.
+# run-42376176493: the manifest is written by scripts/ci/write-manifest.py
+# (artifact names derived from RUN_ATTEMPT inside the writer); the download
+# steps must keep using the same attempt-suffixed artifact names.
 check("manifest-agreement",
-      '--arg preflight_artifact "preflight-logs-part-attempt${RUN_ATTEMPT}"' in bd
-      and 'name: preflight-logs-part-attempt${{ github.run_attempt }}' in bd)
+      'name: preflight-logs-part-attempt${{ github.run_attempt }}' in bd
+      and 'write-manifest.py --profile caller --out ci-parts/manifest.json' in bd)
+check("manifest-writer-source-agreement",
+      "preflight-logs-part-attempt{attempt}" in open("scripts/ci/write-manifest.py").read())
 
 # least privilege: the CALLER must grant actions: write because the called
 # workflow's standalone collect job (skipped when called) declares
@@ -346,16 +351,189 @@ fi
 # ---------- F49 pointer ----------------------------------------------------
 report PASS "F49" "coverage inventory executed separately: scripts/ci/tests/test-codeql-coverage-inventory.sh"
 
+# ---------- D27: run-42376176493 UCRT64 header-location regressions --------
+# The gate must look for _mingw.h at the UCRT64 TARGET header root
+# (<msys2>\ucrt64\include\_mingw.h, owned by mingw-w64-ucrt-x86_64-headers),
+# never inside GCC's private internal include directory
+# (gcc -print-file-name=include), and must verify the pacman package db.
+VUC="scripts/ci/Verify-UCRT64.ps1"
+BW="scripts/build/build-windows.ps1"
+if assert_contains "$VUC" 'include/_mingw.h' "gate checks the UCRT64 TARGET header root" \
+   && assert_contains "$VUC" 'NOT the CRT header location' "gcc private include dir is labeled diagnostic-only" \
+   && assert_contains "$VUC" 'mingw-w64-ucrt-x86_64-headers' "gate names the owning package" \
+   && assert_contains "$VUC" 'pacman' "gate verifies the package database" \
+   && assert_contains "$VUC" 'compile/link probe' "gate runs a separate compile/link probe" \
+   && assert_contains "$BW" 'include/_mingw.h' "desktop-env-check uses the UCRT64 target header root" \
+   && assert_not_contains "$BW" 'Join-Path $incDir "_mingw.h"' "desktop-env-check never searches _mingw.h in the private include dir"; then
+  report PASS "D27" "run-42376176493 UCRT64 header-location repair: target root checked, private dir diagnostic-only, pacman verified, probe present"
+else
+  report FAIL "D27" "UCRT64 header-location static assertions failed"
+fi
+
+# ---------- G28: GUI smoke must assert IsViewable, never XID existence -----
+BL="scripts/build/build-linux.sh"
+MS="scripts/ci/x11-window-mapstate.sh"
+if assert_contains "$BL" 'x11-window-mapstate.sh' "GUI smoke delegates map-state truth to the dedicated checker" \
+   && assert_contains "$BL" 'map_state_at_ready' "map state captured at readiness" \
+   && assert_contains "$BL" 'map_state_after_observation' "map state captured after observation" \
+   && assert_contains "$BL" 'map_state_before_shutdown' "map state captured before shutdown" \
+   && assert_contains "$BL" 'last map_state=' "unviewable XID class fails with its last observed state" \
+   && assert_contains "$BL" 'dpkg-query' "Xvfb identity from the package database" \
+   && assert_not_contains "$BL" 'Xvfb -version' "unsupported Xvfb -version is never used as identity" \
+   && assert_contains "$BL" 'alsa_null_pcm_config' "test-only ALSA null PCM is configured and recorded" \
+   && assert_contains "$BL" 'audio_classification=environment-limitation' "headless ALSA messages are a structured limitation, not a suppressed class" \
+   && assert_contains "$MS" 'IsViewable' "map-state checker knows the only passing state" \
+   && assert_contains "$MS" 'IsUnviewable' "map-state checker rejects IsUnviewable" \
+   && assert_contains "$MS" 'IsUnmapped' "map-state checker rejects IsUnmapped"; then
+  report PASS "G28" "GUI smoke: IsViewable contract, re-queried map state, dpkg-query Xvfb identity, ALSA null-PCM scope"
+else
+  report FAIL "G28" "GUI smoke static assertions failed"
+fi
+
+# ---------- G29: x11-window-mapstate.sh behavior against a stub xwininfo ---
+(
+  cd "$T" || exit 3
+  stub="$T/stubbin"; mkdir -p "$stub"
+  cat > "$stub/xwininfo" <<'STUB'
+#!/usr/bin/env bash
+# fixture stub: content from $STUB_STATS; exit code from $STUB_RC
+[ -n "${STUB_RC:-}" ] && exit "$STUB_RC"
+printf '%s' "${STUB_STATS:-}"
+STUB
+  chmod +x "$stub/xwininfo"
+  export PATH="$stub:$PATH"
+  stats='xwininfo: Window id: 0x600004 "SHEYTAN Music Visualizer"
+  Map State: %STATE%
+  Width: 1280
+  Height: 800'
+  STUB_STATS="${stats/\%STATE%/IsViewable}" bash "$REPO_ROOT/$MS" 0x600004 > viewable.txt 2>&1; echo $? > viewable.rc
+  STUB_STATS="${stats/\%STATE%/IsUnMapped}" bash "$REPO_ROOT/$MS" 0x600004 > unmapped.txt 2>&1; echo $? > unmapped.rc
+  STUB_STATS="${stats/\%STATE%/IsUnviewable}" bash "$REPO_ROOT/$MS" 0x600004 > unviewable.txt 2>&1; echo $? > unviewable.rc
+  STUB_RC=1 STUB_STATS="xwininfo: error: no window 0xdead" bash "$REPO_ROOT/$MS" 0xdead > gone.txt 2>&1; echo $? > gone.rc
+  bash "$REPO_ROOT/$MS" > noid.txt 2>&1; echo $? > noid.rc
+)
+if [ "$(cat "$T/viewable.rc")" = 0 ] && grep -q "map_state=IsViewable width=1280 height=800" "$T/viewable.txt" \
+   && [ "$(cat "$T/unmapped.rc")" = 1 ] && grep -q "map_state=IsUnMapped" "$T/unmapped.txt" \
+   && [ "$(cat "$T/unviewable.rc")" = 1 ] && grep -q "map_state=IsUnviewable" "$T/unviewable.txt" \
+   && [ "$(cat "$T/gone.rc")" = 2 ] \
+   && [ "$(cat "$T/noid.rc")" = 2 ]; then
+  report PASS "G29" "map-state checker: only IsViewable passes (0); IsUnMapped/IsUnviewable fail (1); query failure/no-id fail (2)"
+else
+  report FAIL "G29" "map-state checker behavior fixtures failed"
+fi
+
+# ---------- H30/H31: deterministic manifest writer ------------------------
+(
+  cd "$T" || exit 3
+  export RUN_ID=42376176493 RUN_ATTEMPT=1 COMMIT_SHA=bf50c8e5f6b1866c64a274f610fc3f7a6359d289
+  export REF='refs/heads/release/v1.0"weird\κυρία}'   # quotes, backslash, Unicode, slashes
+  export EVENT=workflow_dispatch REPO='SHEYTANx13/SHEYTAN-Music-Visualizer' RUNNER_OS_LABEL=Linux
+  export STARTED_AT=""   # optional value may be empty
+  export RESULT_PREFLIGHT=success RESULT_WINDOWS=skipped RESULT_LINUX=failure RESULT_CODEQL=cancelled
+  export DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=skipped DOWNLOAD_LINUX=success \
+         DOWNLOAD_CODEQL_GO=skipped DOWNLOAD_CODEQL_ACTIONS=success
+  python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m1/manifest.json >writer.out 2>&1
+  echo $? > writer.rc
+)
+if [ "$(cat "$T/writer.rc")" = 0 ] \
+   && python3 - "$T" <<'PYCHK'
+import json, sys, os
+t = sys.argv[1]
+doc = json.load(open(os.path.join(t, "m1/manifest.json")))
+assert doc["ref"] == 'refs/heads/release/v1.0"weird\\κυρία}', doc["ref"]
+assert doc["event"] == "workflow_dispatch"
+assert doc["start_time_utc"] == ""
+results = {j["name"]: j["result"] for j in doc["jobs"]}
+assert results == {"preflight": "success", "build-windows": "skipped", "build-linux": "failure",
+                   "analyze (go)": "cancelled", "analyze (actions)": "cancelled"}, results
+outs = {d["artifact"]: d["outcome"] for d in doc["downloads"]}
+assert len(outs) == 5 and all(v in ("success", "skipped") for v in outs.values())
+assert os.path.getsize(os.path.join(t, "m1/manifest.json")) > 0
+assert not [f for f in os.listdir(os.path.join(t, "m1")) if f.startswith(".manifest-")], "temp file left behind"
+assert os.path.exists(os.path.join(t, "m1/manifest-diagnostics.txt"))
+print("H31-OK")
+PYCHK
+then
+  report PASS "H30" "manifest writer: hostile ref (quotes/backslash/Unicode/slashes), empty optional, all four job conclusions, atomic rename, no temp leftovers, diagnostics written"
+else
+  report FAIL "H30" "manifest writer fixture failed"
+fi
+(
+  cd "$T" || exit 3
+  : > env.txt
+  # missing required env -> fail-closed rc 2
+  env -i PATH="$PATH" python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m2/manifest.json >m2.out 2>&1; echo $? > m2.rc
+  # invalid result value -> rc 2
+  RUN_ID=1 RUN_ATTEMPT=1 COMMIT_SHA=bf50c8e5f6b1866c64a274f610fc3f7a6359d289 REF=refs/heads/main \
+  EVENT=push REPO=r/x RUNNER_OS_LABEL=Linux STARTED_AT='' \
+  RESULT_PREFLIGHT=green RESULT_WINDOWS=success RESULT_LINUX=success RESULT_CODEQL=success \
+  DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=success DOWNLOAD_LINUX=success \
+  DOWNLOAD_CODEQL_GO=success DOWNLOAD_CODEQL_ACTIONS=success \
+  python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m3/manifest.json >m3.out 2>&1; echo $? > m3.rc
+  # bad SHA -> rc 2
+  RUN_ID=1 RUN_ATTEMPT=1 COMMIT_SHA=not-a-sha REF=refs/heads/main EVENT=push REPO=r/x \
+  RUNNER_OS_LABEL=Linux STARTED_AT='' RESULT_PREFLIGHT=success RESULT_WINDOWS=success \
+  RESULT_LINUX=success RESULT_CODEQL=success DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=success \
+  DOWNLOAD_LINUX=success DOWNLOAD_CODEQL_GO=success DOWNLOAD_CODEQL_ACTIONS=success \
+  python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m4/manifest.json >m4.out 2>&1; echo $? > m4.rc
+)
+if [ "$(cat "$T/m2.rc")" = 2 ] && grep -q "RUN_ATTEMPT" "$T/m2.out" \
+   && [ "$(cat "$T/m3.rc")" = 2 ] && grep -q "RESULT_PREFLIGHT='green'" "$T/m3.out" \
+   && [ "$(cat "$T/m4.rc")" = 2 ] && grep -q "not a 40/64-char" "$T/m4.out" \
+   && [ ! -e "$T/m2/manifest.json" ] && [ ! -e "$T/m3/manifest.json" ] && [ ! -e "$T/m4/manifest.json" ]; then
+  report PASS "H31" "manifest writer fails closed with precise reasons and never leaves a manifest file"
+else
+  report FAIL "H31" "manifest writer fail-closed fixtures failed"
+fi
+
+# ---------- H32: emergency report disambiguates the manifest state ---------
+(
+  cd "$T" || exit 3
+  mkdir -p empty-parts ci-out2
+  printf '' > empty-parts/manifest.json   # the run-42376176493 signature
+  bash "$REPO_ROOT/scripts/ci/emergency-report.sh" --out ci-out2/log.txt --parts-root empty-parts \
+    --manifest empty-parts/manifest.json --reason "fixture: empty manifest" >/dev/null 2>&1
+  cp ci-out2/log.txt report-empty.txt
+  rm -f empty-parts/manifest.json
+  bash "$REPO_ROOT/scripts/ci/emergency-report.sh" --out ci-out2/log2.txt --parts-root empty-parts \
+    --manifest empty-parts/manifest.json --reason "fixture: missing manifest" >/dev/null 2>&1
+  cp ci-out2/log2.txt report-missing.txt
+)
+if grep -q "MANIFEST FILE EMPTY (0 bytes)" "$T/report-empty.txt" \
+   && grep -q "Run 42376176493 signature class" "$T/report-empty.txt" \
+   && grep -q "MANIFEST FILE MISSING" "$T/report-missing.txt"; then
+  report PASS "H32" "emergency report distinguishes empty vs missing manifest with the run-42376176493 signature called out"
+else
+  report FAIL "H32" "emergency report diagnosis fixtures failed"
+fi
+
 # ---------- D22-23 runtime + C17-21: PowerShell fixtures -------------------
+UCRTFIX="scripts/ci/tests/Test-UCRT64Fixture.ps1"
 if command -v pwsh >/dev/null 2>&1; then
   if pwsh -NoProfile -File scripts/ci/tests/Test-CaptureStep.ps1 > "$T/pwsh.txt" 2>&1; then
     report PASS "C17-21" "PowerShell capture fixtures: $(tail -1 "$T/pwsh.txt")"
   else
     report FAIL "C17-21" "PowerShell fixtures failed:"; cat "$T/pwsh.txt"
   fi
+  pwsh -NoProfile -File "$UCRTFIX" > "$T/ucrtfix.txt" 2>&1
+  ucrtfix_rc=$?
+  ucrtfix_last="$(tail -1 "$T/ucrtfix.txt")"
+  case "$ucrtfix_last" in
+    "UCRT64-FIXTURES PASS"*)
+      if [ "$ucrtfix_rc" -eq 0 ]; then
+        report PASS "D33" "UCRT64 gate runtime fixtures (stub toolchain): $ucrtfix_last"
+      else
+        report FAIL "D33" "fixture output says PASS but exit code is $ucrtfix_rc"; cat "$T/ucrtfix.txt"
+      fi ;;
+    "UCRT64-FIXTURES NOT RUN"*)
+      report "NOT RUN" "D33" "$ucrtfix_last" ;;
+    *)
+      report FAIL "D33" "UCRT64 gate runtime fixtures failed (rc=$ucrtfix_rc):"; cat "$T/ucrtfix.txt" ;;
+  esac
 else
   report "NOT RUN" "C17-21" "pwsh not available on this Linux host — scripts/ci/tests/Test-CaptureStep.ps1 must run on Windows/any pwsh 7 host"
   report "NOT RUN" "D22-23" "same limitation (runtime child-process scope proof requires pwsh)"
+  report "NOT RUN" "D33" "same limitation (UCRT64 gate runtime fixtures require pwsh)"
 fi
 
 echo "--------------------------------------------------------------"

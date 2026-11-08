@@ -72,8 +72,19 @@ trap 'rm -f "$tmp"' EXIT
   echo
   echo "1. RUN METADATA (from the run manifest as written by the workflow)"
   echo "--------------------------------------------------------------"
-  if command -v jq >/dev/null 2>&1 && [ -s "$manifest" ]; then
-    jq -r '"Product:          \(.product // "-")",
+  # Precise diagnosis (run-42376176493 phase 2.4): "jq unavailable",
+  # "manifest missing", "manifest empty (0 bytes)" and "manifest present
+  # but not valid JSON" are four different causes and are reported as
+  # such — never combined into one ambiguous message.
+  manifest_state="MISSING"
+  if [ -f "$manifest" ]; then
+    if [ -s "$manifest" ]; then manifest_state="PRESENT"; else manifest_state="EMPTY (0 bytes)"; fi
+  fi
+  echo "manifest_path: $manifest"
+  echo "manifest_state: $manifest_state"
+  echo "jq_available: $(command -v jq >/dev/null 2>&1 && echo yes || echo no)"
+  if [ "$manifest_state" = "PRESENT" ] && command -v jq >/dev/null 2>&1; then
+    if jq -r '"Product:          \(.product // "-")",
            "Repository:       \(.repository // "-")",
            "Workflow:         \(.workflow // "-")",
            "Run ID:           \(.run_id // "-")",
@@ -81,24 +92,41 @@ trap 'rm -f "$tmp"' EXIT
            "Commit SHA:       \(.commit_sha // "-")",
            "Ref:              \(.ref // "-")",
            "Event:            \(.event // "-")",
-           "Start time (UTC): \(.start_time_utc // "-")"' "$manifest" 2>/dev/null || cat "$manifest"
+           "Start time (UTC): \(.start_time_utc // "-")"' "$manifest" 2>/dev/null; then
+      :
+    else
+      echo "(manifest is present but is NOT valid JSON — raw manifest follows)"
+      cat "$manifest"
+    fi
+  elif [ "$manifest_state" = "PRESENT" ]; then
+    echo "(jq unavailable — raw manifest follows)"
+    cat "$manifest"
+  elif [ "$manifest_state" = "EMPTY (0 bytes)" ]; then
+    echo "MANIFEST FILE EMPTY (0 bytes): the manifest writer failed after file creation and before writing content."
+    echo "Run 42376176493 signature class: a jq-only writer leaves an empty file behind when jq is unavailable."
+    echo "The repaired writer (scripts/ci/write-manifest.py) writes atomically and cannot leave this state."
   else
-    echo "(jq unavailable or manifest missing/empty — raw manifest follows)"
-    if [ -s "$manifest" ]; then cat "$manifest"; else echo "MANIFEST MISSING OR EMPTY"; fi
+    echo "MANIFEST FILE MISSING: the manifest step did not create it."
   fi
   echo
   echo "2. JOB CONCLUSIONS (authoritative: workflow needs.*.result from the manifest;"
   echo "   the per-job results below are exactly what the calling workflow observed)"
   echo "--------------------------------------------------------------"
-  if command -v jq >/dev/null 2>&1 && [ -s "$manifest" ]; then
-    jq -r '.jobs[]? | "\(.name // "-") : \(.result // "-")\n   artifact: \(.artifact // "-")  required: \(.required // false)"' \
-      "$manifest" 2>/dev/null || cat "$manifest"
+  if [ "$manifest_state" = "PRESENT" ] && command -v jq >/dev/null 2>&1; then
+    if ! jq -r '.jobs[]? | "\(.name // "-") : \(.result // "-")\n   artifact: \(.artifact // "-")  required: \(.required // false)"' \
+      "$manifest" 2>/dev/null; then
+      echo "(manifest present but not valid JSON — env-reported results shown below)"
+      echo "preflight      : $result_preflight"
+      echo "build-windows  : $result_windows"
+      echo "build-linux    : $result_linux"
+      echo "codeql (call)  : $result_codeql"
+    fi
   else
     echo "preflight      : $result_preflight"
     echo "build-windows  : $result_windows"
     echo "build-linux    : $result_linux"
     echo "codeql (call)  : $result_codeql"
-    echo "(manifest unreadable by jq — env-reported results shown above)"
+    echo "(manifest state: $manifest_state; jq available: $(command -v jq >/dev/null 2>&1 && echo yes || echo no) — env-reported results shown above)"
   fi
   echo
   echo "CodeQL declared result: ${RESULT_CODEQL:-unknown}"

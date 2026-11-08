@@ -27,7 +27,12 @@
 //	3  report written, but at least one required job did not succeed —
 //	   the calling job must fail AFTER uploading the report; a
 //	   successful collection never masks a failed build/CodeQL job
-//	2  hard error (invalid manifest, unreadable parts, unwritable report)
+//	2  hard error — no report is written. Distinct causes are
+//	   reported with distinct HARD_ERROR stderr prefixes:
+//	   manifest-missing / manifest-empty / manifest-invalid
+//	   (unreadable or schema-violating manifest), flag/argument
+//	   errors, unreadable parts, and internal collection errors
+//	   (unwritable report). The numeric contract is unchanged.
 package main
 
 import (
@@ -59,7 +64,23 @@ func main() {
 	}
 	meta, err := cilog.ParseManifest(*manifest)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		// Distinguish the rc=2 hard-error causes precisely
+		// (run-42376176493 phase 6.1): a missing manifest, a
+		// zero-byte manifest and a malformed manifest are three
+		// different producer failures and are reported as such.
+		// The documented exit-code contract (0/1/2/3) is unchanged.
+		if _, statErr := os.Stat(*manifest); statErr != nil {
+			fmt.Fprintf(os.Stderr,
+				"ci-log-collector: HARD_ERROR manifest-missing: %q cannot be read: %v (the manifest step did not create it)\n",
+				*manifest, statErr)
+		} else if fi, statErr := os.Stat(*manifest); statErr == nil && fi.Size() == 0 {
+			fmt.Fprintf(os.Stderr,
+				"ci-log-collector: HARD_ERROR manifest-empty: %q is 0 bytes (the manifest writer failed after file creation and before writing content; see manifest-diagnostics.txt)\n",
+				*manifest)
+		} else {
+			fmt.Fprintf(os.Stderr,
+				"ci-log-collector: HARD_ERROR manifest-invalid: %v\n", err)
+		}
 		os.Exit(2)
 	}
 
@@ -87,7 +108,7 @@ func main() {
 
 	res, err := cilog.Collect(opts)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "ci-log-collector: HARD_ERROR collect: %v\n", err)
 		os.Exit(2)
 	}
 	fmt.Fprintf(os.Stdout, "ci-log-collector: report %q written; coverage=%s; overall=%s; jobs=%d with-parts=%d missing=%d skipped=%d log-files=%d api-jobs=%d api-logs=%d gates=%d failed-gates=%d failed-records=%d warnings=%d\n",
