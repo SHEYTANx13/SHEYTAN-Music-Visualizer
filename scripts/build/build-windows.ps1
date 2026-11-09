@@ -53,6 +53,13 @@ Set-Content -Path $env:CI_LOG_FILE -Value "" -NoNewline # fresh local run
 . (Join-Path $repoRoot "scripts/ci/Capture-Step.ps1")
 
 $job = "phase2-windows-build"
+
+# CI/user log capture: self-check and runtime checks write their app
+# logs under ci-logs/app-logs (explicit SHEYTAN_LOG_DIR override) and
+# resolve all data paths under ci-logs/app-data - never the runner's
+# unrelated roaming profile. Local runs can preset their own values.
+if (-not $env:SHEYTAN_LOG_DIR)  { $env:SHEYTAN_LOG_DIR  = Join-Path $logDir "app-logs" }
+if (-not $env:SHEYTAN_DATA_DIR) { $env:SHEYTAN_DATA_DIR = Join-Path $logDir "app-data" }
 # goffi_static: required when Fyne (CGO) and wgpu (goffi FFI) link in one
 # binary; harmless on Windows (see ai-notes.md).
 #
@@ -89,7 +96,8 @@ if ($null -eq $goResolved) {
         "go-mod-tidy-verify", "go-mod-verify", "go-test", "go-vet",
         "go-build-packages", "build-executable", "run-version",
         "run-self-check", "verify-build-metadata", "stage-portable",
-        "validate-pe", "create-portable-zip"
+        "verify-package-license", "validate-pe", "create-portable-zip",
+        "verify-extracted-package"
     )
     foreach ($g in $blockedGates) {
         Add-Content -Path $env:CI_LOG_FILE -Value ("BLOCKED: gate {0} ({1})" -f $g, $blockedReason)
@@ -391,18 +399,44 @@ if ($exeOk) {
 
     # ---- portable staging + artifact validation -----------------------------
     $rc = Capture-Step -Job $job -Step "stage-portable" -ToolContext "gate:stage-portable" -Command {
-        $stage = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable"
-        if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-        New-Item -ItemType Directory -Force -Path $stage | Out-Null
-        Copy-Item "bin\sheytan-music-visualizer.exe" $stage
-        Copy-Item "license.md" $stage
-        Copy-Item "readme.md" $stage
-        $exeItem = Get-Item (Join-Path $stage "sheytan-music-visualizer.exe")
+        $stageRoot = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable"
+        if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
+        $appDir = Join-Path $stageRoot "SHEYTAN-Music-Visualizer-windows-x64"
+        New-Item -ItemType Directory -Force -Path $appDir | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $appDir "tools\ffmpeg\bin") | Out-Null
+        New-Item -ItemType Directory -Force -Path (Join-Path $appDir "data") | Out-Null
+        Copy-Item "bin\sheytan-music-visualizer.exe" $appDir
+        Copy-Item "license.md" $appDir
+        Copy-Item "readme.md" $appDir
+        Copy-Item "packaging\portable.mode" $appDir
+        Copy-Item "packaging\DATA-FOLDERS.txt" (Join-Path $appDir "data")
+        Copy-Item "packaging\FFMPEG-TOOLS-LICENSING.md" (Join-Path $appDir "tools\ffmpeg")
+        $exeItem = Get-Item (Join-Path $appDir "sheytan-music-visualizer.exe")
         if ($exeItem.Length -le 0) { Write-Output "ERROR: staged executable is empty"; exit 1 }
         Write-Output ("staged executable size: {0} bytes" -f $exeItem.Length)
+        Get-ChildItem -Recurse -File $appDir | ForEach-Object { $rel = $_.FullName.Substring($stageRoot.Length + 1); Write-Output ("STAGED: " + ($rel -replace '\\', '/')) }
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "stage-portable" }
+
+    # BYTE-FOR-BYTE license identity gate (run 42481815519 contract):
+    # the staged license.md must equal the canonical tracked file
+    # exactly, before archive creation. SHA-256 equality on raw bytes;
+    # any mismatch fails the package gate.
+    $rc = Capture-Step -Job $job -Step "verify-package-license" -ToolContext "gate:license-identity" -Command {
+        $canonical = Get-FileHash -Algorithm SHA256 "license.md"
+        $stagedPath = "dist\SHEYTAN-Music-Visualizer-windows-x64-portable\SHEYTAN-Music-Visualizer-windows-x64\license.md"
+        $staged = Get-FileHash -Algorithm SHA256 $stagedPath
+        Write-Output ("canonical sha256: {0}" -f $canonical.Hash)
+        Write-Output ("staged    sha256: {0}" -f $staged.Hash)
+        if ($canonical.Hash -ne $staged.Hash) {
+            Write-Output "ERROR: staged license.md differs from the canonical tracked license.md (byte comparison FAILED)"
+            exit 1
+        }
+        Write-Output "license identity PASSED (staged copy is byte-identical to the canonical tracked license.md)"
+        exit 0
+    }
+    if ($rc -ne 0) { Fail-Gate "verify-package-license" }
 
     $rc = Capture-Step -Job $job -Step "validate-pe" -ToolContext "gate:validate-pe" -Command {
         $bytes = [System.IO.File]::ReadAllBytes("bin\sheytan-music-visualizer.exe")[0..1]
@@ -413,30 +447,86 @@ if ($exeOk) {
     if ($rc -ne 0) { Fail-Gate "validate-pe" }
 
     $rc = Capture-Step -Job $job -Step "create-portable-zip" -ToolContext "gate:create-portable-zip" -Command {
-        $stage = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable"
+        $stageRoot = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable"
         $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
         if (Test-Path $zip) { Remove-Item -Force $zip }
-        Compress-Archive -Path "$stage\*" -DestinationPath $zip
+        # Archive the WHOLE top-level folder (never "$stage\*", which
+        # flattens the tree and loses the directory contract).
+        Compress-Archive -Path $stageRoot -DestinationPath $zip
         $zipItem = Get-Item $zip
         if ($zipItem.Length -le 0) { Write-Output "ERROR: created ZIP is empty"; exit 1 }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
         try {
             Write-Output ("zip entries: {0}; size: {1} bytes" -f $archive.Entries.Count, $zipItem.Length)
-            if ($archive.Entries.Count -lt 3) { Write-Output "ERROR: zip does not contain the expected files"; exit 1 }
+            if ($archive.Entries.Count -lt 5) { Write-Output "ERROR: zip does not contain the expected package tree"; exit 1 }
+            $required = @(
+                "SHEYTAN-Music-Visualizer-windows-x64/sheytan-music-visualizer.exe",
+                "SHEYTAN-Music-Visualizer-windows-x64/license.md",
+                "SHEYTAN-Music-Visualizer-windows-x64/readme.md",
+                "SHEYTAN-Music-Visualizer-windows-x64/portable.mode",
+                "SHEYTAN-Music-Visualizer-windows-x64/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md",
+                "SHEYTAN-Music-Visualizer-windows-x64/data/DATA-FOLDERS.txt"
+            )
+            foreach ($req in $required) {
+                $hit = $archive.Entries | Where-Object { $_.FullName -eq $req }
+                if ($null -eq $hit) { Write-Output "ERROR: zip is missing required package entry: $req"; exit 1 }
+            }
+            Write-Output "zip package tree verified (one top-level app folder + required entries)"
         }
         finally { $archive.Dispose() }
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "create-portable-zip" }
+
+    # POST-ARCHIVE license + package verification (run 42481815519
+    # contract): extract the produced ZIP and compare the distributed
+    # license.md bytes against the canonical tracked file. A staged
+    # check alone does not prove what a user receives.
+    $rc = Capture-Step -Job $job -Step "verify-extracted-package" -ToolContext "gate:package-verify" -Command {
+        $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
+        $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("sheytan-pkg-verify-" + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+        Expand-Archive -Path $zip -DestinationPath $extractRoot
+        $extractedLicense = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64\license.md"
+        $cleanup = { if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot } }
+        if (-not (Test-Path $extractedLicense)) {
+            Write-Output "ERROR: extracted package has no license.md at the expected path"
+            & $cleanup; exit 1
+        }
+        $canonical = Get-FileHash -Algorithm SHA256 "license.md"
+        $dist = Get-FileHash -Algorithm SHA256 $extractedLicense
+        Write-Output ("extracted sha256: {0}" -f $dist.Hash)
+        if ($canonical.Hash -ne $dist.Hash) {
+            Write-Output "ERROR: DISTRIBUTED license.md differs from the canonical tracked license.md (post-archive byte comparison FAILED)"
+            & $cleanup; exit 1
+        }
+        $marker = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64\portable.mode"
+        if (-not (Test-Path $marker)) {
+            Write-Output "ERROR: portable.mode marker missing from the extracted package"
+            & $cleanup; exit 1
+        }
+        $exe = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64\sheytan-music-visualizer.exe"
+        $exeBytes = [System.IO.File]::ReadAllBytes($exe)[0..1]
+        if ($exeBytes[0] -ne 77 -or $exeBytes[1] -ne 90) {
+            Write-Output "ERROR: extracted executable is not a PE (missing MZ header)"
+            & $cleanup; exit 1
+        }
+        & $cleanup
+        Write-Output "extracted package verified: license byte-identical, portable.mode present, executable PE-valid"
+        exit 0
+    }
+    if ($rc -ne 0) { Fail-Gate "verify-extracted-package" }
 }
 else {
     Skip-Gate "run-version" "executable build failed"
     Skip-Gate "run-self-check" "executable build failed"
     Skip-Gate "verify-build-metadata" "executable build failed"
     Skip-Gate "stage-portable" "executable build failed"
+    Skip-Gate "verify-package-license" "executable build failed"
     Skip-Gate "validate-pe" "executable build failed"
     Skip-Gate "create-portable-zip" "executable build failed"
+    Skip-Gate "verify-extracted-package" "executable build failed"
 }
 
 # ---- run summary + failure index -------------------------------------------

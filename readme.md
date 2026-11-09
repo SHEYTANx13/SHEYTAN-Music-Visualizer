@@ -51,6 +51,10 @@ brand palettes used by the visualizer (`internal/visualizer`).
 | GPU renderer: wgpu (Go-controlled WebGPU) radial-mode shader with verified readback; hardware adapters on Vulkan/DX12/Metal hosts | DELIVERED as code + software-adapter proof; **hardware-GPU execution: NOT AVAILABLE on the verification host** |
 | MP4 export: 1280×720 → 3840×2160 at 24/30/60 fps, H.264 + AAC via local FFmpeg, streamed frames, real progress, cancellation, ffprobe validation | DELIVERED (`internal/export`; verified 1080p30 and 4K24 proofs) |
 | Projects: versioned JSON, atomic save, validation, relink, presets (Hellfire Pulse, Crimson Orbit, Obsidian Wave, Ember Storm) | DELIVERED (`internal/project`) |
+| Fullscreen: single state controller, persisted intent vs observed platform state, F11 toggle, Esc exit, event-driven reconciliation (never a force loop) | DELIVERED (`internal/fullscreen`, `ui/fyne`; state-transition tests PASS — interactive desktop behavior: NOT RUN on this headless verification host) |
+| Runtime logging in every interactive launch: UTC text log, rotation, stderr fallback, startup/subsystem/error records, panic stacks | DELIVERED (`internal/logging` + startup wiring; real-run probe evidence captured) |
+| User-facing diagnostics: Help / Diagnostics dialog with Open Logs Folder, Copy Log Path, resolved data mode + log path | DELIVERED (`ui/fyne` actions; button execution needs an interactive desktop: NOT RUN here) |
+| Predictable app-local data layout: portable `data/` beside the executable (portable.mode marker) or installed per-user location (Windows LOCALAPPDATA, Linux XDG), with visible fallback and non-destructive legacy migration | DELIVERED (`internal/apppaths` + package staging gates; resolver/bootstrap/migration tests PASS) |
 | Windows x64 build | DELIVERED as script/workflow definition; **native Windows execution: NOT RUN on this Linux verification host** |
 
 ## Supported formats
@@ -148,8 +152,12 @@ dialog.
 ```bash
 go run -tags goffi_static ./cmd/sheytan-music-visualizer --version      # product + build metadata
 go run -tags goffi_static ./cmd/sheytan-music-visualizer --self-check   # invariants incl. decoders, DSP fixture, renderer, ffmpeg probe
+go run -tags goffi_static ./cmd/sheytan-music-visualizer --debug       # the studio window with debug-level runtime log records
 go run -tags goffi_static ./cmd/sheytan-music-visualizer                # the studio window
 ```
+
+Keyboard: **Space** play/pause, **←/→** seek, **F11** fullscreen toggle,
+**Esc** exit fullscreen.
 
 ## Studio walkthrough
 
@@ -172,12 +180,44 @@ go run -tags goffi_static ./cmd/sheytan-music-visualizer                # the st
    presets, real progress (rendered frames + encoder frames), cancel, and
    an ffprobe validation verdict before the file is finalized atomically.
 
-## Logs
+## Logs and data layout
 
-- **Application logs** (runtime): `<user-config-dir>/SHEYTAN Music
-  Visualizer/logs/app.log`; `SHEYTAN_LOG_DIR` overrides explicitly.
-- **Data** (canonical PCM cache): `<user-config-dir>/SHEYTAN Music
-  Visualizer/data/pcm-cache`; `SHEYTAN_DATA_DIR` overrides (tests use this).
+- **Where your runtime log lives.** The application resolves ONE data
+  layout at startup (`internal/apppaths`):
+  - Portable package (a `portable.mode` marker sits beside the
+    executable): everything under `<package>/data/` —
+    `logs/app.log`, `config/`, `cache/`, `projects/`, `exports/`,
+    `temp/`, `crashes/`.
+  - Installed build: the same tree under the writable per-user
+    location — Windows `%LOCALAPPDATA%\SHEYTAN Music Visualizer`
+    (deliberately never the roaming profile), Linux
+    `$XDG_DATA_HOME/SHEYTAN Music Visualizer` (default
+    `~/.local/share/...`).
+  - If nothing is writable, a visible temporary fallback is used and
+    the exact reason is recorded (never silent, never scattered).
+- **Finding the log in the app**: Help / Diagnostics shows the data
+  mode, the resolved data root and the exact log path, with
+  **Open Logs Folder** and **Copy Log Path** actions.
+- **Log format and retention**: readable one-line text records with
+  UTC timestamps and severity (`app.log`, 5 MiB rotation, one retained
+  generation `app.log.1`). Startup records version/commit/build
+  date/builder, Go version, OS/arch, PID, data mode and log path;
+  subsystem initialization, renderer/audio/FFmpeg decisions, export
+  start/result/failure, fullscreen requested-vs-observed transitions
+  and recoverable panic stacks are recorded. No audio content,
+  credentials or environment dumps are ever logged. A broken log file
+  never aborts the launch: a stderr fallback is used and surfaced.
+- **Overrides** (explicit configuration, never silent fallbacks):
+  `SHEYTAN_DATA_DIR` selects the whole data root; `SHEYTAN_LOG_DIR`
+  selects the log directory (used by CI and tests).
+- **Migration**: logs written by older versions under the previous
+  location (`%APPDATA%` on Windows, `~/.config` on Linux) are copied
+  once as `app.legacy.log` — originals are never moved or deleted.
+- **FFmpeg resolution order** (`internal/fflocate`): explicit
+  configuration (`SHEYTAN_FFMPEG`), then the app-local
+  `tools/ffmpeg/bin` folder, then `PATH`. No binary is downloaded or
+  bundled; see `packaging/FFMPEG-TOOLS-LICENSING.md` for the legal
+  position and the user-approved local setup path.
 - **Build/CI logs**: `ci-logs/` (bootstrapped by `scripts/ci/bootstrap-logs.sh`
   / `Bootstrap-Logs.ps1` before anything writes into it); CI uploads one
   namespaced, attempt-suffixed log-part artifact per evidence-producing job
@@ -185,9 +225,14 @@ go run -tags goffi_static ./cmd/sheytan-music-visualizer                # the st
   `linux-logs-part-attempt<N>`, `codeql-logs-part-{go,actions}-attempt<N>`),
   then `cmd/ci-log-collector` aggregates them (plus the authoritative GitHub
   job/step conclusions and open code-scanning alerts) into ONE artifact named
-  exactly `log.txt`; the internal parts are deleted only after the final
-  upload is validated, so the run exposes a single diagnostic file. Every
-  Linux CI job runs on the explicit `ubuntu-26.04` runner label.
+  exactly `log.txt`. That final artifact is uploaded with
+  `actions/upload-artifact` v7 `archive: false`: **the download is the plain
+  `log.txt` file itself, not a ZIP containing it** (validated in-workflow:
+  no ZIP signature, exactly one consolidated artifact). The pre-compressed
+  Windows portable ZIP and the Linux portable tar.gz are likewise uploaded
+  non-archived, so downloads are never double-wrapped. The internal log parts
+  are deleted only after the final upload is validated. Every Linux CI job
+  runs on the explicit `ubuntu-26.04` runner label.
 - The packaged Phase 2 verification transcript lives in `evidence/`.
 
 ## License

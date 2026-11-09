@@ -199,6 +199,78 @@ if [ "$MODE" = "desktop" ]; then
     skip_gate run-self-check "executable build failed"
   fi
 
+  # ---- portable package staging (run 42481815519 directory contract) ----
+  # One top-level application folder: executable, license.md, readme.md,
+  # portable.mode marker, tools/ffmpeg app-local dependency location and
+  # the documented data/ bootstrap. A tar.gz preserves the executable
+  # bit (a ZIP would not), so the portable contract survives extraction.
+  STAGE_ROOT="$REPO_ROOT/dist/SHEYTAN-Music-Visualizer-linux-x64-portable"
+  STAGE_APP="$STAGE_ROOT/SHEYTAN-Music-Visualizer-linux-x64"
+  TARBALL="$REPO_ROOT/dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz"
+  rm -rf "$STAGE_ROOT" "$TARBALL"
+  mkdir -p "$STAGE_APP/tools/ffmpeg/bin" "$STAGE_APP/data"
+  if [ "$EXE_OK" -eq 1 ]; then
+    install -m 0755 bin/sheytan-music-visualizer "$STAGE_APP/sheytan-music-visualizer"
+    install -m 0644 license.md "$STAGE_APP/license.md"
+    install -m 0644 readme.md "$STAGE_APP/readme.md"
+    install -m 0644 packaging/portable.mode "$STAGE_APP/portable.mode"
+    install -m 0644 packaging/DATA-FOLDERS.txt "$STAGE_APP/data/DATA-FOLDERS.txt"
+    install -m 0644 packaging/FFMPEG-TOOLS-LICENSING.md "$STAGE_APP/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md"
+  fi
+
+  if [ "$EXE_OK" -eq 1 ]; then
+    CI_TOOL_CONTEXT="gate:stage-portable" ci_capture "$JOB" stage-portable bash -c '
+      set -euo pipefail
+      test -s "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable missing"; exit 1; }
+      test -x "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable not executable"; exit 1; }
+      for f in license.md readme.md portable.mode data/DATA-FOLDERS.txt tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md; do
+        test -s "SHEYTAN-Music-Visualizer-linux-x64/$f" || { echo "ERROR: staged file missing/empty: $f"; exit 1; }
+      done
+      echo "staged portable tree:"
+      find "SHEYTAN-Music-Visualizer-linux-x64" -type f -printf "STAGED: %P (%s bytes)\n" | sort
+    ' || fail_gate stage-portable
+
+    # BYTE-FOR-BYTE license identity gate (pre-archive): cmp on raw
+    # bytes between the canonical tracked file and the staged copy.
+    CI_TOOL_CONTEXT="gate:license-identity (staged)" ci_capture "$JOB" verify-package-license cmp license.md "$STAGE_APP/license.md" ||
+      fail_gate verify-package-license
+
+    # Tar.gz creation preserving permissions, then POST-ARCHIVE
+    # verification: extract the actual archive and compare license
+    # bytes + executable bit again. A staging check alone does not
+    # prove what a user receives.
+    CI_TOOL_CONTEXT="gate:create-portable-tar" ci_capture "$JOB" create-portable-tar bash -c '
+      set -euo pipefail
+      tar -czf "dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz" -C "dist/SHEYTAN-Music-Visualizer-linux-x64-portable" "SHEYTAN-Music-Visualizer-linux-x64"
+      test -s "dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz" || { echo "ERROR: tarball missing/empty"; exit 1; }
+      echo "tarball contents:"
+      tar -tzf "dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz"
+    ' || fail_gate create-portable-tar
+
+    if [ -s "$TARBALL" ]; then
+      VERIFY_DIR="$(mktemp -d)"
+      CI_TOOL_CONTEXT="gate:package-verify (extracted tarball)" ci_capture "$JOB" verify-extracted-package bash -c '
+        set -euo pipefail
+        VERIFY_DIR="$1"
+        tar -xzf "dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz" -C "$VERIFY_DIR"
+        APP="$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64"
+        cmp license.md "$APP/license.md" || { echo "ERROR: DISTRIBUTED license.md differs from canonical (post-archive)"; exit 1; }
+        test -x "$APP/sheytan-music-visualizer" || { echo "ERROR: executable bit lost in tarball"; exit 1; }
+        test -f "$APP/portable.mode" || { echo "ERROR: portable.mode missing in tarball"; exit 1; }
+        test -f "$APP/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md" || { echo "ERROR: ffmpeg licensing doc missing in tarball"; exit 1; }
+        echo "extracted package verified: license byte-identical, executable bit preserved, portable.mode present"
+      ' _ "$VERIFY_DIR" || fail_gate verify-extracted-package
+      rm -rf "$VERIFY_DIR"
+    else
+      skip_gate verify-extracted-package "tarball not created"
+    fi
+  else
+    skip_gate stage-portable "executable build failed"
+    skip_gate verify-package-license "executable build failed"
+    skip_gate create-portable-tar "executable build failed"
+    skip_gate verify-extracted-package "executable build failed"
+  fi
+
   # race tests on concurrent core packages
   CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race $GO_TAGS -timeout 480s ./internal/audio/... ./internal/playback/... ./internal/dsp/... ./internal/export/... ./internal/studio/... ./internal/project/... ./internal/render/... ||
     fail_gate go-test-race

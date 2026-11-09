@@ -7,6 +7,8 @@ package fyneapp
 import (
 	"fmt"
 	"image"
+	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -51,6 +53,7 @@ func (u *studioUI) onImport() {
 	}, u.win)
 	fd.SetFilter(storage.NewExtensionFileFilter([]string{".wav", ".wave", ".mp3", ".flac", ".ogg", ".oga"}))
 	fd.Resize(fyne.NewSize(700, 500))
+	fd.SetOnClosed(func() { u.reconcileFullscreen("import-dialog-closed") })
 	fd.Show()
 }
 
@@ -76,6 +79,7 @@ func (u *studioUI) onSaveProject() {
 	}, u.win)
 	fd.SetFileName("project.sheytan.json")
 	fd.Resize(fyne.NewSize(700, 500))
+	fd.SetOnClosed(func() { u.reconcileFullscreen("save-project-dialog-closed") })
 	fd.Show()
 }
 
@@ -97,6 +101,7 @@ func (u *studioUI) onOpenProject() {
 	}, u.win)
 	fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
 	fd.Resize(fyne.NewSize(700, 500))
+	fd.SetOnClosed(func() { u.reconcileFullscreen("open-project-dialog-closed") })
 	fd.Show()
 }
 
@@ -114,6 +119,7 @@ func (u *studioUI) onExport() {
 		return
 	}
 	export.ProofHardwareEncoders(env)
+	u.logInfo("export dialog opened", "ffmpeg_source", env.Source, "ffmpeg_version", env.Version)
 	u.showExportDialog(env)
 }
 
@@ -276,6 +282,98 @@ func (u *studioUI) refreshTransportFrom(clock playback.ClockInfo, info render.Ba
 	sec := int(clock.Position.Seconds())
 	u.timeCur.SetText(fmt.Sprintf("%d:%02d", sec/60, sec%60))
 	_ = info
+}
+
+// logInfo/logErr are nil-safe runtime-log helpers (the UI stays fully
+// functional even when logging fell back to stderr).
+func (u *studioUI) logInfo(msg string, args ...any) {
+	if u.log != nil {
+		u.log.Info(msg, args...)
+	}
+}
+
+func (u *studioUI) logErr(msg string, args ...any) {
+	if u.log != nil {
+		u.log.Error(msg, args...)
+	}
+}
+
+// reconcileFullscreen re-applies the persisted fullscreen intent after
+// a dialog closed. Event-driven and debounced inside the controller —
+// never a loop, never focus stealing.
+func (u *studioUI) reconcileFullscreen(reason string) {
+	if u.fs != nil {
+		u.fs.Reconcile(reason)
+	}
+}
+
+// onHelp shows the Help / Diagnostics surface: the resolved data mode
+// with its reason, the exact runtime log path, the Open Logs Folder
+// and Copy Log Path actions, and a fullscreen toggle. These are the
+// user paths that make runtime logs attachable without searching
+// hidden system folders.
+func (u *studioUI) onHelp() {
+	u.logInfo("help-diagnostics opened")
+	modeLine := fmt.Sprintf("Data mode: %s", u.lay.Mode)
+	reasonLine := "Location rule: " + u.lay.Reason
+	rootLine := "Data root: " + u.lay.DataRoot
+	logLine := "Runtime log: " + u.logFilePath()
+
+	logLabel := widget.NewLabel(logLine)
+	logLabel.Wrapping = fyne.TextWrapWord
+	logLabel.TextStyle = fyne.TextStyle{Monospace: true}
+	rootLabel := widget.NewLabel(modeLine + "\n" + reasonLine + "\n" + rootLine)
+	rootLabel.Wrapping = fyne.TextWrapWord
+
+	openBtn := widget.NewButton("Open Logs Folder", func() {
+		u.logInfo("open-logs-folder requested", "dir", u.lay.Logs)
+		if u.app == nil {
+			u.dialogInfo("Logs folder", u.lay.Logs)
+			return
+		}
+		u.app.OpenURL(storage.NewFileURI(u.lay.Logs))
+	})
+	copyBtn := widget.NewButton("Copy Log Path", func() {
+		u.setClipboard(u.logFilePath())
+		u.status("Log path copied to clipboard: " + u.logFilePath())
+		u.logInfo("log path copied to clipboard")
+	})
+	fsBtn := widget.NewButton("Toggle Fullscreen (F11)", func() {
+		u.fs.Toggle("help-dialog")
+	})
+
+	hint := widget.NewLabel("Attach app.log when reporting a problem. " +
+		"The log contains UTC timestamps, severity and subsystem events — never audio content or credentials.")
+	hint.Wrapping = fyne.TextWrapWord
+
+	content := container.NewVBox(
+		rootLabel, logLabel, widget.NewSeparator(),
+		container.NewHBox(openBtn, copyBtn, fsBtn),
+		hint,
+	)
+	d := dialog.NewCustom("Help / Diagnostics — "+brand.ProductName, "Close", content, u.win)
+	d.Resize(fyne.NewSize(680, 380))
+	d.SetOnClosed(func() { u.reconcileFullscreen("help-dialog-closed") })
+	d.Show()
+}
+
+// setClipboard copies via the app clipboard (Window.Clipboard is
+// deprecated upstream) with a window fallback when no app is held.
+func (u *studioUI) setClipboard(text string) {
+	if u.app != nil {
+		u.app.Clipboard().SetContent(text)
+		return
+	}
+	u.win.Clipboard().SetContent(text)
+}
+
+// logFilePath returns the path shown to users: the real file when file
+// logging works, an explanatory fallback otherwise.
+func (u *studioUI) logFilePath() string {
+	if u.logFile != nil && !u.logFile.IsFallback() && u.logFile.Path() != "" {
+		return u.logFile.Path()
+	}
+	return "(file log unavailable — stderr fallback active; data root: " + u.lay.DataRoot + ")"
 }
 
 // dialogError shows an error dialog.

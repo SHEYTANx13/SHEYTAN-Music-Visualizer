@@ -1,0 +1,10 @@
+SHEYTAN Music Visualizer — portable package marker.
+
+The presence of this file beside the application executable selects
+PORTABLE data mode: every mutable file (configuration, logs, cache,
+projects, exports, temp files, crash diagnostics) is stored under the
+data/ directory in THIS folder, never in hidden system locations.
+
+Delete this file to make an installation use the per-user data
+location instead (Windows: %LOCALAPPDATA%\SHEYTAN Music Visualizer;
+Linux: $XDG_DATA_HOME/SHEYTAN Music Visualizer).

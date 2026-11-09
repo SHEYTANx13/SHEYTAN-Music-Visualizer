@@ -1,0 +1,34 @@
+SHEYTAN Music Visualizer — application data layout
+===================================================
+
+This package keeps all mutable application data in ONE place. On first
+launch the application creates (and write-probes) these directories:
+
+  data/
+    config/          application settings (window-state.json, ...)
+    logs/            runtime log: app.log (the file to attach to bug
+      archive/         reports) + app.log.1 rotated generation
+    cache/           decodable/analysis cache, safe to delete
+    projects/        default location for .sheytan.json projects
+    exports/         default location for rendered MP4 output
+    temp/            transient working files
+    crashes/         crash/panic diagnostics with stack traces
+
+The runtime log is a plain readable text file with UTC timestamps and
+severity. In the desktop app: Help / Diagnostics > "Open Logs Folder"
+or "Copy Log Path" shows the exact resolved location.
+
+Mode rules
+----------
+- Portable packages ship the portable.mode marker beside the
+  executable: everything stays in this folder's data/ directory.
+- Installed builds resolve the same tree under the writable per-user
+  location (Windows: %LOCALAPPDATA%\SHEYTAN Music Visualizer — never
+  the roaming profile; Linux: $XDG_DATA_HOME or ~/.local/share).
+- If this folder is read-only (e.g. read-only media), the application
+  falls back to the per-user location and states the exact reason in
+  the log and in Help / Diagnostics. It never writes next to a
+  protected executable.
+
+Nothing here is a pre-existing "log": app.log appears only after a
+real application run. Upgrades never erase this directory.

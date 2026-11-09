@@ -13,6 +13,7 @@ package fyneapp
 import (
 	"fmt"
 	"image/color"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -27,9 +28,12 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fullscreen"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio"
@@ -38,20 +42,59 @@ import (
 
 // Run starts the full studio application (replaces the Phase 1
 // placeholder). It blocks until the window is closed.
+//
+// Runtime-logging contract: the data layout is resolved and the
+// runtime log opened BEFORE any subsystem or window construction, and
+// a broken log file never aborts the launch (stderr fallback).
 func Run() error {
+	lg, lay, logErr := initRuntime()
+	defer lg.Close()
+	log := lg.Logger()
+	if logErr != nil {
+		// Already logged to the stderr fallback by initRuntime/logging.
+		// The startup failure path below remains fully visible.
+		log.Warn("runtime file log unavailable; using stderr fallback", "err", logErr.Error())
+	} else {
+		log.Info("runtime log opened", "path", lg.Path())
+	}
+
 	a := app.NewWithID(brand.AppID)
 	w := a.NewWindow(brand.WindowTitle())
 	w.SetPadded(false)
 
 	svc, err := studio.New()
 	if err != nil {
+		log.Error("studio service initialization failed", "err", err.Error())
 		return err
 	}
 	u := newStudioUI(w, svc)
+	u.app = a
+	u.log = log
+	u.lay = lay
+	u.logFile = lg
+	u.fs = fullscreen.New(fsWindow{w: w},
+		fullscreen.NewFileStore(windowStateStorePath(lay)), log)
+
 	w.SetContent(u.build())
 	installTransportKeys(w, u)
 	w.Resize(fyne.NewSize(1440, 860))
+
+	// Fullscreen restore happens AFTER the window is shown and the
+	// event loop is running (the correct Fyne moment — never before
+	// the window is ready, never via a guessed monitor resize).
+	a.Lifecycle().SetOnStarted(func() {
+		u.fs.ApplyPersistedAtStartup("launch-restore")
+	})
+
+	log.Info("window shown",
+		"renderer", rendererSummary(u.rendererInfo),
+		"fullscreen_desired", u.fs.Desired(),
+		"fullscreen_observed", u.fs.Observed())
 	w.ShowAndRun()
+
+	// Graceful shutdown: record, then tear down in dependency order.
+	u.fs.SyncObserved("shutdown")
+	log.Info("shutdown", "clean", true, "fullscreen_observed", u.fs.Observed())
 	u.close()
 	svc.Close()
 	return nil
@@ -60,8 +103,11 @@ func Run() error {
 // installTransportKeys wires the keyboard transport shortcuts
 // (roadmap Phase 2 #1: keyboard navigation beyond tab order):
 //
-//	Space   play/pause toggle
+//	Space        play/pause toggle
 //	Left/Right   seek 5 s backward/forward (clamped to the track)
+//	F11          fullscreen toggle (single controller, persisted intent)
+//	Escape       exit fullscreen (only while fullscreen is observed;
+//	             dialogs consume Escape first while one is open)
 //
 // The shortcuts dispatch through the same service actions as the
 // transport buttons — no duplicate logic, no direct widget writes.
@@ -74,6 +120,14 @@ func installTransportKeys(w fyne.Window, u *studioUI) {
 			u.seekBy(-5 * time.Second)
 		case fyne.KeyRight:
 			u.seekBy(5 * time.Second)
+		case fyne.KeyF11:
+			u.fs.Toggle("f11")
+		case fyne.KeyEscape:
+			// Explicit user exit: the controller clears the persisted
+			// intent so no later reconcile re-enters fullscreen.
+			if u.fs.Observed() {
+				u.fs.Exit("escape")
+			}
 		}
 	})
 }
@@ -99,6 +153,13 @@ func (u *studioUI) seekBy(delta time.Duration) {
 type studioUI struct {
 	win fyne.Window
 	svc *studio.Studio
+
+	// runtime diagnostics state (Phase: runtime logging users can attach)
+	app     fyne.App
+	log     *slog.Logger
+	lay     apppaths.Layout
+	logFile *logging.Log
+	fs      *fullscreen.Controller
 
 	// top bar
 	trackLabel  *widget.Label
@@ -183,11 +244,12 @@ func (u *studioUI) build() fyne.CanvasObject {
 	btnOpen := widget.NewButton("Open Project…", u.onOpenProject)
 	btnSave := widget.NewButton("Save Project", u.onSaveProject)
 	btnExport := widget.NewButton("Export MP4…", u.onExport)
+	btnHelp := widget.NewButton("Help / Diagnostics", u.onHelp)
 	btnAbout := widget.NewButton("About", u.onAbout)
 
 	top := container.NewBorder(nil, nil,
 		container.NewHBox(brandMark, widget.NewLabel(" "), u.trackLabel),
-		container.NewHBox(btnImport, btnOpen, btnSave, btnExport, btnAbout),
+		container.NewHBox(btnImport, btnOpen, btnSave, btnExport, btnHelp, btnAbout),
 		u.statusLabel,
 	)
 
@@ -466,6 +528,7 @@ func (u *studioUI) onEvent(ev studio.Event) {
 		}
 	case studio.EventExportDone:
 		u.status("Export complete: " + ev.Message)
+		u.logInfo("export finished", "result", "success", "detail", ev.Message)
 		if u.exportDialog != nil {
 			u.exportDialog.Hide()
 			u.exportDialog = nil
@@ -473,6 +536,7 @@ func (u *studioUI) onEvent(ev studio.Event) {
 		u.dialogInfo("Export complete", ev.Message)
 	case studio.EventExportFailed:
 		u.status("Export failed: " + ev.Message)
+		u.logErr("export failed", "detail", ev.Message)
 		if u.exportDialog != nil {
 			u.exportDialog.Hide()
 			u.exportDialog = nil

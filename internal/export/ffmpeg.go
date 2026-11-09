@@ -19,6 +19,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fflocate"
 )
 
 // Resolution presets.
@@ -43,6 +46,7 @@ var QualityPresets = []string{"high", "balanced", "compat"}
 type Environment struct {
 	FFmpegPath       string          `json:"ffmpegPath"`
 	FFprobePath      string          `json:"ffprobePath"`
+	Source           string          `json:"source,omitempty"` // fflocate rule: override / app-local / path
 	Version          string          `json:"version"`
 	Encoders         map[string]bool `json:"encoders"`                   // encoder name -> present
 	HardwareEncoders []string        `json:"hardwareEncoders,omitempty"` // proof-encoded OK
@@ -54,8 +58,13 @@ var (
 	cachedEnv *Environment
 )
 
-// DetectEnv probes the local ffmpeg/ffprobe. Results are cached per
-// process; force=true re-probes (after the user changes the path).
+// DetectEnv probes the local ffmpeg/ffprobe through the single
+// fflocate resolution order: explicit user configuration (including
+// the SHEYTAN_FFMPEG directory), the app-local tools directory
+// (<app root>/tools/ffmpeg/bin), then the system PATH. Results are
+// cached per process; force=true re-probes (after the user changes
+// the path). The error when nothing is found names every searched
+// location and the actionable next step.
 func DetectEnv(force bool) (*Environment, error) {
 	envMu.Lock()
 	defer envMu.Unlock()
@@ -63,31 +72,29 @@ func DetectEnv(force bool) (*Environment, error) {
 		return cachedEnv, nil
 	}
 	env := &Environment{Encoders: map[string]bool{}}
-	ff, err := exec.LookPath("ffmpeg")
-	if err != nil {
+	lay := apppaths.Resolve(apppaths.OSEnv())
+	loc, lerr := fflocate.Locate(fflocate.OPOpts(lay.ToolsFFmpegBin()))
+	if lerr != nil {
 		cachedEnv = env
-		return env, fmt.Errorf("ffmpeg not found on PATH; install FFmpeg (a user-provided local build) or set its location in Settings")
+		return env, fmt.Errorf("ffmpeg/ffprobe not available: %w (export needs both; place them in %s or on PATH)",
+			lerr, toolsHint(lay))
 	}
-	env.FFmpegPath = ff
-	fp, err := exec.LookPath("ffprobe")
-	if err != nil {
-		cachedEnv = env
-		return env, fmt.Errorf("ffprobe not found on PATH (required for export validation)")
-	}
-	env.FFprobePath = fp
+	env.FFmpegPath = loc.FFmpeg
+	env.FFprobePath = loc.FFprobe
+	env.Source = loc.Source
 
 	// version
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, ff, "-version").Output()
+	out, err := exec.CommandContext(ctx, env.FFmpegPath, "-version").Output()
 	if err != nil {
 		cachedEnv = env
-		return env, fmt.Errorf("ffmpeg -version failed: %w", err)
+		return env, fmt.Errorf("ffmpeg -version failed for %q: %w", loc.Source, err)
 	}
 	env.Version = firstLine(string(out))
 
 	// encoders list
-	encOut, err := exec.CommandContext(ctx, ff, "-hide_banner", "-encoders").Output()
+	encOut, err := exec.CommandContext(ctx, env.FFmpegPath, "-hide_banner", "-encoders").Output()
 	if err == nil {
 		for _, name := range []string{"libx264", "h264_nvenc", "h264_qsv", "h264_amf", "aac", "libfdk_aac"} {
 			if encoderPresent(string(encOut), name) {
@@ -101,12 +108,18 @@ func DetectEnv(force bool) (*Environment, error) {
 	return env, nil
 }
 
-// SetEnvPathOverride stores a user-configured directory containing
-// ffmpeg/ffprobe (applied on next DetectEnv(force=true)).
-var pathOverride string
+// toolsHint renders the app-local tools directory for user messages.
+func toolsHint(lay apppaths.Layout) string {
+	if d := lay.ToolsFFmpegBin(); d != "" {
+		return d
+	}
+	return "<app root>/tools/ffmpeg/bin"
+}
 
-// SetPathOverride sets a user-provided directory or executable prefix.
-func SetPathOverride(dir string) { pathOverride = dir }
+// SetPathOverride stores a user-configured directory containing
+// ffmpeg/ffprobe (applied on next DetectEnv(force=true)). It forwards
+// to the single fflocate authority.
+func SetPathOverride(dir string) { fflocate.SetDirOverride(dir) }
 
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {

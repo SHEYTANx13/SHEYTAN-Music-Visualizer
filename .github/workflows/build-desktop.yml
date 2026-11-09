@@ -277,11 +277,17 @@ jobs:
           }
 
       - name: Upload Windows x64 build artifact (CI artifact, not a release)
+        # archive: false delivers the ALREADY-COMPRESSED portable ZIP
+        # directly — the downloaded artifact IS the portable ZIP, not an
+        # artifact ZIP wrapping another ZIP. v7 non-archive mode accepts
+        # exactly one file path and names the artifact after its
+        # basename; the name input is ignored in this mode.
         if: success()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-x64-portable-build
           path: dist/SHEYTAN-Music-Visualizer-windows-x64-portable.zip
+          archive: false
           if-no-files-found: error
           overwrite: true
 
@@ -424,14 +430,19 @@ jobs:
         if: success()
         run: |
           test -s bin/sheytan-music-visualizer || { echo "ERROR: linux executable missing or empty"; exit 1; }
-          ls -l bin/sheytan-music-visualizer
+          test -s dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz || { echo "ERROR: linux portable tarball missing or empty"; exit 1; }
+          ls -l bin/sheytan-music-visualizer dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz
 
       - name: Upload Linux x64 build artifact (CI artifact, not a release)
+        # The portable tar.gz preserves the executable bit (a plain
+        # binary artifact upload would not) and archive: false delivers
+        # the prebuilt archive directly — no artifact ZIP wrapper.
         if: success()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: linux-x64-portable-build
-          path: bin/sheytan-music-visualizer
+          path: dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz
+          archive: false
           if-no-files-found: error
           overwrite: true
 
@@ -723,16 +734,55 @@ jobs:
           test "$(find ci-out -maxdepth 1 -type f | wc -l)" -eq 1 || { echo "ERROR: ci-out must contain exactly one file (log.txt)"; exit 1; }
           size=$(stat -c%s ci-out/log.txt)
           echo "log.txt validated: $size bytes"
+          # Direct-delivery contract: the artifact must be PLAIN TEXT —
+          # never a ZIP. A ZIP signature (PK\x03\x04) here would mean
+          # the consolidated report got wrapped and the direct
+          # log.txt download contract is broken.
+          sig=$(head -c 2 ci-out/log.txt)
+          if [ "$sig" = $'PK\x03\x04' ] || [ "$sig" = "PK" ]; then
+            echo "ERROR: ci-out/log.txt carries a ZIP signature — plain-text contract violated"
+            exit 1
+          fi
+          head -3 ci-out/log.txt
 
-      - name: Upload the single consolidated diagnostics artifact
+      - name: Upload the single consolidated diagnostics artifact (plain text, no outer ZIP)
         id: upload_report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: log.txt
           path: ci-out/log.txt
+          # archive: false uploads the single file DIRECTLY: the
+          # downloaded artifact is plain log.txt (UTF-8 text), not a
+          # ZIP containing log.txt. Exactly one file path is supplied;
+          # in this mode the artifact is named after the file's
+          # basename (log.txt) and the name input is ignored.
+          archive: false
           if-no-files-found: error
           overwrite: true
+
+      - name: Record final artifact identity (upload outcome evidence)
+        if: always()
+        env:
+          ARTIFACT_ID: ${{ steps.upload_report.outputs.artifact-id }}
+          ARTIFACT_URL: ${{ steps.upload_report.outputs.artifact-url }}
+        run: |
+          set -Eeuo pipefail
+          {
+            echo "final consolidated artifact upload outcome:"
+            echo "  artifact_id=${ARTIFACT_ID:-not-reported}"
+            echo "  artifact_url=${ARTIFACT_URL:-not-reported}"
+            echo "  delivery_mode=direct (archive: false; downloaded artifact is plain log.txt)"
+            date -u '+  uploaded_utc=%Y-%m-%dT%H:%M:%SZ'
+          } | tee ci-logs/final-artifact.txt
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            {
+              echo "### Consolidated report"
+              echo "- Artifact: log.txt (plain text, non-archived direct upload)"
+              echo "- artifact id: ${ARTIFACT_ID:-not-reported}"
+              echo "- [download URL](${ARTIFACT_URL:-not-reported})"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Delete temporary log-part artifacts (single-artifact guarantee)
         id: cleanup_artifacts

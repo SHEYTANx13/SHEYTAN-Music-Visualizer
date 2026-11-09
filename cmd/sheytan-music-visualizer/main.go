@@ -16,11 +16,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"regexp"
+	"runtime/debug"
 	"strings"
 
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
@@ -43,12 +46,16 @@ func run(args []string, out, errW io.Writer) int {
 	fs.SetOutput(errW)
 	showVersion := fs.Bool("version", false, "print product and build metadata, then exit")
 	selfCheckFlag := fs.Bool("self-check", false, "run foundation self-checks, then exit without opening a window")
+	debugFlag := fs.Bool("debug", false, "write debug-level records to the runtime log (default log volume unchanged)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(errW, "%s: unexpected arguments: %s\n", brand.ProductName, strings.Join(fs.Args(), " "))
 		return 2
+	}
+	if *debugFlag {
+		os.Setenv("SHEYTAN_DEBUG", "1") // consumed by the UI runtime bootstrap
 	}
 	switch {
 	case *showVersion:
@@ -60,12 +67,30 @@ func run(args []string, out, errW io.Writer) int {
 	case *selfCheckFlag:
 		return selfCheck(out, errW)
 	default:
-		if err := fyneapp.Run(); err != nil {
-			fmt.Fprintf(errW, "%s: startup failed: %v\n", brand.ProductName, err)
-			return 1
+		err := runGUI()
+		if err == nil {
+			return 0
 		}
-		return 0
+		// Recoverable-panic reporting at the main boundary: log the
+		// stack where possible and return a real failure. A fatal
+		// runtime error (out of memory, arbitrary termination) is NOT
+		// recoverable and is never claimed to be.
+		fmt.Fprintf(errW, "%s: startup failed: %v\n", brand.ProductName, err)
+		return 1
 	}
+}
+
+// runGUI launches the Fyne studio with a recoverable-panic boundary.
+func runGUI() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("unexpected panic in GUI runtime: %v", r)
+			// The runtime log may already be open inside the UI package;
+			// stderr always carries the stack for a failed launch.
+			fmt.Fprintf(os.Stderr, "%s: PANIC (recoverable): %v\n%s", brand.ProductName, r, debug.Stack())
+		}
+	}()
+	return fyneapp.Run()
 }
 
 type check struct {
@@ -77,6 +102,7 @@ func selfCheck(out, errW io.Writer) int {
 	checks := []check{
 		{"buildinfo", checkBuildInfo},
 		{"brand-identity", checkBrandIdentity},
+		{"data-layout", checkDataLayout},
 		{"log-directory", checkLogDirectory},
 		{"decoder-registry", checkDecoderRegistry},
 		{"dsp-fixture", checkDSPFixture},
@@ -129,21 +155,49 @@ func checkBrandIdentity(out io.Writer) error {
 	return nil
 }
 
+// checkLogDirectory verifies the resolved data layout end to end:
+// apppaths resolution (mode + reason), directory bootstrap, write
+// probe, and a real log open/write. It reports the exact resolved log
+// path and data mode for CI capture and user diagnostics.
 func checkLogDirectory(out io.Writer) error {
-	dir, err := logging.Dir()
-	if err != nil {
-		return fmt.Errorf("resolve log directory: %w", err)
+	lay := apppaths.Resolve(apppaths.OSEnv())
+	fmt.Fprintf(out, "  data-mode=%s root=%s\n", lay.Mode, lay.DataRoot)
+	if lay.Reason != "" {
+		fmt.Fprintf(out, "  data-reason=%s\n", lay.Reason)
 	}
-	if err := logging.VerifyWritable(dir); err != nil {
+	if err := apppaths.Bootstrap(lay); err != nil {
+		return fmt.Errorf("data layout bootstrap: %w", err)
+	}
+	if err := logging.VerifyWritable(lay.Logs); err != nil {
 		return fmt.Errorf("log directory not writable: %w", err)
 	}
-	l, err := logging.Open(dir, logging.Options{})
+	l, err := logging.Open(lay.Logs, logging.Options{})
 	if err != nil {
 		return fmt.Errorf("open application log: %w", err)
 	}
 	defer l.Close()
 	l.Logger().Info("self-check executed", "component", "cmd/sheytan-music-visualizer")
 	fmt.Fprintf(out, "  log=%s\n", l.Path())
+	return nil
+}
+
+// checkDataLayout verifies every contract directory of the resolved
+// layout exists after bootstrap (config/logs/cache/projects/exports/
+// temp/crashes) — the package/layout gate for portable and installed
+// modes.
+func checkDataLayout(out io.Writer) error {
+	lay := apppaths.Resolve(apppaths.OSEnv())
+	if err := apppaths.Bootstrap(lay); err != nil {
+		return fmt.Errorf("bootstrap: %w", err)
+	}
+	for _, d := range []string{lay.Config, lay.Logs, lay.LogsArch, lay.Cache,
+		lay.Projects, lay.Exports, lay.Temp, lay.Crashes} {
+		fi, err := os.Stat(d)
+		if err != nil || !fi.IsDir() {
+			return fmt.Errorf("contract directory missing: %q", d)
+		}
+	}
+	fmt.Fprintf(out, "  contract dirs OK under %s (mode=%s)\n", lay.DataRoot, lay.Mode)
 	return nil
 }
 

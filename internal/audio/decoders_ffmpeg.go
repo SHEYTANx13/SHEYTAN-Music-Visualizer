@@ -30,12 +30,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fflocate"
 )
 
 // ffmpegExecTimeout bounds the short ffprobe/version child processes;
@@ -66,24 +68,17 @@ func FFmpegAdapter() FFmpegAdapterStatus { return ffmpegStatus }
 // Tests inject fixed paths through RegisterFFmpegOptional's locator.
 type ffmpegBinLocater func() (ffmpeg, ffprobe string, err error)
 
-// defaultFFmpegLocater resolves the binaries from the explicit
-// SHEYTAN_FFMPEG directory override or from PATH.
+// defaultFFmpegLocater resolves the binaries through the single
+// fflocate authority: the explicit SHEYTAN_FFMPEG directory override
+// (user configuration), the app-local tools directory
+// (<app root>/tools/ffmpeg/bin), then PATH.
 func defaultFFmpegLocater() (string, string, error) {
-	ff := ""
-	fp := ""
-	if dir := strings.TrimSpace(os.Getenv("SHEYTAN_FFMPEG")); dir != "" {
-		ff = filepath.Join(dir, "ffmpeg")
-		fp = filepath.Join(dir, "ffprobe")
-	} else {
-		var err error
-		if ff, err = exec.LookPath("ffmpeg"); err != nil {
-			return "", "", fmt.Errorf("audio: ffmpeg not found on PATH (the optional M4A/AAC adapter stays unregistered)")
-		}
-		if fp, err = exec.LookPath("ffprobe"); err != nil {
-			return "", "", fmt.Errorf("audio: ffprobe not found on PATH (the optional M4A/AAC adapter stays unregistered)")
-		}
+	loc, err := fflocate.Locate(fflocate.OPOpts(
+		apppaths.Resolve(apppaths.OSEnv()).ToolsFFmpegBin()))
+	if err != nil {
+		return "", "", fmt.Errorf("audio: %w (the optional M4A/AAC adapter stays unregistered)", err)
 	}
-	return ff, fp, nil
+	return loc.FFmpeg, loc.FFprobe, nil
 }
 
 // RegisterFFmpegOptional registers the M4A/AAC decoder family when a

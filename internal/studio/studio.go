@@ -15,11 +15,11 @@ import (
 	"fmt"
 	"image"
 	"math"
-	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
@@ -120,23 +120,17 @@ func New() (*Studio, error) {
 	return s, nil
 }
 
-// DataDir resolves the app-owned data directory (override for tests).
+// DataDir resolves the app-owned cache directory through the SINGLE
+// apppaths authority (portable data/, installed per-user location,
+// visible fallback). The explicit SHEYTAN_DATA_DIR override remains
+// honored (it selects the whole data root, exactly as the resolver
+// defines it) so tests and CI keep working.
 func DataDir() (string, error) {
-	if v := os.Getenv("SHEYTAN_DATA_DIR"); v != "" {
-		if err := os.MkdirAll(v, 0o755); err != nil {
-			return "", err
-		}
-		return v, nil
-	}
-	base, err := os.UserConfigDir()
-	if err != nil {
+	lay := apppaths.Resolve(apppaths.OSEnv())
+	if err := apppaths.Bootstrap(lay); err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "SHEYTAN Music Visualizer", "data")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return dir, nil
+	return lay.Cache, nil
 }
 
 // Subscribe registers the event sink (UI bridge).
