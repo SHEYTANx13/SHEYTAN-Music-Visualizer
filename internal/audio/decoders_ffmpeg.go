@@ -38,6 +38,7 @@ import (
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fflocate"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/procattr"
 )
 
 // ffmpegExecTimeout bounds the short ffprobe/version child processes;
@@ -126,7 +127,9 @@ func registerFFmpegOptionalWith(locater ffmpegBinLocater) FFmpegAdapterStatus {
 func probeFFmpegVersion(ff string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), ffmpegExecTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, ff, "-version").Output()
+	vcmd := exec.CommandContext(ctx, ff, "-version")
+	procattr.Configure(vcmd) // never a visible child console on Windows
+	out, err := vcmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -209,12 +212,14 @@ func (d *ffmpegDecoder) Probe() (Metadata, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), ffmpegExecTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, d.ffprobe,
+	pcmd := exec.CommandContext(ctx, d.ffprobe,
 		"-v", "error",
 		"-print_format", "json",
 		"-show_streams", "-show_format",
 		"--", d.path,
-	).Output()
+	)
+	procattr.Configure(pcmd) // never a visible child console on Windows
+	out, err := pcmd.Output()
 	if err != nil {
 		return d.md, fmt.Errorf("audio: ffprobe failed for %s: %w", filepath.Base(d.path), err)
 	}
@@ -294,6 +299,7 @@ func (d *ffmpegDecoder) PCMReader() (io.Reader, error) {
 		"-",
 	}
 	cmd := exec.CommandContext(runCtx, d.ffmpeg, args...)
+	procattr.Configure(cmd) // never a visible child console on Windows
 	pipeR, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()

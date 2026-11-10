@@ -219,16 +219,27 @@ if [ "$MODE" = "desktop" ]; then
   fi
 
   if [ "$EXE_OK" -eq 1 ]; then
-    CI_TOOL_CONTEXT="gate:stage-portable" ci_capture "$JOB" stage-portable bash -c '
-      set -euo pipefail
-      test -s "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable missing"; exit 1; }
-      test -x "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable not executable"; exit 1; }
-      for f in license.md readme.md portable.mode data/DATA-FOLDERS.txt tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md; do
-        test -s "SHEYTAN-Music-Visualizer-linux-x64/$f" || { echo "ERROR: staged file missing/empty: $f"; exit 1; }
-      done
-      echo "staged portable tree:"
-      find "SHEYTAN-Music-Visualizer-linux-x64" -type f -printf "STAGED: %P (%s bytes)\n" | sort
-    ' || fail_gate stage-portable
+    # The gate body documents paths RELATIVE TO THE STAGING ROOT
+    # ($STAGE_ROOT), so the gate runs from there. Local lab run
+    # discovery: executed from $REPO_ROOT these relative paths resolve
+    # to nothing and the gate fails spuriously — the failed run never
+    # reached this gate (build failure), so the defect stayed latent
+    # until a local end-to-end execution exercised it. The subshell
+    # keeps the caller cwd untouched; ci_capture inherits the absolute
+    # CI_LOG_FILE, and the gate record shows the true WORKDIR.
+    (
+      cd "$STAGE_ROOT" || { echo "ERROR: staging root missing: $STAGE_ROOT"; exit 1; }
+      CI_TOOL_CONTEXT="gate:stage-portable" ci_capture "$JOB" stage-portable bash -c '
+        set -euo pipefail
+        test -s "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable missing"; exit 1; }
+        test -x "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable not executable"; exit 1; }
+        for f in license.md readme.md portable.mode data/DATA-FOLDERS.txt tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md; do
+          test -s "SHEYTAN-Music-Visualizer-linux-x64/$f" || { echo "ERROR: staged file missing/empty: $f"; exit 1; }
+        done
+        echo "staged portable tree:"
+        find "SHEYTAN-Music-Visualizer-linux-x64" -type f -printf "STAGED: %P (%s bytes)\n" | sort
+      '
+    ) || fail_gate stage-portable
 
     # BYTE-FOR-BYTE license identity gate (pre-archive): cmp on raw
     # bytes between the canonical tracked file and the staged copy.
@@ -301,7 +312,16 @@ if [ "$MODE" = "desktop" ]; then
   # window the gate fails even when the process survives.
   # Blocked honestly when the display/inspection tooling is missing —
   # never passed without tooling.
-  if command -v Xvfb >/dev/null 2>&1 && command -v xdpyinfo >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then
+  #
+  # PREREQUISITE GUARD (run 42598929646 defect E repair): the smoke
+  # launches ./bin/sheytan-music-visualizer. When the executable build
+  # failed, the gate is recorded BLOCKED with the exact reason — it
+  # must NEVER attempt to execute a nonexistent binary (that produced
+  # the misleading "No such file or directory" launch failure in the
+  # failed run). A BLOCKED prerequisite is not a pass and not a
+  # software failure.
+  if [ "$EXE_OK" -eq 1 ]; then
+    if command -v Xvfb >/dev/null 2>&1 && command -v xdpyinfo >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then
     CI_TOOL_CONTEXT="gate:gui-smoke (virtual display Xvfb; IsViewable proof + graceful-close proof)" ci_capture "$JOB" gui-smoke bash -c '
       set -u
       SMOKE_DIR="ci-logs/gui-smoke"
@@ -521,8 +541,11 @@ if [ "$MODE" = "desktop" ]; then
       fi
       echo "GUI smoke PASS: window viewable (IsViewable at readiness, after observation and before shutdown), geometry sane, UI log clean, closed gracefully on the virtual display"
     ' || fail_gate gui-smoke
+    else
+      blocked_gate gui-smoke "Xvfb/xdpyinfo/xwininfo unavailable on this host (window viewability cannot be proven without tooling)"
+    fi
   else
-    blocked_gate gui-smoke "Xvfb/xdpyinfo/xwininfo unavailable on this host (window viewability cannot be proven without tooling)"
+    blocked_gate gui-smoke "executable build failed — GUI smoke refuses to launch a nonexistent binary (run 42598929646 defect E)"
   fi
 
   # govulncheck when available

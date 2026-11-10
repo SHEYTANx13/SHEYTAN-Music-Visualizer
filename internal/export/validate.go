@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/procattr"
 )
 
 // ValidationExpect describes what the output must satisfy.
@@ -45,10 +47,12 @@ const durationTolerance = 1.0/24 + 0.5
 func Validate(ffprobePath string, path string, expect ValidationExpect) (*ValidationResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, ffprobePath,
+	pcmd := exec.CommandContext(ctx, ffprobePath,
 		"-v", "error", "-print_format", "json",
 		"-show_format", "-show_streams", path,
-	).Output()
+	)
+	procattr.Configure(pcmd) // never a visible child console on Windows
+	out, err := pcmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("ffprobe: %w", err)
 	}

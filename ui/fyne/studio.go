@@ -72,6 +72,21 @@ func Run() error {
 	u.log = log
 	u.lay = lay
 	u.logFile = lg
+	// Persisted renderer preference (revalidated EVERY launch —
+	// hardware and drivers change; an unresolvable manual GPU choice
+	// falls back to CPU with the exact reason recorded by the selector).
+	u.prefStore = render.OpenPreferenceStore(prefStorePath(lay))
+	u.rendererReq = make(chan render.Preference, 1)
+	if stored, found, perr := u.prefStore.Load(); perr != nil {
+		log.Warn("stored renderer preference unreadable; auto remains active",
+			"err", perr.Error(), "path", prefStorePath(lay))
+	} else if found && stored != render.PrefAuto {
+		u.renderer, u.rendererInfo = render.SelectRendererExplicit(stored)
+		log.Info("persisted renderer preference applied",
+			"preference", string(stored),
+			"backend", string(u.rendererInfo.Backend),
+			"detail", u.rendererInfo.Detail)
+	}
 	u.fs = fullscreen.New(fsWindow{w: w},
 		fullscreen.NewFileStore(windowStateStorePath(lay)), log)
 
@@ -214,6 +229,15 @@ type studioUI struct {
 	renderer render.Renderer
 	renderMu sync.Mutex
 	closing  bool
+
+	// System Integration state (run 42598929646): the persisted
+	// renderer preference store, the in-main-window dialog, and the
+	// request channel through which ALL renderer lifecycle changes are
+	// performed by the render loop goroutine (no mid-frame swaps).
+	prefStore     *render.PreferenceStore
+	sysDialog     dialog.Dialog
+	rendererReq   chan render.Preference
+	rendererReqMu sync.Mutex
 }
 
 func newStudioUI(w fyne.Window, svc *studio.Studio) *studioUI {
@@ -244,12 +268,13 @@ func (u *studioUI) build() fyne.CanvasObject {
 	btnOpen := widget.NewButton("Open Project…", u.onOpenProject)
 	btnSave := widget.NewButton("Save Project", u.onSaveProject)
 	btnExport := widget.NewButton("Export MP4…", u.onExport)
+	btnSystem := widget.NewButton("System Integration", u.onSystemIntegration)
 	btnHelp := widget.NewButton("Help / Diagnostics", u.onHelp)
 	btnAbout := widget.NewButton("About", u.onAbout)
 
 	top := container.NewBorder(nil, nil,
 		container.NewHBox(brandMark, widget.NewLabel(" "), u.trackLabel),
-		container.NewHBox(btnImport, btnOpen, btnSave, btnExport, btnHelp, btnAbout),
+		container.NewHBox(btnImport, btnOpen, btnSave, btnExport, btnSystem, btnHelp, btnAbout),
 		u.statusLabel,
 	)
 

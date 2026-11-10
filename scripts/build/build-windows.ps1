@@ -300,6 +300,13 @@ $rc = Capture-Step -Job $job -Step "build-executable" -ToolContext "gate:build-e
     $bi = "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
     $args_ = @("build", "-trimpath") + $goTags
     $ld = @()
+    # GUI SUBSYSTEM (run 42598929646 defect H): the user-facing Windows
+    # desktop executable must be linked with -H=windowsgui so launching
+    # it never attaches a command window. The token is emitted FIRST
+    # and the -X metadata tokens below stay intact (both live in the
+    # same -ldflags value); validate-pe verifies the resulting PE
+    # Optional Header subsystem is IMAGE_SUBSYSTEM_WINDOWS_GUI / 2.
+    $ld += "-H=windowsgui"
     # EVERY element carries its own "-X " flag token inside the single
     # -ldflags value. Without the -X prefix the Go tool silently ignores
     # the tokens (exit 0, defaults kept) — the run 42231355353 defect
@@ -333,7 +340,18 @@ if ($exeOk) {
     $rc = Capture-Step -Job $job -Step "run-version" -ToolContext "runtime:--version" -Command { & "bin\sheytan-music-visualizer.exe" --version }
     if ($rc -ne 0) { Fail-Gate "run-version" }
 
-    $rc = Capture-Step -Job $job -Step "run-self-check" -ToolContext "runtime:--self-check" -Command { & "bin\sheytan-music-visualizer.exe" --self-check }
+    # GUI-subsystem evidence contract (run 42598929646): a
+    # -H=windowsgui process may not inherit captured stdout/stderr on
+    # every runner, so the structured self-check result is ALSO written
+    # to a file that CI reads (main.go --self-check-out). The console
+    # capture stays in place; the file is the belt-and-braces evidence.
+    $rc = Capture-Step -Job $job -Step "run-self-check" -ToolContext "runtime:--self-check" -Command {
+        & "bin\sheytan-music-visualizer.exe" --self-check --self-check-out "ci-logs\windows-self-check.txt"
+        if (Test-Path "ci-logs\windows-self-check.txt") {
+            Write-Output "self-check result file: ci-logs/windows-self-check.txt"
+            Get-Content "ci-logs\windows-self-check.txt"
+        }
+    }
     if ($rc -ne 0) { Fail-Gate "run-self-check" }
 
     # ENFORCED metadata acceptance gate (run 42231355353 repair): exit
@@ -438,10 +456,34 @@ if ($exeOk) {
     }
     if ($rc -ne 0) { Fail-Gate "verify-package-license" }
 
+    # PE SUBSYSTEM GATE (run 42598929646 defect H / gate V12): verify
+    # from the BUILT ARTIFACT that the Optional Header subsystem is
+    # Windows GUI (IMAGE_SUBSYSTEM_WINDOWS_GUI = 2). The old gate only
+    # checked the MZ signature, which cannot detect a console-subsystem
+    # binary. Parsing is pure byte math on the documented PE layout:
+    # e_lfanew @0x3C -> "PE\0\0" -> COFF header (20 bytes) -> Optional
+    # Header; Subsystem is at OptionalHeader+68 for both PE32 and PE32+.
     $rc = Capture-Step -Job $job -Step "validate-pe" -ToolContext "gate:validate-pe" -Command {
-        $bytes = [System.IO.File]::ReadAllBytes("bin\sheytan-music-visualizer.exe")[0..1]
+        $exe = "bin\sheytan-music-visualizer.exe"
+        $bytes = [System.IO.File]::ReadAllBytes($exe)
+        if ($bytes.Length -lt 0x100) { Write-Output "ERROR: file too small for a PE ($($bytes.Length) bytes)"; exit 1 }
         if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) { Write-Output "ERROR: not a PE executable (missing MZ header)"; exit 1 }
         Write-Output "PE MZ header confirmed"
+        $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+        if ($peOff -le 0 -or ($peOff + 24 + 68) -gt $bytes.Length) { Write-Output "ERROR: implausible e_lfanew $peOff"; exit 1 }
+        if ($bytes[$peOff] -ne 0x50 -or $bytes[$peOff+1] -ne 0x45 -or $bytes[$peOff+2] -ne 0 -or $bytes[$peOff+3] -ne 0) {
+            Write-Output "ERROR: PE signature missing at e_lfanew"; exit 1
+        }
+        $optOff = $peOff + 4 + 20
+        $magic = [BitConverter]::ToUInt16($bytes, $optOff)
+        if ($magic -ne 0x20B -and $magic -ne 0x10B) { Write-Output "ERROR: unexpected Optional Header magic 0x{0:X4}" -f $magic; exit 1 }
+        $subsystem = [BitConverter]::ToUInt16($bytes, $optOff + 68)
+        Write-Output ("PE optional-header magic: 0x{0:X4}; Subsystem: {1} (2 = IMAGE_SUBSYSTEM_WINDOWS_GUI, 3 = console)" -f $magic, $subsystem)
+        if ($subsystem -ne 2) {
+            Write-Output "ERROR: the Windows desktop executable is NOT a GUI-subsystem binary (-H=windowsgui missing or overridden)"
+            exit 1
+        }
+        Write-Output "validate-pe PASSED: desktop executable subsystem = Windows GUI (2), verified from the built artifact"
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "validate-pe" }

@@ -7,8 +7,7 @@ package fyneapp
 import (
 	"fmt"
 	"image"
-	"path/filepath"
-	"runtime/debug"
+	"net/url"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -21,6 +20,7 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/sysprofile"
 )
 
 // onPlayPause toggles playback (wired to the transport button).
@@ -142,7 +142,7 @@ func (u *studioUI) showExportDialog(env *export.Environment) {
 	encNames = append(encNames, env.HardwareEncoders...)
 
 	resSel = widget.NewSelect(names, nil)
-	resSel.SetSelectedIndex(1) // 1080p default
+	resSel.SetSelectedIndex(u.memoryAwareDefaultResolution()) // honest available-memory default (still fully manual)
 	fpsSel = widget.NewSelect(fpsNames, nil)
 	fpsSel.SetSelectedIndex(1)
 	qualSel = widget.NewSelect([]string{"high (CRF 18)", "balanced (CRF 21)", "compat (CRF 23)"}, nil)
@@ -238,17 +238,43 @@ func (u *studioUI) startRenderLoop() {
 	go func() {
 		ticker := time.NewTicker(time.Second / 30)
 		defer ticker.Stop()
-		for range ticker.C {
-			u.renderMu.Lock()
-			if u.closing {
+	forRunning:
+		for {
+			// Renderer preference changes are handled by THIS goroutine
+			// between frames, so a renderer can never be swapped or
+			// closed mid-flight. Newest request supersedes (buffered).
+			select {
+			case pref := <-u.rendererReq:
+				r, info := render.SelectRendererExplicit(pref)
+				u.renderMu.Lock()
+				old := u.renderer
+				u.renderer = r
+				u.rendererInfo = info
 				u.renderMu.Unlock()
-				return
+				if old != nil {
+					old.Close() // no frame in flight: this goroutine owns both
+				}
+				u.logInfo("renderer switched",
+					"preference", string(pref),
+					"backend", string(info.Backend),
+					"gpu_state", string(info.GpuState),
+					"adapter", info.Adapter,
+					"device_class", info.DeviceClass,
+					"detail", info.Detail)
+			default:
 			}
+			u.renderMu.Lock()
+			closing := u.closing
+			r := u.renderer
 			u.renderMu.Unlock()
-			if u.win == nil {
+			if closing {
 				return
 			}
-			fr, err := u.svc.PreviewFrame(960, 540, u.renderer)
+			if r == nil || u.win == nil {
+				continue forRunning
+			}
+			<-ticker.C
+			fr, err := u.svc.PreviewFrame(960, 540, r)
 			if err != nil || fr == nil || fr.Image == nil {
 				continue
 			}
@@ -263,9 +289,33 @@ func (u *studioUI) startRenderLoop() {
 				u.preview.Image = cp
 				u.preview.Refresh()
 				u.refreshTransportFrom(clock, info)
+				// Live honest state: the EXECUTING renderer's evidence
+				// (e.g. GpuVerified after the first real frame, or
+				// GpuFallback after device loss) drives the UI labels.
+				u.renderMu.Lock()
+				u.rendererInfo = info
+				u.renderMu.Unlock()
+				u.rendererLB.SetText("renderer: " + rendererSummary(info))
 			})
 		}
 	}()
+}
+
+// memoryAwareDefaultResolution returns the default export resolution
+// index derived from the CURRENTLY AVAILABLE memory (never total
+// memory alone). Unknown availability keeps the shipped 1080p default.
+// The user keeps full manual control — this only preselects. The
+// profile collection runs on this dialog's UI-thread moment and only
+// reads sysfs/registry-class native sources (fast, local).
+func (u *studioUI) memoryAwareDefaultResolution() int {
+	probe := sysprofile.Collect(u.currentRendererInfo())
+	budget := sysprofile.MemoryBudgetFor(probe)
+	for i, res := range export.Resolutions {
+		if res.Height == budget.RecommendedExportHeight {
+			return i
+		}
+	}
+	return 1 // 1080p default index
 }
 
 // refreshTransportFrom updates the transport widgets from a clock
@@ -326,12 +376,7 @@ func (u *studioUI) onHelp() {
 	rootLabel.Wrapping = fyne.TextWrapWord
 
 	openBtn := widget.NewButton("Open Logs Folder", func() {
-		u.logInfo("open-logs-folder requested", "dir", u.lay.Logs)
-		if u.app == nil {
-			u.dialogInfo("Logs folder", u.lay.Logs)
-			return
-		}
-		u.app.OpenURL(storage.NewFileURI(u.lay.Logs))
+		u.openLogsFolder()
 	})
 	copyBtn := widget.NewButton("Copy Log Path", func() {
 		u.setClipboard(u.logFilePath())
@@ -355,6 +400,32 @@ func (u *studioUI) onHelp() {
 	d.Resize(fyne.NewSize(680, 380))
 	d.SetOnClosed(func() { u.reconcileFullscreen("help-dialog-closed") })
 	d.Show()
+}
+
+// openLogsFolder asks the operating system to reveal the runtime log
+// directory. Fyne v2.8.2's App.OpenURL accepts a *net/url.URL — NOT a
+// fyne.URI — so the Fyne file URI is validated by parsing its String()
+// value into a real URL first (url.Parse also percent-escapes spaces
+// and other reserved characters). Every failure path stays honest:
+// the exact error is logged and surfaced in a dialog that always shows
+// the usable absolute path, so the action never fails silently and
+// never spawns a shell or a second window.
+func (u *studioUI) openLogsFolder() {
+	u.logInfo("open-logs-folder requested", "dir", u.lay.Logs)
+	if u.app == nil {
+		u.dialogInfo("Logs folder", u.lay.Logs)
+		return
+	}
+	parsed, err := url.Parse(storage.NewFileURI(u.lay.Logs).String())
+	if err != nil {
+		u.logErr("open-logs-folder: log path is not a valid URL", "error", err.Error())
+		u.dialogInfo("Logs folder", u.lay.Logs+"\n\n(OS open skipped — the location could not be converted to a URL: "+err.Error()+")")
+		return
+	}
+	if oerr := u.app.OpenURL(parsed); oerr != nil {
+		u.logErr("open-logs-folder failed", "error", oerr.Error())
+		u.dialogInfo("Logs folder", u.lay.Logs+"\n\n(The operating system could not open it: "+oerr.Error()+")")
+	}
 }
 
 // setClipboard copies via the app clipboard (Window.Clipboard is

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/procattr"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
@@ -232,6 +233,7 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 		partPath,
 	)
 	cmd := exec.CommandContext(ctx, j.env.FFmpegPath, args...)
+	procattr.Configure(cmd) // never a visible child console on Windows
 	cmd.Args[0] = j.env.FFmpegPath
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

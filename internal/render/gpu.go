@@ -37,6 +37,7 @@ type Preference string
 
 const (
 	PrefAuto     Preference = "auto"
+	PrefCPU      Preference = "cpu"
 	PrefVulkan   Preference = "vulkan"
 	PrefDX12     Preference = "dx12"
 	PrefSoftware Preference = "software"
@@ -48,6 +49,8 @@ func ParsePreference(s string) (Preference, error) {
 	switch Preference(strings.ToLower(strings.TrimSpace(s))) {
 	case "", PrefAuto:
 		return PrefAuto, nil
+	case PrefCPU:
+		return PrefCPU, nil
 	case PrefVulkan:
 		return PrefVulkan, nil
 	case PrefDX12:
@@ -55,7 +58,7 @@ func ParsePreference(s string) (Preference, error) {
 	case PrefSoftware:
 		return PrefSoftware, nil
 	default:
-		return "", fmt.Errorf("render: unknown GPU preference %q (want auto|vulkan|dx12|software)", s)
+		return "", fmt.Errorf("render: unknown GPU preference %q (want auto|cpu|vulkan|dx12|software)", s)
 	}
 }
 

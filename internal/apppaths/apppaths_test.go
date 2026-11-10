@@ -24,6 +24,20 @@ func testEnv(home, tmp string, env map[string]string, exe string) Env {
 // is unrelated (paths with spaces included).
 func TestPortableMarkerSelectsDataBesideExecutable(t *testing.T) {
 	base := t.TempDir()
+	// Canonicalize the temp base to its REAL path before building the
+	// expectations. The implementation canonicalizes the executable
+	// path with filepath.EvalSymlinks (apppaths.appRoot), so on Windows
+	// the resolved layout carries the canonical long form: 8.3 aliases
+	// such as RUNNER~1 expand to the full profile name and casing is
+	// corrected. Comparing the raw temp-dir string against the
+	// canonicalized layout fails even though both names identify the
+	// SAME directory (run 42598929646, Windows runner). Canonicalizing
+	// the expectation keeps the assertion EXACT — full string equality
+	// on one canonical form plus a filesystem-identity cross-check —
+	// never a substring or prefix check.
+	if resolved, err := filepath.EvalSymlinks(base); err == nil {
+		base = resolved
+	}
 	// Deliberate space in the app dir name.
 	appDir := filepath.Join(base, "App Folder With Spaces")
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
@@ -43,6 +57,16 @@ func TestPortableMarkerSelectsDataBesideExecutable(t *testing.T) {
 		t.Fatalf("mode = %q, want portable (reason: %s)", l.Mode, l.Reason)
 	}
 	want := filepath.Join(appDir, DataDir)
+	// Filesystem-identity cross-check when both paths exist: os.SameFile
+	// proves the two names resolve to the same directory regardless of
+	// any remaining alias form, so the portable-root contract is proven
+	// by identity as well as by exact canonical string equality.
+	if fiGot, err := os.Stat(l.DataRoot); err == nil {
+		fiWant, err2 := os.Stat(want)
+		if err2 == nil && !os.SameFile(fiGot, fiWant) {
+			t.Fatalf("DataRoot %q and %q are NOT the same directory", l.DataRoot, want)
+		}
+	}
 	if l.DataRoot != want {
 		t.Fatalf("DataRoot = %q, want %q", l.DataRoot, want)
 	}

@@ -94,6 +94,13 @@ func SelectRenderer() (Renderer, BackendInfo) {
 		ci.Detail = "GPU preference env invalid (" + envErr.Error() + "); using the CPU renderer"
 		return c, ci
 	}
+	return selectRendererWith(pref, fromEnv)
+}
+
+// selectRendererWith is the preference-driven selection core shared by
+// the env path (SelectRenderer) and the persisted-preference path
+// (SelectRendererExplicit, preference_store.go).
+func selectRendererWith(pref Preference, fromEnv bool) (Renderer, BackendInfo) {
 	g, attemptInfo := newGPURendererFull(pref)
 	if g != nil {
 		info := g.Info()

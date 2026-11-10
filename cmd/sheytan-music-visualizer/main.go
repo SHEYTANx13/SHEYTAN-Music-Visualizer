@@ -13,10 +13,10 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"math"
 	"os"
 	"regexp"
@@ -46,6 +46,7 @@ func run(args []string, out, errW io.Writer) int {
 	fs.SetOutput(errW)
 	showVersion := fs.Bool("version", false, "print product and build metadata, then exit")
 	selfCheckFlag := fs.Bool("self-check", false, "run foundation self-checks, then exit without opening a window")
+	selfCheckOut := fs.String("self-check-out", "", "additionally write the --self-check result to this UTF-8 file (structured CI evidence for the GUI-subsystem build, whose stdout may not be captured)")
 	debugFlag := fs.Bool("debug", false, "write debug-level records to the runtime log (default log volume unchanged)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -65,7 +66,7 @@ func run(args []string, out, errW io.Writer) int {
 		}
 		return 0
 	case *selfCheckFlag:
-		return selfCheck(out, errW)
+		return selfCheckToFile(out, errW, *selfCheckOut)
 	default:
 		err := runGUI()
 		if err == nil {
@@ -96,6 +97,27 @@ func runGUI() (err error) {
 type check struct {
 	name string
 	fn   func(io.Writer) error
+}
+
+// selfCheckToFile runs the foundation self-checks and, when a path was
+// supplied, additionally persists the full structured result to that
+// file (mode 0o644). The file is plain text — the same lines the
+// console would carry — so hosted CI can read reliable evidence from a
+// GUI-subsystem executable whose stdout/stderr may not be captured.
+// A file-write failure is reported on stderr but NEVER downgrades the
+// check verdict; the exit code still reflects only the checks.
+func selfCheckToFile(out, errW io.Writer, path string) int {
+	if path == "" {
+		return selfCheck(out, errW)
+	}
+	var buf bytes.Buffer
+	rc := selfCheck(io.MultiWriter(out, &buf), errW)
+	if werr := os.WriteFile(path, buf.Bytes(), 0o644); werr != nil {
+		fmt.Fprintf(errW, "%s: self-check result file could not be written: %v\n", brand.ProductName, werr)
+	} else {
+		fmt.Fprintf(out, "self-check result file: %s (rc=%d)\n", path, rc)
+	}
+	return rc
 }
 
 func selfCheck(out, errW io.Writer) int {

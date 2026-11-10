@@ -22,6 +22,7 @@ import (
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fflocate"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/procattr"
 )
 
 // Resolution presets.
@@ -86,7 +87,9 @@ func DetectEnv(force bool) (*Environment, error) {
 	// version
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, env.FFmpegPath, "-version").Output()
+	vcmd := exec.CommandContext(ctx, env.FFmpegPath, "-version")
+	procattr.Configure(vcmd) // never a visible child console on Windows
+	out, err := vcmd.Output()
 	if err != nil {
 		cachedEnv = env
 		return env, fmt.Errorf("ffmpeg -version failed for %q: %w", loc.Source, err)
@@ -94,7 +97,9 @@ func DetectEnv(force bool) (*Environment, error) {
 	env.Version = firstLine(string(out))
 
 	// encoders list
-	encOut, err := exec.CommandContext(ctx, env.FFmpegPath, "-hide_banner", "-encoders").Output()
+	ecmd := exec.CommandContext(ctx, env.FFmpegPath, "-hide_banner", "-encoders")
+	procattr.Configure(ecmd) // never a visible child console on Windows
+	encOut, err := ecmd.Output()
 	if err == nil {
 		for _, name := range []string{"libx264", "h264_nvenc", "h264_qsv", "h264_amf", "aac", "libfdk_aac"} {
 			if encoderPresent(string(encOut), name) {
@@ -155,6 +160,7 @@ func ProbeHardwareEncoder(env *Environment, name string) error {
 	}
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, env.FFmpegPath, args...)
+	procattr.Configure(cmd) // never a visible child console on Windows
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("export: hardware encoder %s proof encode failed: %v: %s",
