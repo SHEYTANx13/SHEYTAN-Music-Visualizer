@@ -178,6 +178,12 @@ type Profile struct {
 	Power       PowerInfo     `json:"power"`
 	Audio       AudioInfo     `json:"audio"`
 	Render      RenderSection `json:"render"`
+	// Export: FFmpeg/ffprobe capability through the single discovery
+	// authority (Unknown with the reason when the caller supplied none).
+	Export ExportInfo `json:"export"`
+	// Display: window-reported display facts (Unknown with the reason
+	// when the caller supplied none).
+	Display DisplayInfo `json:"display"`
 }
 
 // platform hooks — assigned by the build-tagged collector files and
@@ -208,7 +214,18 @@ var hookMu sync.Mutex
 // of the renderer the application is actually executing (from
 // render.Renderer.Info()); it is passed in rather than re-selected so
 // the profile can never disagree with the live render path.
+//
+// Export/Display sections default to Unknown-with-reason; callers that
+// observed the real values use CollectWith.
 func Collect(activeRenderer render.BackendInfo) Profile {
+	return CollectWith(activeRenderer, ExportInfo{}, DisplayInfo{})
+}
+
+// CollectWith is Collect plus caller-observed Export and Display
+// sections (the UI passes what the live window and the single
+// FFmpeg discovery authority actually reported). Zero values are
+// normalized to explicit Unknown facts — never blank output.
+func CollectWith(activeRenderer render.BackendInfo, exportSec ExportInfo, displaySec DisplayInfo) Profile {
 	// The hook mutex makes a test-side hook swap atomic against this
 	// snapshot. Collection holds it only for the read — swaps never
 	// hold it across a test body, so no lock ordering can deadlock.
@@ -225,7 +242,52 @@ func Collect(activeRenderer render.BackendInfo) Profile {
 		Audio:       collectAudio(),
 	}
 	p.Render = decideRender(activeRenderer)
+	p.Export = normalizeExport(exportSec)
+	p.Display = normalizeDisplay(displaySec)
 	return p
+}
+
+// normalizeExport turns a zero/partial ExportInfo into explicit
+// Unknown-with-reason facts (never blank output).
+func normalizeExport(e ExportInfo) ExportInfo {
+	if e.FfmpegPath.State == "" {
+		e.FfmpegPath = unknownFact("FFmpeg discovery not performed for this snapshot")
+	}
+	if e.FfprobePath.State == "" {
+		e.FfprobePath = unknownFact("FFmpeg discovery not performed for this snapshot")
+	}
+	if e.SourceDir.State == "" {
+		e.SourceDir = unknownFact("no FFmpeg source location supplied")
+	}
+	if e.Version.State == "" {
+		e.Version = unknownFact("version not probed")
+	}
+	if e.Encoders.State == "" {
+		e.Encoders = unknownFact("encoder set not probed")
+	}
+	if e.BuiltInDecoders.State == "" {
+		e.BuiltInDecoders = unknownFact("decoder registry coverage not supplied by the caller")
+	}
+	if e.Summary == "" {
+		e.Summary = "export capability not observed in this snapshot"
+	}
+	return e
+}
+
+// normalizeDisplay turns a zero/partial DisplayInfo into explicit
+// Unknown-with-reason facts (never blank output).
+func normalizeDisplay(d DisplayInfo) DisplayInfo {
+	if d.Resolution.State == "" {
+		d.Resolution = unknownFact("window size not observed")
+	}
+	if d.Scale.State == "" {
+		d.Scale = unknownFact("scale factor not observed")
+	}
+	if d.Refresh.State == "" {
+		d.Refresh = unknownFact(
+			"the pinned Fyne v2.8.2 framework does not expose the display refresh rate")
+	}
+	return d
 }
 
 // collectOS gathers the always-known facts plus the platform version.

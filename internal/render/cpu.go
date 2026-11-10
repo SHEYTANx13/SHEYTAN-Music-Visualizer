@@ -20,6 +20,11 @@ type CPURenderer struct {
 	info  BackendInfo
 	scene SceneState
 	buf   *image.RGBA
+	// powScratch backs the per-column falloff table in vbar across
+	// frames (profiled: one allocation per bar per frame otherwise).
+	// Owned by the render-loop goroutine that owns RenderFrame; never
+	// shared across goroutines.
+	powScratch []float64
 }
 
 // NewCPURenderer creates the CPU renderer (always available).
@@ -38,7 +43,7 @@ func NewCPURenderer() *CPURenderer {
 func (r *CPURenderer) Info() BackendInfo { return r.info }
 
 // Close releases buffers.
-func (r *CPURenderer) Close() { r.buf = nil }
+func (r *CPURenderer) Close() { r.buf = nil; r.powScratch = nil }
 
 // RenderFrame renders one frame. The output buffer is reused between
 // calls — callers must copy if they retain the image.
@@ -73,7 +78,7 @@ func (r *CPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 			cfg.ParticleDensity, in.Width, in.Height)
 	}
 
-	c := &canvas{img: r.buf}
+	c := newCanvasWith(r.buf, &r.powScratch)
 	c.background(in, pal)
 	// Layered composition: the optional dimmed background layer is
 	// drawn first, then the primary mode composites over it
@@ -140,7 +145,27 @@ func dimPalette(p visualizer.Palette, k float64) visualizer.Palette {
 }
 
 // canvas is a small software drawing surface over *image.RGBA.
-type canvas struct{ img *image.RGBA }
+//
+// Per-frame hot-path caching (run 42837709122 §5.3, profiled): the
+// width/height are captured ONCE at construction instead of re-reading
+// image.Bounds() inside addPixel — the CPU profile of the 1080p bar
+// render showed Bounds()/clamp01/u8 conversions among the top costs.
+// All draw math is unchanged; outputs stay bit-identical (verified by
+// the deterministic frame tests and the readback benchmarks).
+type canvas struct {
+	img        *image.RGBA
+	w          int
+	h          int
+	powScratch *[]float64 // shared per-renderer falloff table (may be nil)
+}
+
+// newCanvas wraps img and caches its geometry for the hot path.
+// scratch (optional) is reused for per-call falloff tables; nil
+// allocates per call (deterministic either way).
+func newCanvasWith(img *image.RGBA, scratch *[]float64) *canvas {
+	b := img.Bounds()
+	return &canvas{img: img, w: b.Dx(), h: b.Dy(), powScratch: scratch}
+}
 
 // background paints the vertical obsidian gradient with a subtle
 // bass-driven floor glow.
@@ -158,11 +183,15 @@ func (c *canvas) background(in visualizer.FrameInput, pal visualizer.Palette) {
 		br := lerp(pal.Back[0], pal.Low[0]*0.45, t*t*floorGlow*3)
 		bg := lerp(pal.Back[1], pal.Low[1]*0.45, t*t*floorGlow*3)
 		bb := lerp(pal.Back[2], pal.Low[2]*0.45, t*t*floorGlow*3)
+		// Hot path (profiled): the row color is constant in x — convert
+		// to output bytes ONCE per row (identical values, fewer u8
+		// calls) instead of once per pixel.
+		r8, g8, b8 := u8(br), u8(bg), u8(bb)
 		for x := 0; x < w; x++ {
 			o := x * 4
-			row[o] = u8(br)
-			row[o+1] = u8(bg)
-			row[o+2] = u8(bb)
+			row[o] = r8
+			row[o+1] = g8
+			row[o+2] = b8
 			row[o+3] = 255
 		}
 	}
@@ -170,7 +199,7 @@ func (c *canvas) background(in visualizer.FrameInput, pal visualizer.Palette) {
 
 // addPixel blends one pixel additively (clamped).
 func (c *canvas) addPixel(x, y int, r, g, b, a float64) {
-	if x < 0 || y < 0 || x >= c.img.Bounds().Dx() || y >= c.img.Bounds().Dy() {
+	if x < 0 || y < 0 || x >= c.w || y >= c.h {
 		return
 	}
 	o := y*c.img.Stride + x*4
@@ -188,6 +217,27 @@ func (c *canvas) vbar(x, yTop, yBottom, w int, lo, hi [3]float64, glow float64) 
 		yTop, yBottom = yBottom, yTop
 	}
 	hh := yBottom - yTop
+	// Hot-path arithmetic (profiled): math.Pow(t, 0.85) depends only on
+	// y, but the old loop recomputed it for every (dx, y) pair. One
+	// reused table per call produces the IDENTICAL values (same
+	// inputs, same function) while cutting pow calls by the dx-column
+	// count and keeping the steady state allocation-free.
+	var powT []float64
+	if c.powScratch != nil {
+		if cap(*c.powScratch) < hh+1 {
+			*c.powScratch = make([]float64, hh+1)
+		}
+		powT = (*c.powScratch)[:hh+1]
+	} else {
+		powT = make([]float64, hh+1)
+	}
+	for y := yTop; y <= yBottom; y++ {
+		t := 0.0
+		if hh > 0 {
+			t = float64(yBottom-y) / float64(hh)
+		}
+		powT[y-yTop] = math.Pow(t, 0.85)
+	}
 	for dx := -w; dx <= w; dx++ {
 		fall := 1 - math.Abs(float64(dx))/(float64(w)+1)
 		if fall <= 0 {
@@ -199,11 +249,7 @@ func (c *canvas) vbar(x, yTop, yBottom, w int, lo, hi [3]float64, glow float64) 
 		}
 		xx := x + dx
 		for y := yTop; y <= yBottom; y++ {
-			t := 0.0
-			if hh > 0 {
-				t = float64(yBottom-y) / float64(hh)
-			}
-			t = math.Pow(t, 0.85)
+			t := powT[y-yTop]
 			r := lerp(lo[0], hi[0], t)
 			g := lerp(lo[1], hi[1], t)
 			b := lerp(lo[2], hi[2], t)
@@ -239,15 +285,26 @@ func (c *canvas) glowCircle(cx, cy, radius, intensity float64, r, g, b float64) 
 	maxX := int(math.Ceil(cx + radius*2))
 	minY := int(math.Floor(cy - radius*2))
 	maxY := int(math.Ceil(cy + radius*2))
+	// Hot-path arithmetic (profiled): the squared-distance test rejects
+	// every out-of-disc box pixel WITHOUT the sqrt; the in-disc branch
+	// keeps the identical d = sqrt(d2) value the alpha uses. At the
+	// disc boundary any float rounding flip changes t by <1 ulp where
+	// alpha = intensity*t*t rounds to the same u8 output.
+	limit2 := (radius * 2) * (radius * 2)
 	for y := minY; y <= maxY; y++ {
+		dy := float64(y) + 0.5 - cy
+		dy2 := dy * dy
 		for x := minX; x <= maxX; x++ {
 			dx := float64(x) + 0.5 - cx
-			dy := float64(y) + 0.5 - cy
-			d := math.Sqrt(dx*dx + dy*dy)
-			if d > radius*2 {
+			d2 := dx*dx + dy2
+			if d2 > limit2 {
 				continue
 			}
-			t := math.Max(0, 1-d/(radius*2))
+			d := math.Sqrt(d2)
+			t := 1 - d/(radius*2)
+			if t < 0 {
+				t = 0
+			}
 			c.addPixel(x, y, r, g, b, intensity*t*t)
 		}
 	}

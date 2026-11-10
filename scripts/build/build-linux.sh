@@ -141,6 +141,11 @@ CI_TOOL_CONTEXT="gate:go-mod-verify" ci_capture "$JOB" go-mod-verify go mod veri
 if [ "$MODE" = "preflight" ]; then
   note ""
   note "Preflight mode requested: tests, vet, builds and runtime checks belong to the platform build jobs."
+  # Run-42837709122 regression fixtures for the Windows packaging/process
+  # gates (ZIP root layout + robust child-process runner). Pure PowerShell
+  # logic — runs on any host with pwsh; without pwsh every fixture is
+  # reported NOT RUN (never silently passed).
+  if CI_TOOL_CONTEXT="gate:package-gate-fixtures" ci_capture "$JOB" package-gate-fixtures bash scripts/ci/tests/test-package-gates.sh; then :; else fail_gate package-gate-fixtures; fi
   note ""
   note "RUN SUMMARY — $JOB"
   note "Ended:            $(date -u '+%Y-%m-%dT%H:%M:%SZ')"

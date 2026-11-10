@@ -360,7 +360,26 @@ if ($exeOk) {
     # carry exactly those values; when none was supplied (local dev
     # build), the legitimate local/dev defaults are asserted instead.
     # Missing, stale, malformed or inconsistent values fail the gate.
+    # ROBUST PROCESS-EXIT CONTRACT (run 42837709122 gate A repair): the
+    # previous form read the automatic $LASTEXITCODE right after
+    # `& "bin\sheytan-music-visualizer.exe"`. The distributed desktop
+    # executable is linked -H=windowsgui; on the hosted runner pwsh
+    # never surfaced that child's exit code into $LASTEXITCODE, and the
+    # gate's Set-StrictMode -Version Latest threw
+    #   "The variable '$LASTEXITCODE' cannot be retrieved because it has
+    #    not been set."
+    # The gate now launches the exe through Invoke-CapturedProcess
+    # (System.Diagnostics.Process, UseShellExecute=$false, redirected
+    # stdout+stderr, argument array, bounded wait, REAL Process.ExitCode,
+    # fail-closed on any unobservable exit). $LASTEXITCODE is never read.
+    # The GUI subsystem of the distributed binary is NOT touched.
     $rc = Capture-Step -Job $job -Step "verify-build-metadata" -ToolContext "gate:build-metadata" -Command {
+        . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/Invoke-CapturedProcess.ps1")
+        $exe = Join-Path (Get-Location).Path "bin\sheytan-music-visualizer.exe"
+        if (-not (Test-Path -LiteralPath $exe)) {
+            Write-Output "ERROR: executable not found at $exe (nothing to verify)"
+            exit 1
+        }
         $expectedCommit = ""
         $expectedVersion = ""
         $expectedBuiltBy = ""
@@ -373,15 +392,52 @@ if ($exeOk) {
             $expectedBuiltBy = if ($env:SHEYTAN_BUILT_BY) { $env:SHEYTAN_BUILT_BY.Trim() } else { "" }
             $expectedDate = if ($env:SHEYTAN_BUILD_DATE) { $env:SHEYTAN_BUILD_DATE.Trim() } else { "" }
         }
-        $verLines = & "bin\sheytan-music-visualizer.exe" --version
-        $verRc = $LASTEXITCODE
-        if ($verRc -ne 0) { Write-Output "ERROR: --version exited with $verRc"; exit $verRc }
-        $verLine = ($verLines | Select-Object -First 1)
+        $verRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @("--version") -TimeoutSeconds 120
+        if ($verRun.Error -ne "") {
+            Write-Output "ERROR: --version process observation incomplete: $($verRun.Error)"
+            exit 1
+        }
+        Write-Output ("--version exit code observed: {0}" -f $verRun.ExitCode)
+        if ($verRun.ExitCode -ne 0) {
+            Write-Output "ERROR: --version exited with $($verRun.ExitCode)"
+            if ($verRun.StdErr.Count -gt 0) { $verRun.StdErr | ForEach-Object { Write-Output "stderr: $_" } }
+            exit $verRun.ExitCode
+        }
+        $verLine = ($verRun.StdOut | Select-Object -First 1)
         Write-Output "version line observed: $verLine"
-        $selfLines = & "bin\sheytan-music-visualizer.exe" --self-check
-        $selfRc = $LASTEXITCODE
-        if ($selfRc -ne 0) { Write-Output "ERROR: --self-check exited with $selfRc"; exit $selfRc }
-        $selfInfo = ($selfLines | Where-Object { $_ -match 'version=' } | Select-Object -First 1)
+        # Machine-readable self-check: the GUI-subsystem process may not
+        # have its console streams captured on every runner, so the result
+        # is ALSO written to a file (--self-check-out). The file contents
+        # are validated here as first-class evidence — never the console
+        # output alone.
+        $selfOutFile = Join-Path (Get-Location).Path "ci-logs\windows-self-check-metadata.txt"
+        if (Test-Path -LiteralPath $selfOutFile) { Remove-Item -LiteralPath $selfOutFile -Force }
+        $selfRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @("--self-check", "--self-check-out", $selfOutFile) -TimeoutSeconds 180
+        if ($selfRun.Error -ne "") {
+            Write-Output "ERROR: --self-check process observation incomplete: $($selfRun.Error)"
+            exit 1
+        }
+        Write-Output ("--self-check exit code observed: {0}" -f $selfRun.ExitCode)
+        if ($selfRun.ExitCode -ne 0) {
+            Write-Output "ERROR: --self-check exited with $($selfRun.ExitCode)"
+            if ($selfRun.StdErr.Count -gt 0) { $selfRun.StdErr | ForEach-Object { Write-Output "stderr: $_" } }
+            exit $selfRun.ExitCode
+        }
+        if (-not (Test-Path -LiteralPath $selfOutFile)) {
+            Write-Output "ERROR: --self-check wrote no machine-readable result file: $selfOutFile"
+            exit 1
+        }
+        $selfFileText = Get-Content -LiteralPath $selfOutFile
+        Write-Output "self-check result file contents:"
+        $selfFileText | ForEach-Object { Write-Output "  | $_" }
+        if (-not ($selfFileText | Where-Object { $_ -match 'self-check: all foundation invariants hold' })) {
+            Write-Output "ERROR: self-check result file does not contain the passing verdict"
+            exit 1
+        }
+        $selfInfo = ($selfRun.StdOut + $selfFileText | Where-Object { $_ -match 'version=' } | Select-Object -First 1)
+        if ($null -eq $selfInfo) {
+            $selfInfo = ($selfFileText | Where-Object { $_ -match 'commit=' } | Select-Object -First 1)
+        }
         Write-Output "self-check metadata observed: $selfInfo"
 
         $failures_ = @()
@@ -488,35 +544,82 @@ if ($exeOk) {
     }
     if ($rc -ne 0) { Fail-Gate "validate-pe" }
 
+    # PACKAGE ROOT CONTRACT (run 42837709122 gates B+C repair): the
+    # archive must carry the APPLICATION directory as its single
+    # top-level folder — never the staging wrapper
+    # (SHEYTAN-Music-Visualizer-windows-x64-portable) that CONTAINS it.
+    # The previous `Compress-Archive -Path $stageRoot` archived the
+    # wrapper itself, so every entry gained one extra outer path level
+    # and both the entry manifest and the post-extraction license lookup
+    # failed downstream. New-PortableZip writes the wrapper's CHILD app
+    # directory as the package root with explicit, '/'-normalized entry
+    # names, byte-exact file content and explicit directory entries
+    # (empty tools/ffmpeg/bin survives). Linux parity: the TAR gate
+    # archives the inner app directory directly (build-linux.sh
+    # create-portable-tar), producing the identical single-root layout.
     $rc = Capture-Step -Job $job -Step "create-portable-zip" -ToolContext "gate:create-portable-zip" -Command {
+        . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/New-PortableZip.ps1")
         $stageRoot = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable"
         $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
-        if (Test-Path $zip) { Remove-Item -Force $zip }
-        # Archive the WHOLE top-level folder (never "$stage\*", which
-        # flattens the tree and loses the directory contract).
-        Compress-Archive -Path $stageRoot -DestinationPath $zip
-        $zipItem = Get-Item $zip
-        if ($zipItem.Length -le 0) { Write-Output "ERROR: created ZIP is empty"; exit 1 }
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
-        try {
-            Write-Output ("zip entries: {0}; size: {1} bytes" -f $archive.Entries.Count, $zipItem.Length)
-            if ($archive.Entries.Count -lt 5) { Write-Output "ERROR: zip does not contain the expected package tree"; exit 1 }
-            $required = @(
-                "SHEYTAN-Music-Visualizer-windows-x64/sheytan-music-visualizer.exe",
-                "SHEYTAN-Music-Visualizer-windows-x64/license.md",
-                "SHEYTAN-Music-Visualizer-windows-x64/readme.md",
-                "SHEYTAN-Music-Visualizer-windows-x64/portable.mode",
-                "SHEYTAN-Music-Visualizer-windows-x64/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md",
-                "SHEYTAN-Music-Visualizer-windows-x64/data/DATA-FOLDERS.txt"
-            )
-            foreach ($req in $required) {
-                $hit = $archive.Entries | Where-Object { $_.FullName -eq $req }
-                if ($null -eq $hit) { Write-Output "ERROR: zip is missing required package entry: $req"; exit 1 }
-            }
-            Write-Output "zip package tree verified (one top-level app folder + required entries)"
+        $mk = New-PortableZip -StageRoot $stageRoot -ZipPath $zip
+        if ($mk.Error -ne "") {
+            Write-Output "ERROR: portable ZIP creation failed: $($mk.Error)"
+            exit 1
         }
-        finally { $archive.Dispose() }
+        $zipItem = Get-Item -LiteralPath $zip
+        if ($zipItem.Length -le 0) { Write-Output "ERROR: created ZIP is empty"; exit 1 }
+        Write-Output ("zip entries: {0}; size: {1} bytes" -f $mk.Count, $zipItem.Length)
+        Write-Output "--- FULL ENTRY MANIFEST ---"
+        foreach ($e in $mk.Entries) { Write-Output "ENTRY: $e" }
+        # COMPLETE manifest validation — not only a minimum count:
+        #   1. exactly one top-level directory (the app folder),
+        #   2. no staging-wrapper directory anywhere,
+        #   3. no path-traversal or backslash entries,
+        #   4. every required file present as an exact entry,
+        #   5. the required directories present (data/, tools/ffmpeg/, tools/ffmpeg/bin/).
+        $appRoot = "SHEYTAN-Music-Visualizer-windows-x64"
+        $tops = @($mk.Entries | ForEach-Object { ($_ -split '/')[0] } | Sort-Object -Unique)
+        if ($tops.Count -ne 1 -or $tops[0] -ne $appRoot) {
+            Write-Output "ERROR: package root must be exactly one app directory '$appRoot'; observed top-level: $($tops -join ', ')"
+            exit 1
+        }
+        $wrapper = $mk.Entries | Where-Object { $_ -match '(^|/)SHEYTAN-Music-Visualizer-windows-x64-portable(/|$)' }
+        if ($wrapper) {
+            Write-Output "ERROR: staging wrapper directory leaked into the package:"
+            $wrapper | ForEach-Object { Write-Output "  $_" }
+            exit 1
+        }
+        $unsafe = $mk.Entries | Where-Object { $_ -match '(^|/)\.\.(/|$)' -or $_ -match '\\' -or $_.StartsWith('/') }
+        if ($unsafe) {
+            Write-Output "ERROR: unsafe package entries (path traversal/backslash):"; $unsafe | ForEach-Object { Write-Output "  $_" }
+            exit 1
+        }
+        $required = @(
+            "SHEYTAN-Music-Visualizer-windows-x64/sheytan-music-visualizer.exe",
+            "SHEYTAN-Music-Visualizer-windows-x64/license.md",
+            "SHEYTAN-Music-Visualizer-windows-x64/readme.md",
+            "SHEYTAN-Music-Visualizer-windows-x64/portable.mode",
+            "SHEYTAN-Music-Visualizer-windows-x64/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md",
+            "SHEYTAN-Music-Visualizer-windows-x64/data/DATA-FOLDERS.txt"
+        )
+        foreach ($req in $required) {
+            if ($mk.Entries -notcontains $req) {
+                Write-Output "ERROR: zip is missing required package entry: $req"
+                exit 1
+            }
+        }
+        $requiredDirs = @(
+            "SHEYTAN-Music-Visualizer-windows-x64/data/",
+            "SHEYTAN-Music-Visualizer-windows-x64/tools/ffmpeg/",
+            "SHEYTAN-Music-Visualizer-windows-x64/tools/ffmpeg/bin/"
+        )
+        foreach ($reqDir in $requiredDirs) {
+            if ($mk.Entries -notcontains $reqDir) {
+                Write-Output "ERROR: zip is missing required package directory: $reqDir"
+                exit 1
+            }
+        }
+        Write-Output "zip package manifest verified: single app-directory root, wrapper excluded, no traversal, all required files and directories present"
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "create-portable-zip" }
@@ -525,37 +628,129 @@ if ($exeOk) {
     # contract): extract the produced ZIP and compare the distributed
     # license.md bytes against the canonical tracked file. A staged
     # check alone does not prove what a user receives.
+    # POST-ARCHIVE PACKAGE VERIFICATION (run 42837709122 gate C repair):
+    # the exact produced ZIP is extracted to a FRESH temporary directory
+    # and every required path is verified there, the extracted EXE gets
+    # the full PE header check (MZ + Optional Header subsystem = 2,
+    # IMAGE_SUBSYSTEM_WINDOWS_GUI), the distributed license.md is
+    # byte-compared (hash + length) against the canonical tracked file,
+    # and the extracted executable must run --version and --self-check
+    # through the robust process runner with the machine-readable
+    # result file validated. This gate is downstream of the archive
+    # root layout: with the run's defect the app files landed one level
+    # deeper and the license lookup failed even though the staged copy
+    # was byte-identical — the license itself was never wrong.
     $rc = Capture-Step -Job $job -Step "verify-extracted-package" -ToolContext "gate:package-verify" -Command {
+        . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/Invoke-CapturedProcess.ps1")
         $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
         $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("sheytan-pkg-verify-" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+        $cleanup = { if (Test-Path -LiteralPath $extractRoot) { Remove-Item -Recurse -Force $extractRoot } }
         Expand-Archive -Path $zip -DestinationPath $extractRoot
-        $extractedLicense = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64\license.md"
-        $cleanup = { if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot } }
-        if (-not (Test-Path $extractedLicense)) {
-            Write-Output "ERROR: extracted package has no license.md at the expected path"
+        $appRoot = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64"
+        # 1. COMPLETE required-path manifest after extraction.
+        $requiredPaths = @(
+            "sheytan-music-visualizer.exe",
+            "license.md",
+            "readme.md",
+            "portable.mode",
+            "tools\ffmpeg\FFMPEG-TOOLS-LICENSING.md",
+            "data\DATA-FOLDERS.txt",
+            "tools\ffmpeg\bin"
+        )
+        $missing = @()
+        foreach ($rel in $requiredPaths) {
+            $p = Join-Path $appRoot $rel
+            if (-not (Test-Path -LiteralPath $p)) { $missing += $rel }
+        }
+        if ($missing.Count -gt 0) {
+            Write-Output "ERROR: extracted package is missing required paths:"
+            $missing | ForEach-Object { Write-Output "  MISSING: $_" }
+            Write-Output "actual extracted tree:"
+            Get-ChildItem -Recurse -Force $extractRoot | ForEach-Object {
+                Write-Output ("    {0}" -f $_.FullName.Substring($extractRoot.Length + 1))
+            }
             & $cleanup; exit 1
         }
-        $canonical = Get-FileHash -Algorithm SHA256 "license.md"
-        $dist = Get-FileHash -Algorithm SHA256 $extractedLicense
-        Write-Output ("extracted sha256: {0}" -f $dist.Hash)
-        if ($canonical.Hash -ne $dist.Hash) {
+        # No staging wrapper may exist inside the extraction either.
+        $wrapperHit = Get-ChildItem -Recurse -Directory $extractRoot |
+            Where-Object { $_.Name -eq "SHEYTAN-Music-Visualizer-windows-x64-portable" }
+        if ($wrapperHit) {
+            Write-Output "ERROR: staging wrapper directory present inside the extracted package"
+            & $cleanup; exit 1
+        }
+        # 2. Distributed license byte identity (hash AND length).
+        $canonical = Get-FileHash -Algorithm SHA256 -LiteralPath "license.md"
+        $canonicalLen = (Get-Item -LiteralPath "license.md").Length
+        $extractedLicense = Join-Path $appRoot "license.md"
+        $dist = Get-FileHash -Algorithm SHA256 -LiteralPath $extractedLicense
+        $distLen = (Get-Item -LiteralPath $extractedLicense).Length
+        Write-Output ("canonical sha256: {0} ({1} bytes)" -f $canonical.Hash, $canonicalLen)
+        Write-Output ("extracted sha256: {0} ({1} bytes)" -f $dist.Hash, $distLen)
+        if ($canonical.Hash -ne $dist.Hash -or $canonicalLen -ne $distLen) {
             Write-Output "ERROR: DISTRIBUTED license.md differs from the canonical tracked license.md (post-archive byte comparison FAILED)"
             & $cleanup; exit 1
         }
-        $marker = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64\portable.mode"
-        if (-not (Test-Path $marker)) {
-            Write-Output "ERROR: portable.mode marker missing from the extracted package"
-            & $cleanup; exit 1
-        }
-        $exe = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64\sheytan-music-visualizer.exe"
-        $exeBytes = [System.IO.File]::ReadAllBytes($exe)[0..1]
-        if ($exeBytes[0] -ne 77 -or $exeBytes[1] -ne 90) {
+        # 3. Extracted executable: full PE header check, not only MZ.
+        $exe = Join-Path $appRoot "sheytan-music-visualizer.exe"
+        $bytes = [System.IO.File]::ReadAllBytes($exe)
+        if ($bytes.Length -lt 0x100) { Write-Output "ERROR: extracted file too small for a PE ($($bytes.Length) bytes)"; & $cleanup; exit 1 }
+        if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) {
             Write-Output "ERROR: extracted executable is not a PE (missing MZ header)"
             & $cleanup; exit 1
         }
+        $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+        $optOff = $peOff + 4 + 20
+        $subsystem = [BitConverter]::ToUInt16($bytes, $optOff + 68)
+        Write-Output ("extracted EXE PE Optional Header Subsystem: {0} (2 = GUI)" -f $subsystem)
+        if ($subsystem -ne 2) {
+            Write-Output "ERROR: extracted executable lost the Windows GUI subsystem (must stay -H=windowsgui)"
+            & $cleanup; exit 1
+        }
+        # 4. Runtime contract on the EXTRACTED binary via the robust
+        #    runner: real exit codes, captured streams, machine-readable
+        #    self-check file. The package must RUN, not merely exist.
+        $verRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @("--version") -TimeoutSeconds 120
+        if ($verRun.Error -ne "") {
+            Write-Output "ERROR: extracted EXE --version observation incomplete: $($verRun.Error)"
+            & $cleanup; exit 1
+        }
+        Write-Output ("extracted EXE --version exit code: {0}" -f $verRun.ExitCode)
+        if ($verRun.ExitCode -ne 0) {
+            Write-Output "ERROR: extracted EXE --version exited with $($verRun.ExitCode)"
+            & $cleanup; exit 1
+        }
+        $verLine = ($verRun.StdOut | Select-Object -First 1)
+        Write-Output "extracted EXE version line: $verLine"
+        if ($env:SHEYTAN_BUILD_COMMIT -and -not [string]::IsNullOrWhiteSpace($env:SHEYTAN_BUILD_COMMIT)) {
+            $want = $env:SHEYTAN_BUILD_COMMIT.Trim()
+            if ($verLine -notlike "*commit $want,*") {
+                Write-Output "ERROR: extracted EXE commit mismatch (want $want)"
+                & $cleanup; exit 1
+            }
+        }
+        $selfOutFile = Join-Path $extractRoot "self-check.txt"
+        $selfRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @("--self-check", "--self-check-out", $selfOutFile) -TimeoutSeconds 180
+        if ($selfRun.Error -ne "") {
+            Write-Output "ERROR: extracted EXE --self-check observation incomplete: $($selfRun.Error)"
+            & $cleanup; exit 1
+        }
+        Write-Output ("extracted EXE --self-check exit code: {0}" -f $selfRun.ExitCode)
+        if ($selfRun.ExitCode -ne 0) {
+            Write-Output "ERROR: extracted EXE --self-check exited with $($selfRun.ExitCode)"
+            & $cleanup; exit 1
+        }
+        if (-not (Test-Path -LiteralPath $selfOutFile)) {
+            Write-Output "ERROR: extracted EXE --self-check wrote no result file"
+            & $cleanup; exit 1
+        }
+        $selfText = Get-Content -LiteralPath $selfOutFile
+        if (-not ($selfText | Where-Object { $_ -match 'self-check: all foundation invariants hold' })) {
+            Write-Output "ERROR: extracted EXE self-check result file lacks the passing verdict"
+            & $cleanup; exit 1
+        }
         & $cleanup
-        Write-Output "extracted package verified: license byte-identical, portable.mode present, executable PE-valid"
+        Write-Output "extracted package verified: complete required-path manifest, no wrapper, license byte-identical, PE GUI subsystem 2, extracted EXE ran --version and self-check with valid result file"
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "verify-extracted-package" }

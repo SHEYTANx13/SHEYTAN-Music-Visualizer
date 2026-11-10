@@ -15,6 +15,7 @@ import (
 	"image/color"
 	"log/slog"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,9 +35,11 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fullscreen"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/perf"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/sysprofile"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
 )
 
@@ -47,8 +50,16 @@ import (
 // runtime log opened BEFORE any subsystem or window construction, and
 // a broken log file never aborts the launch (stderr fallback).
 func Run() error {
+	// Startup instrumentation (run 42837709122 §5.1): the recorder is
+	// anchored at the true OS process start (procfs / GetProcessTimes;
+	// honest fallback documented in internal/perf) so the first mark
+	// already carries the full cold-start elapsed time.
+	startup := perf.NewRecorder()
+	startup.Mark("runtime-entry")
+
 	lg, lay, logErr := initRuntime()
 	defer lg.Close()
+	startup.Mark("logger-and-data-paths")
 	log := lg.Logger()
 	if logErr != nil {
 		// Already logged to the stderr fallback by initRuntime/logging.
@@ -61,12 +72,14 @@ func Run() error {
 	a := app.NewWithID(brand.AppID)
 	w := a.NewWindow(brand.WindowTitle())
 	w.SetPadded(false)
+	startup.Mark("app-shell-created")
 
 	svc, err := studio.New()
 	if err != nil {
 		log.Error("studio service initialization failed", "err", err.Error())
 		return err
 	}
+	startup.Mark("studio-service-and-audio-init")
 	u := newStudioUI(w, svc)
 	u.app = a
 	u.log = log
@@ -76,6 +89,26 @@ func Run() error {
 	// hardware and drivers change; an unresolvable manual GPU choice
 	// falls back to CPU with the exact reason recorded by the selector).
 	u.prefStore = render.OpenPreferenceStore(prefStorePath(lay))
+	u.startup = startup
+	// Persisted resource policy mode (default Auto). Loaded before
+	// the first bounded decision point and logged with its source.
+	u.policyStore = OpenPolicyStore(policyStorePath(lay))
+	if mode, found, perr := u.policyStore.Load(); perr != nil {
+		u.policyMode = sysprofile.ModeAuto
+		log.Warn("stored system policy unreadable; auto remains active",
+			"err", perr.Error(), "path", policyStorePath(lay))
+	} else if found {
+		u.policyMode = mode
+	} else {
+		u.policyMode = sysprofile.ModeAuto
+	}
+	pol := sysprofile.ModePolicyFor(u.policyMode, sysprofile.Collect(u.rendererInfo))
+	log.Info("resource policy resolved",
+		"mode", string(u.policyMode),
+		"workers", pol.Workers,
+		"frame_queue", pol.FrameQueueDepth,
+		"export_height_cap", pol.MaxExportHeight,
+		"source", pol.Source)
 	u.rendererReq = make(chan render.Preference, 1)
 	if stored, found, perr := u.prefStore.Load(); perr != nil {
 		log.Warn("stored renderer preference unreadable; auto remains active",
@@ -91,6 +124,7 @@ func Run() error {
 		fullscreen.NewFileStore(windowStateStorePath(lay)), log)
 
 	w.SetContent(u.build())
+	startup.Mark("ui-shell-built")
 	installTransportKeys(w, u)
 	w.Resize(fyne.NewSize(1440, 860))
 
@@ -98,7 +132,20 @@ func Run() error {
 	// event loop is running (the correct Fyne moment — never before
 	// the window is ready, never via a guessed monitor resize).
 	a.Lifecycle().SetOnStarted(func() {
+		// First event-loop iteration ≈ first usable window: the
+		// honest "first visible/usable main window" stage.
+		startup.Mark("first-window-usable")
 		u.fs.ApplyPersistedAtStartup("launch-restore")
+		// One structured startup record — stages, anchor provenance
+		// and the never-polled steady-state runtime snapshot.
+		startup.Mark("startup-recorded")
+		log.Info("startup stages complete", u.startup.KVPairs()...)
+		log.Info("runtime snapshot",
+			"gomaxprocs", runtime.GOMAXPROCS(0),
+			"num_cpu", runtime.NumCPU(),
+			"heap_alloc_bytes", heapAllocBytes(),
+			"gc_cycles", numGCPackages())
+		startup.Close()
 	})
 
 	log.Info("window shown",
@@ -238,6 +285,18 @@ type studioUI struct {
 	sysDialog     dialog.Dialog
 	rendererReq   chan render.Preference
 	rendererReqMu sync.Mutex
+
+	// Resource policy state (run 42837709122 §4.3): the persisted
+	// mode store and the live mode snapshot. Guidance is read at
+	// bounded decision points; the mutex only guards the snapshot.
+	policyStore *PolicyStore
+	policyMu    sync.Mutex
+	policyMode  sysprofile.PerformanceMode
+
+	// Startup instrumentation (run 42837709122 §5.1): one recorder
+	// anchored at the true OS process start, marked along the
+	// startup path, logged once after the window is usable.
+	startup *perf.Recorder
 }
 
 func newStudioUI(w fyne.Window, svc *studio.Studio) *studioUI {
@@ -769,4 +828,19 @@ func modeFromName(name string) visualizer.Mode {
 		}
 	}
 	return visualizer.ModeBars
+}
+
+// heapAllocBytes reports the current Go heap allocation (one-shot
+// runtime read; never polled, never per-frame).
+func heapAllocBytes() uint64 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.HeapAlloc
+}
+
+// numGCPackages reports the completed GC cycle count (one-shot read).
+func numGCPackages() uint32 {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.NumGC
 }

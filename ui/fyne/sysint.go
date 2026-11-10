@@ -4,12 +4,13 @@
 // attached to the main window, like Help/Diagnostics).
 //
 // It reports the honest machine profile (OS, CPU, effective
-// parallelism, RAM, GPU/render path, audio, power) with explicit
-// provenance states, the auto-tuning policy decisions, and the
-// persisted renderer preference (Auto / CPU / Vulkan / DX12 / Software)
-// with revalidation on launch. Scanning runs on a goroutine and every
-// widget mutation is marshaled back through fyne.Do; the UI and the
-// audio/render paths are never blocked by a scan.
+// parallelism, RAM, GPU/render path, audio, power, display, export
+// capability) with explicit provenance states, the active resource
+// policy mode with its bounded guidance, and the persisted renderer
+// preference (Auto / CPU / Vulkan / DX12 / Software) with revalidation
+// on launch. Scanning runs on a goroutine and every widget mutation is
+// marshaled back through fyne.Do; the UI and the audio/render paths
+// are never blocked by a scan.
 package fyneapp
 
 import (
@@ -69,6 +70,32 @@ func (u *studioUI) onSystemIntegration() {
 		u.applyRendererPreferenceFromUI(choice)
 	}
 
+	// Resource policy mode (run 42837709122 §4.3): Auto is the default;
+	// every mode is bounded guidance — the scheduler baseline is never
+	// overridden, memory budgets stay conservative, and the audio/UI
+	// paths always lead.
+	modeSelect := widget.NewSelect(sysprofile.ModeChoices, nil)
+	if u.policyStore != nil {
+		if stored, found, err := u.policyStore.Load(); err != nil {
+			u.logErr("system policy unreadable", "error", err.Error())
+			modeSelect.PlaceHolder = "current: auto (stored policy unreadable)"
+		} else if found {
+			modeSelect.SetSelected(string(stored))
+		} else {
+			modeSelect.SetSelected(string(sysprofile.ModeAuto))
+		}
+	} else {
+		modeSelect.SetSelected(string(sysprofile.ModeAuto))
+	}
+	modeSelect.OnChanged = func(choice string) {
+		u.applyPolicyModeFromUI(choice)
+	}
+
+	modeNote := widget.NewLabel("Mode guidance is bounded: worker counts never exceed the scheduler baseline " +
+		"(which already respects CPU affinity and container limits), memory budgets stay conservative, and " +
+		"manual parallelism uses the documented SHEYTAN_MAX_WORKERS override. Audio and UI latency always lead.")
+	modeNote.Wrapping = fyne.TextWrapWord
+
 	prefNote := widget.NewLabel("Renderer preference is persisted and revalidated on every launch; " +
 		"a manual GPU choice that cannot resolve falls back to the CPU renderer with the exact reason.")
 	prefNote.Wrapping = fyne.TextWrapWord
@@ -80,10 +107,14 @@ func (u *studioUI) onSystemIntegration() {
 		widget.NewLabelWithStyle("Render path", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		prefSelect,
 		prefNote,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Resource policy mode", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		modeSelect,
+		modeNote,
 		scanBtn,
 	)
 	d := dialog.NewCustom("System Integration — "+brand.ProductName, "Close", content, u.win)
-	d.Resize(fyne.NewSize(760, 560))
+	d.Resize(fyne.NewSize(760, 620))
 	d.SetOnClosed(func() { u.reconcileFullscreen("system-integration-closed") })
 	u.sysDialog = d
 	d.Show()
@@ -96,18 +127,26 @@ func (u *studioUI) onSystemIntegration() {
 // open and on the explicit Refresh action only.
 func (u *studioUI) scanSystemProfile(area *fyne.Container, status *widget.Label) {
 	active := u.currentRendererInfo()
+	// Display facts come from the LIVE window (the real owner of these
+	// values); the export facts from the single FFmpeg discovery
+	// authority via the resolved layout. Both are cheap, local-only
+	// reads — still executed on the scanning goroutine, never the UI
+	// thread.
+	display := displayFactsFromWindow(u.win)
+	export := sysprofile.CollectExportFast(u.lay.ToolsFFmpegBin())
 	go func() {
 		start := time.Now()
-		p := sysprofile.Collect(active)
+		p := sysprofile.CollectWith(active, export, display)
 		// Optional verification probe with the REAL render path (same
 		// shader workload the app renders). On explicit rescan only —
 		// never at startup, never polled.
 		probeInfo, probeVerified := sysprofile.ProbeRenderer(render.PrefAuto)
+		pol := sysprofile.ModePolicyFor(u.currentPolicyMode(), p)
 		text := formatProfile(p, probeInfo, probeVerified, time.Since(start))
-		pol := sysprofile.WorkerPolicyFor()
-		budget := sysprofile.MemoryBudgetFor(p)
-		text += "\nWorker policy: " + fmt.Sprintf("%d of %d effective — %s", pol.Workers, pol.Effective, pol.Source)
-		text += "\nMemory budget: default export height " + fmt.Sprintf("%d p — %s", budget.RecommendedExportHeight, budget.Reason)
+		text += "\nResource policy (" + string(pol.Mode) + "): workers " + fmt.Sprintf("%d", pol.Workers) +
+			", frame queue " + fmt.Sprintf("%d", pol.FrameQueueDepth) +
+			", export height cap " + fmt.Sprintf("%dp", pol.MaxExportHeight) +
+			"\nPolicy source: " + pol.Source
 		fyne.Do(func() {
 			status.SetText(fmt.Sprintf("Scan complete in %s (collector: %s)",
 				time.Since(start).Round(time.Millisecond), p.Collector))
@@ -115,7 +154,9 @@ func (u *studioUI) scanSystemProfile(area *fyne.Container, status *widget.Label)
 			area.Refresh()
 			u.logInfo("system-integration scan complete",
 				"collector", p.Collector,
-				"render_decision", p.Render.Decision)
+				"render_decision", p.Render.Decision,
+				"export_summary", p.Export.Summary,
+				"policy_mode", string(pol.Mode))
 		})
 	}()
 }
@@ -126,6 +167,34 @@ func (u *studioUI) currentRendererInfo() render.BackendInfo {
 	u.renderMu.Lock()
 	defer u.renderMu.Unlock()
 	return u.rendererInfo
+}
+
+// currentPolicyMode snapshots the active policy mode under its mutex
+// (safe from any goroutine).
+func (u *studioUI) currentPolicyMode() sysprofile.PerformanceMode {
+	u.policyMu.Lock()
+	defer u.policyMu.Unlock()
+	return u.policyMode
+}
+
+// setPolicyMode stores the active mode (UI goroutine only).
+func (u *studioUI) setPolicyMode(m sysprofile.PerformanceMode) {
+	u.policyMu.Lock()
+	u.policyMode = m
+	u.policyMu.Unlock()
+}
+
+// displayFactsFromWindow reads the display facts the LIVE window
+// actually reports (content size in logical units, computed scale).
+// Everything the pinned Fyne version does not expose (refresh rate)
+// stays Unknown with that exact reason inside sysprofile.
+func displayFactsFromWindow(w fyne.Window) sysprofile.DisplayInfo {
+	if w == nil || w.Content() == nil {
+		return sysprofile.CollectDisplay(0, 0, 0)
+	}
+	sz := w.Content().Size()
+	scale := fyne.CurrentDevice().SystemScaleForWindow(w)
+	return sysprofile.CollectDisplay(int(sz.Width), int(sz.Height), float64(scale))
 }
 
 // formatProfile renders the profile with explicit provenance states.
@@ -166,6 +235,15 @@ func formatProfile(p sysprofile.Profile, probe render.BackendInfo, probeVerified
 	s += "\nPower: " + gf(p.Power.State) + "\n"
 	s += "Audio output: " + gf(p.Audio.DefaultOutput) + "\n"
 	s += "Audio engine: " + gf(p.Audio.Backend) + "\n"
+	s += "\nDisplay resolution: " + gf(p.Display.Resolution) + "\n"
+	s += "Display scale: " + gf(p.Display.Scale) + "\n"
+	s += "Display refresh: " + gf(p.Display.Refresh) + "\n"
+	s += "\nExport capability: " + p.Export.Summary + "\n"
+	s += "FFmpeg: " + gf(p.Export.FfmpegPath) + "\n"
+	s += "ffprobe: " + gf(p.Export.FfprobePath) + "\n"
+	s += "FFmpeg version: " + gf(p.Export.Version) + "\n"
+	s += "Encoders: " + gf(p.Export.Encoders) + "\n"
+	s += "Built-in decoders: " + gf(p.Export.BuiltInDecoders) + "\n"
 	s += "\nRender path (ACTIVE): " + rendererSummary(p.Render.Active) + "\n"
 	s += "Decision: " + p.Render.Decision + "\n"
 	s += fmt.Sprintf("Verified: %v (executed + validated; never inferred from a name)\n", p.Render.Verified)
@@ -176,8 +254,7 @@ func formatProfile(p sysprofile.Profile, probe render.BackendInfo, probeVerified
 			s += "Verification probe: not verified — " + rendererSummary(probe) + "\n"
 		}
 	}
-	s += "\nDisplay facts: read from the running window (Fyne) — no display hardware inventory is collected.\n"
-	s += "All inspection is local-only: no telemetry, no upload, no serial numbers or user identifiers."
+	s += "\nAll inspection is local-only: no telemetry, no upload, no serial numbers or user identifiers."
 	return s
 }
 
@@ -216,6 +293,28 @@ func (u *studioUI) applyRendererPreferenceFromUI(choice string) {
 	u.logInfo("renderer preference applied", "preference", string(pref))
 	u.requestRenderer(pref)
 	u.status("Renderer preference: " + string(pref) + " (revalidated on every launch)")
+}
+
+// applyPolicyModeFromUI persists the chosen resource mode and records
+// the decision. The mode is guidance read at bounded decision points —
+// nothing here mutates the scheduler or buffers mid-flight.
+func (u *studioUI) applyPolicyModeFromUI(choice string) {
+	mode, err := sysprofile.ParsePerformanceMode(choice)
+	if err != nil {
+		u.logErr("system policy invalid", "choice", choice, "error", err.Error())
+		u.dialogError("Resource policy", err.Error())
+		return
+	}
+	if u.policyStore != nil {
+		if serr := u.policyStore.Save(mode); serr != nil {
+			u.logErr("system policy save failed", "error", serr.Error())
+			u.dialogError("Resource policy", "could not persist: "+serr.Error())
+			return
+		}
+	}
+	u.setPolicyMode(mode)
+	u.logInfo("resource policy mode applied", "mode", string(mode))
+	u.status("Resource policy: " + string(mode) + " (bounded guidance; scheduler baseline untouched)")
 }
 
 // requestRenderer hands a preference change to the render loop.
