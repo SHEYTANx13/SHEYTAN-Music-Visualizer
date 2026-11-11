@@ -295,7 +295,11 @@ $rc = Capture-Step -Job $job -Step "go-mod-verify" -ToolContext "gate:go-mod-ver
 if ($rc -ne 0) { Fail-Gate "go-mod-verify" }
 
 # ---- Go gates (tag-consuming: generated with the -GoTags preamble) ---------
-$rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -GoTags -Command { go test $goTags ./... }
+# Test ownership (run 42939743766 §2.4): the dedicated GPU integration test
+# TestPaletteReachesGPUShader is owned EXCLUSIVELY by this job's
+# gpu-validation gate; it is excluded here ONLY by that exact name. Every
+# other internal/render test stays in the default suite.
+$rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -GoTags -Command { go test $goTags -skip '^TestPaletteReachesGPUShader$' ./... }
 if ($rc -ne 0) { Fail-Gate "go-test" }
 
 $rc = Capture-Step -Job $job -Step "go-vet" -ToolContext "gate:go-vet" -GoTags -Command { go vet $goTags ./... }
@@ -482,9 +486,20 @@ if ($exeOk) {
     }
     if ($rc -ne 0) { Fail-Gate "verify-build-metadata" }
 
+    # Failure-counter snapshot for the package-status record (run
+    # 42939743766 §6): gates BEFORE staging must be green for VERIFIED;
+    # later non-package gates do NOT invalidate a verified package — they
+    # produce the workflow's TEST-ONLY state instead.
+    $script:failuresBeforePackage = $script:failures
+
     # ---- portable staging + artifact validation -----------------------------
     $rc = Capture-Step -Job $job -Step "stage-portable" -ToolContext "gate:stage-portable" -Command {
-        $stageRoot = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable"
+        # CANONICAL ONE-PACKAGE CONTRACT (run 42939743766 §5.1): the GitHub
+        # Actions artifact is EXACTLY dist\SHEYTAN-Music-Visualizer-windows-x64.zip
+        # containing exactly one top-level app directory
+        # SHEYTAN-Music-Visualizer-windows-x64/. The staging root is an
+        # INTERNAL directory that is never uploaded and never archived.
+        $stageRoot = Join-Path (Get-Location).Path "dist\windows-x64-stage"
         if (Test-Path $stageRoot) { Remove-Item -Recurse -Force $stageRoot }
         $appDir = Join-Path $stageRoot "SHEYTAN-Music-Visualizer-windows-x64"
         New-Item -ItemType Directory -Force -Path $appDir | Out-Null
@@ -510,7 +525,7 @@ if ($exeOk) {
     # any mismatch fails the package gate.
     $rc = Capture-Step -Job $job -Step "verify-package-license" -ToolContext "gate:license-identity" -Command {
         $canonical = Get-FileHash -Algorithm SHA256 "license.md"
-        $stagedPath = "dist\SHEYTAN-Music-Visualizer-windows-x64-portable\SHEYTAN-Music-Visualizer-windows-x64\license.md"
+        $stagedPath = "dist\windows-x64-stage\SHEYTAN-Music-Visualizer-windows-x64\license.md"
         $staged = Get-FileHash -Algorithm SHA256 $stagedPath
         Write-Output ("canonical sha256: {0}" -f $canonical.Hash)
         Write-Output ("staged    sha256: {0}" -f $staged.Hash)
@@ -557,8 +572,8 @@ if ($exeOk) {
 
     # PACKAGE ROOT CONTRACT (run 42837709122 gates B+C repair): the
     # archive must carry the APPLICATION directory as its single
-    # top-level folder — never the staging wrapper
-    # (SHEYTAN-Music-Visualizer-windows-x64-portable) that CONTAINS it.
+    # top-level folder — never the staging wrapper (windows-x64-stage)
+    # that CONTAINS it.
     # The previous `Compress-Archive -Path $stageRoot` archived the
     # wrapper itself, so every entry gained one extra outer path level
     # and both the entry manifest and the post-extraction license lookup
@@ -570,8 +585,8 @@ if ($exeOk) {
     # create-portable-tar), producing the identical single-root layout.
     $rc = Capture-Step -Job $job -Step "create-portable-zip" -ToolContext "gate:create-portable-zip" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/New-PortableZip.ps1") -Command {
         . (Join-Path $repoRoot "scripts/ci/New-PortableZip.ps1")
-        $stageRoot = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable"
-        $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
+        $stageRoot = Join-Path (Get-Location).Path "dist\windows-x64-stage"
+        $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
         $mk = New-PortableZip -StageRoot $stageRoot -ZipPath $zip
         if ($mk.Error -ne "") {
             Write-Output "ERROR: portable ZIP creation failed: $($mk.Error)"
@@ -594,7 +609,7 @@ if ($exeOk) {
             Write-Output "ERROR: package root must be exactly one app directory '$appRoot'; observed top-level: $($tops -join ', ')"
             exit 1
         }
-        $wrapper = $mk.Entries | Where-Object { $_ -match '(^|/)SHEYTAN-Music-Visualizer-windows-x64-portable(/|$)' }
+        $wrapper = $mk.Entries | Where-Object { $_ -match '(^|/)windows-x64-stage(/|$)' }
         if ($wrapper) {
             Write-Output "ERROR: staging wrapper directory leaked into the package:"
             $wrapper | ForEach-Object { Write-Output "  $_" }
@@ -653,7 +668,7 @@ if ($exeOk) {
     # was byte-identical — the license itself was never wrong.
     $rc = Capture-Step -Job $job -Step "verify-extracted-package" -ToolContext "gate:package-verify" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Invoke-CapturedProcess.ps1") -Command {
         . (Join-Path $repoRoot "scripts/ci/Invoke-CapturedProcess.ps1")
-        $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
+        $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
         $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("sheytan-pkg-verify-" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
         $cleanup = { if (Test-Path -LiteralPath $extractRoot) { Remove-Item -Recurse -Force $extractRoot } }
@@ -685,7 +700,7 @@ if ($exeOk) {
         }
         # No staging wrapper may exist inside the extraction either.
         $wrapperHit = Get-ChildItem -Recurse -Directory $extractRoot |
-            Where-Object { $_.Name -eq "SHEYTAN-Music-Visualizer-windows-x64-portable" }
+            Where-Object { $_.Name -eq "windows-x64-stage" }
         if ($wrapperHit) {
             Write-Output "ERROR: staging wrapper directory present inside the extracted package"
             & $cleanup; exit 1
@@ -776,6 +791,84 @@ else {
     Skip-Gate "create-portable-zip" "executable build failed"
     Skip-Gate "verify-extracted-package" "executable build failed"
 }
+
+# ---- dedicated GPU integration gate (Dedicated owner: TestPaletteReachesGPUShader)
+# run 42939743766 §2.4: the palette end-to-end proof runs EXACTLY ONCE per
+# platform, here on Windows, with verbose output and its readback
+# diagnostics. It is excluded from go-test by its exact name — NOT skipped
+# as unreliable. Honest adapter note: hosted runners exercise the
+# project's supported software adapter (labelled noop/software, never a
+# physical GPU); hardware validation stays a separate, documented activity.
+$rc = Capture-Step -Job $job -Step "gpu-validation" -ToolContext "gate:gpu-validation (dedicated palette owner)" -GoTags -Command { go test $goTags -timeout 240s -v -run '^TestPaletteReachesGPUShader$' -count=1 ./internal/render/ }
+if ($rc -ne 0) { Fail-Gate "gpu-validation" }
+
+# ---- path-with-spaces runtime check + package-status record ----------------
+# The package-status record (run 42939743766 §6) is machine-readable state
+# for the workflow upload decision: VERIFIED only when every pre-package
+# gate and every package gate passed AND the expected commit (immutable
+# github.sha context) exactly matches the embedded build metadata.
+$script:packageStatus = "UNAVAILABLE"
+$script:commitExpected = $env:SHEYTAN_BUILD_COMMIT
+$script:commitObserved = "not-observed"
+$script:commitVerified = $false
+$exeExists = Test-Path "bin\sheytan-music-visualizer.exe"
+$zipPath = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
+$zipExists = (Test-Path -LiteralPath $zipPath) -and ((Get-Item -LiteralPath $zipPath).Length -gt 0)
+if ($exeExists -and $zipExists -and $script:failuresBeforePackage -eq 0) {
+    $rc = Capture-Step -Job $job -Step "verify-extracted-path-with-spaces" -ToolContext "gate:package-verify (path with spaces)" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Invoke-CapturedProcess.ps1") -Command {
+        . (Join-Path $repoRoot "scripts/ci/Invoke-CapturedProcess.ps1")
+        $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
+        $base = Join-Path ([System.IO.Path]::GetTempPath()) ("SHEYTAN Spaces Dir " + [guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Force -Path $base | Out-Null
+        $cleanup = { if (Test-Path -LiteralPath $base) { Remove-Item -Recurse -Force $base } }
+        try {
+            Expand-Archive -Path $zip -DestinationPath $base
+            $exe = Join-Path $base "SHEYTAN-Music-Visualizer-windows-x64\sheytan-music-visualizer.exe"
+            if (-not (Test-Path -LiteralPath $exe)) { Write-Output "ERROR: EXE missing after spaces-path extraction"; exit 1 }
+            $verRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @("--version") -TimeoutSeconds 120
+            if ($verRun.Kind -ne 'exited' -or $verRun.ExitCode -ne 0) {
+                Write-Output ("ERROR: extracted EXE --version failed from a path containing spaces (kind={0} code={1})" -f $verRun.Kind, $verRun.ExitCode)
+                exit 1
+            }
+            Write-Output "spaces-path runtime check PASSED"
+            exit 0
+        }
+        finally { & $cleanup }
+    }
+    if ($rc -ne 0) { Fail-Gate "verify-extracted-path-with-spaces" }
+
+    # A -H=windowsgui executable may not deliver stdout through a plain
+    # `&` invocation on the runner (run-42837709122 root cause); the
+    # robust runner is the only reliable observation path.
+    . (Join-Path $repoRoot "scripts/ci/Invoke-CapturedProcess.ps1")
+    $verRun = Invoke-CapturedProcess -FilePath "bin\sheytan-music-visualizer.exe" -ArgumentList @("--version") -TimeoutSeconds 120
+    if ($verRun.Kind -eq 'exited' -and $verRun.ExitCode -eq 0 -and $verRun.StdOut.Count -gt 0) {
+        $verLine = ($verRun.StdOut | Select-Object -First 1)
+        if ($verLine -match 'commit ([0-9a-f]{40})') { $script:commitObserved = $Matches[1] }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:commitExpected) -and $script:commitObserved -eq $script:commitExpected.Trim()) {
+        $script:commitVerified = $true
+    }
+    $packageGatesFailed = $script:failures - $script:failuresBeforePackage
+    if ($script:commitVerified -and $packageGatesFailed -eq 0) {
+        $script:packageStatus = "VERIFIED"
+    } else {
+        $script:packageStatus = "TEST_ONLY"
+    }
+}
+$pkgRecord = [ordered]@{
+    platform         = "windows-x64"
+    package_status   = $script:packageStatus
+    package_file     = "dist/SHEYTAN-Music-Visualizer-windows-x64.zip"
+    app_dir          = "SHEYTAN-Music-Visualizer-windows-x64"
+    commit_expected  = $(if ([string]::IsNullOrWhiteSpace($script:commitExpected)) { $null } else { $script:commitExpected })
+    commit_observed  = $script:commitObserved
+    commit_verified  = $script:commitVerified
+    note             = "package_status is VERIFIED only with a non-blank expected commit that exactly matches the embedded metadata; TEST_ONLY packages are valid but the required job stays red"
+}
+New-Item -ItemType Directory -Force -Path "ci-logs" | Out-Null
+$pkgRecord | ConvertTo-Json | Set-Content -Path "ci-logs\package-status-windows.json" -Encoding utf8NoBOM
+Get-Content "ci-logs\package-status-windows.json"
 
 # ---- run summary + failure index -------------------------------------------
 $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")

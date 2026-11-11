@@ -17,12 +17,19 @@ machine. No account, no telemetry, no bundled codec binaries.
 > 2026-11-05 repair session additionally delivered the optional AAC/M4A
 > input adapter, layered compositions, manual tempo/offset correction,
 > spectral rolloff, keyboard transport shortcuts, benchmarks and the
-> consolidated-diagnostics gate repair. The 2026-11-11 session (run
-> 42921967187 repair) fixed the shared Windows packaging-gate root cause,
-> added guaranteed recovery artifacts, machine-readable gate evidence,
-> measured startup/render/DSP performance work, and the docs set under
-> [docs/](docs). See [roadmap.md](roadmap.md) for the honest status of
-> every capability and [ai-notes.md](ai-notes.md) for the evidence trail.
+> consolidated-diagnostics gate repair. The 2026-11-11 sessions delivered
+> the run-42921967187 packaging-gate repair with machine-readable gate
+> evidence, and the run-42939743766 repair: the GPU palette-to-shader
+> defect was fixed at its source (fragment write mask + formalized
+> Go↔WGSL uniform contract, [docs/GPU-RENDERING.md](docs/GPU-RENDERING.md)),
+> the workflow-security scanner now runs pinned zizmor 1.32.0 in one
+> isolated uvx environment, CI diagnostics gained per-gate JSON records
+> and root-cause grouping ([docs/CI-DIAGNOSTICS.md](docs/CI-DIAGNOSTICS.md)),
+> and GitHub Actions now produces EXACTLY ONE Windows and ONE Linux
+> application package plus the plain-text diagnostics report — no
+> recovery/duplicate builds. See [roadmap.md](roadmap.md) for the honest
+> status of every capability and [ai-notes.md](ai-notes.md) for the
+> evidence trail.
 
 ---
 
@@ -58,7 +65,7 @@ brand palettes used by the visualizer (`internal/visualizer`).
 | Runtime logging in every interactive launch: UTC text log, rotation, stderr fallback, startup/subsystem/error records, panic stacks | DELIVERED (`internal/logging` + startup wiring; real-run probe evidence captured) |
 | User-facing diagnostics: Help / Diagnostics dialog with Open Logs Folder, Copy Log Path, resolved data mode + log path | DELIVERED (`ui/fyne` actions; button execution needs an interactive desktop: NOT RUN here) |
 | Predictable app-local data layout: portable `data/` beside the executable (portable.mode marker) or installed per-user location (Windows LOCALAPPDATA, Linux XDG), with visible fallback and non-destructive legacy migration | DELIVERED (`internal/apppaths` + package staging gates; resolver/bootstrap/migration tests PASS) |
-| Windows x64 build | DELIVERED as script/workflow definition with a guaranteed recovery-artifact path (`windows-x64-recovery-executable` / `-staged-package`, uploaded from fresh re-validation even when a later packaging gate fails); **native Windows execution: NOT RUN on this Linux verification host** |
+| Windows x64 build | DELIVERED as script/workflow definition producing exactly one canonical package (`SHEYTAN-Music-Visualizer-windows-x64.zip`, uploaded VERIFIED or TEST-ONLY); **native Windows execution: NOT RUN on this Linux verification host — hosted `build-windows` owns it** |
 
 ## Supported formats
 
@@ -143,7 +150,8 @@ go test ./internal/cilog/                            # collector correctness fix
 - [docs/architecture.md](docs/architecture.md) — package map, startup
   sequence, threading and single-window contracts.
 - [docs/ci.md](docs/ci.md) — build requirements, the exact gate list,
-  the repository-root resolution contract, recovery vs final artifacts,
+  the repository-root resolution contract, one-canonical-package-per-OS
+  artifacts,
   and how to reproduce a failed gate locally.
 - [docs/diagnostics.md](docs/diagnostics.md) — log layout and rotation,
   startup metrics, benchmark/profiling commands, and how to read the

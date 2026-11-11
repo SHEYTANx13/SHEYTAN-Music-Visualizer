@@ -72,18 +72,37 @@ scripts run under `ci-logs/step-scripts/`). Regression fixtures live in
 `scripts/ci/tests/Test-ResolveRepoRoot.ps1` (10 subprocess scenarios R1–R8)
 and run as fixture P7 of `scripts/ci/tests/test-package-gates.sh`.
 
-## Artifacts: final vs recovery
+## Artifacts: one canonical package per OS (run 42939743766 contract)
+
+The run-42921967187 recovery-artifact path (standalone EXE + staged-folder
+package) is RETIRED. There is exactly one Windows and one Linux
+application artifact, plus the single consolidated diagnostics report:
+
+| Artifact | Produced by | Condition | Notes |
+|---|---|---|---|
+| `SHEYTAN-Music-Visualizer-windows-x64.zip` | build-windows | package gates green (VERIFIED) or non-package gates red while package gates green (TEST-ONLY) | one app dir `SHEYTAN-Music-Visualizer-windows-x64/`; PE GUI subsystem 2; license byte-identical; extracted EXE re-run |
+| `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` | build-linux | same VERIFIED/TEST_ONLY rule | one app dir `SHEYTAN-Music-Visualizer-linux-x64/`; exec bit preserved |
+| `SHEYTAN-Music-Visualizer-all-logs.txt` | collect-logs | always (`if: always()`) | plain text, direct upload (`archive: false`), no ZIP wrapper |
+
+`package_status` (VERIFIED / TEST_ONLY / UNAVAILABLE) is written by the
+build scripts to `ci-logs/package-status-<os>.json`; `commit_expected`
+comes from the immutable `github.sha` context and must exactly match the
+embedded build metadata or the package is never marked VERIFIED. A package
+that fails its own checks is never uploaded. Per-job log-part artifacts
+are internal collector inputs, deleted only after the consolidated report
+upload is verified.
 
 | Artifact | Name | Condition | Meaning |
 | --- | --- | --- | --- |
-| Final portable ZIP | `windows-x64-portable-build` | `success()` only — every gate incl. extraction verification passed | The tested, released-quality package (single app-directory root, license byte-identical, extracted EXE re-run). |
-| Recovery executable | `windows-x64-recovery-executable` | `always()`, uploaded only when the EXE independently re-proves: non-empty, PE subsystem 2, expected commit, `--self-check` pass | Single unzipped EXE so a packaging-only failure still gives the user a testable binary. Test-only; never a release. |
-| Recovery staged package | `windows-x64-recovery-staged-package` | `always()`, when the staged app folder exists | The staged folder as-is. Test-only. |
-| Consolidated report | `log.txt` | `always()` after evidence jobs | One plain-text file uploaded unzipped (`archive: false`); validated (non-empty, no ZIP signature) before upload. |
+| Windows package | `SHEYTAN-Music-Visualizer-windows-x64.zip` | package-status driven (`always()`; only when the package passed its own gates) | The single canonical Windows package: one app-directory root, license byte-identical, PE GUI 2, extracted EXE re-run. `TEST-ONLY — required gates failed` label when other gates are red; the job stays red. |
+| Linux package | `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` | same status-driven rule | The single canonical Linux package: one app-directory root, license byte-identical, exec bit preserved. |
+| Consolidated report | `SHEYTAN-Music-Visualizer-all-logs.txt` | `always()` after evidence jobs | One plain-text file uploaded unzipped (`archive: false`); validated (non-empty, no ZIP signature) before upload. |
 
-Recovery eligibility is decided from fresh evidence only and recorded in
-`ci-logs/recovery-eligibility.json`. A recovery upload never turns a
-failed required gate green: the job conclusion comes from the build step.
+There is no raw EXE, no staged-folder archive and no "recovery" variant
+anywhere in the artifact list (the run-42921967187 recovery path was
+retired in the run-42939743766 repair). Package upload decisions come from
+`ci-logs/package-status-windows.json` / `package-status-linux.json`, never
+from file existence alone.
 
 ## Workflow security posture
 
@@ -93,11 +112,21 @@ failed required gate green: the job conclusion comes from the build step.
   `security-events: write` only; collector: `actions: write` solely for
   temporary-artifact cleanup).
 - Preflight runs **pinned** static validators: `actionlint` v1.7.12
-  (checksum-verified) and `zizmor` 1.16.2, failing the run on any finding
-  at low severity or above. Two narrowly-scoped actionlint false
-  positives (documented schema staleness for `queue:` and
-  `github.run_started_at`, both proven by a real hosted run) are ignored
-  by exact message.
+  (checksum-verified) and `zizmor` 1.32.0 — installed through the
+  SHA-pinned `astral-sh/setup-uv` action and audited in ONE isolated
+  `uvx --from zizmor==1.32.0` environment that is verified for version
+  before the audit (the run-42939743766 interpreter-mismatch defect is
+  structurally impossible now), failing the run on any finding at low
+  severity or above. THREE narrowly-scoped actionlint compatibility
+  ignores (documented schema staleness for `queue:`, the documented
+  `github.run_started_at` context property, and the `$/` self-repository
+  reusable-workflow call that zizmor requires but actionlint 1.7.12 does
+  not parse yet — upstream issue #711, no newer verified release) are
+  ignored by exact message, each with its official reference next to it.
+  A negative fixture proves actionlint rejects a deliberately invalid
+  workflow, so a broken install can never masquerade as a clean scan.
+  Online zizmor audits are disabled (deterministic local audits only) —
+  a documented limitation, not a suppressed finding class.
 - `govulncheck ./...` remains a required Linux gate.
 - `.github/dependabot.yml` tracks Go modules and GitHub Actions weekly.
 - CodeQL analyzes Go with

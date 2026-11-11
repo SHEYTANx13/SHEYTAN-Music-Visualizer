@@ -147,11 +147,21 @@ func sincos(x float64) (float64, float64) {
 	return 4*y*(1-y)*2 - 1, 0
 }
 
+// imageUniform reports whether every PIXEL of the frame is identical.
+// It compares whole 4-byte RGBA pixels — the previous byte-granular
+// version mistook a uniform clear color (8,8,8,255) for "non-uniform"
+// content because the alpha bytes differed from the RGB bytes, so a draw
+// that wrote nothing could pass a readback test vacuously
+// (run 42939743766).
 func imageUniform(img *image.RGBA) bool {
-	first := img.Pix[0]
-	for _, b := range img.Pix {
-		if b != first {
-			return false
+	if len(img.Pix) < 4 {
+		return true
+	}
+	for i := 4; i+4 <= len(img.Pix); i += 4 {
+		for c := 0; c < 4; c++ {
+			if img.Pix[i+c] != img.Pix[c] {
+				return false
+			}
 		}
 	}
 	return true

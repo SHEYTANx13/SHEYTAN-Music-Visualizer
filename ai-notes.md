@@ -888,6 +888,8 @@ improve measured startup/runtime performance, and re-synchronize docs.
 No push/PR/release was made (mission rule 1): hosted verification on the
 delivered commit remains a user-triggered step.
 
+<!-- BEGIN HISTORICAL RECORD — run 42921967187 session (superseded artifact/tool claims are historical, see the run-42939743766 section below) -->
+
 ## Starting state
 
 Checkout verified at the evidence commit, clean tree, branch main up to
@@ -956,3 +958,90 @@ without root, so GUI smoke/startup-stage measurement are NOT RUN here)
 | govulncheck | NOT RUN this session (no network to install pinned v1.9.0 in the sandbox; it remains a required hosted/Linux-ladder gate) |
 | Windows UCRT64 build + portable ZIP + recovery upload path execution | BLOCKED locally (no Windows toolchain in this Linux sandbox; definition validated by fixtures) |
 | Hosted re-run | NOT RUN (no push permitted) |
+
+
+<!-- END HISTORICAL RECORD -->
+
+# Session record — run 42939743766 repair (2026-11-11)
+
+## The GPU palette defect: what actually failed and why
+
+`TestPaletteReachesGPUShader` failed identically on hosted Windows and
+Linux ("palettes 0 and 1 produced identical GPU frames"). Reproduction on
+this host reproduced it byte-for-byte, and empirical instrumentation
+proved:
+
+1. The Go packer wrote CORRECT, palette-dependent bytes (bins@48,
+   colors@304, size 384 — matching the WGSL struct layout).
+2. The rendered frame was EXACTLY the load-op clear color (0.03,0.03,0.03,1)
+   for every pixel, for every palette.
+3. The wgpu software HAL stores `colorTarget.mask = state.WriteMask` raw;
+   the pipeline declared `gputypes.ColorTargetState{Format: ...}` with the
+   zero WriteMask — and in the pinned gputypes the zero value IS
+   `ColorWriteMaskNone`. Every fragment write was masked out.
+4. The general readback test passed VACUOUSLY because `imageUniform`
+   compared bytes, and a uniform RGBA clear color has alpha != RGB.
+
+Fixes: explicit `WriteMask: gputypes.ColorWriteMaskAll` in
+`internal/render/gpu.go` buildPipeline; pixel-granular `imageUniform`;
+the packer formalized into ONE `packUniforms` with the documented layout
+table and offset constants; the WGSL shader now reads every packed lane
+(peak highlight mirrors the CPU renderer's peak markers); contract tests
+pin offsets, lane order, packed bytes and the static WGSL member order.
+
+## Go↔WGSL data contract (the fixed, tested one)
+
+See `docs/GPU-RENDERING.md` — the authoritative table, plus
+`TestUniformLayoutMatchesWGSL`, `TestColorLaneOrderMatchesPaletteFields`,
+`TestPackUniformsContract`, `TestWGSLParamsContractMatchesGoLayout` and
+`TestPaletteReachesGPUShader`. Any change to the WGSL Params struct or the
+packer must update all of them together.
+
+## How to reproduce the GPU test
+
+```bash
+go test -tags goffi_static -v -run '^TestPaletteReachesGPUShader$' -count=1 ./internal/render/
+```
+
+It runs on the project's supported software adapter (ForceFallbackAdapter;
+labelled "Software Renderer", never reported as hardware). CI owns it in
+the dedicated `gpu-validation` gate, once per platform; the default and
+race suites exclude it by exact name (`-skip '^TestPaletteReachesGPUShader$'`).
+
+## zizmor repair
+
+The run-42921967187 preflight installed the then-pinned zizmor release
+with `pip` but
+audited via `/usr/bin/python3 -m zizmor` — a different environment
+("No module named zizmor"), so the audit never executed. The preflight now
+installs uv through the SHA-pinned `astral-sh/setup-uv` action (verified
+commit fac544c07dec837d0ccb6301d7b5580bf5edae39 = v8.2.0) and runs BOTH
+the version check and the audit through ONE isolated environment:
+`uvx --from zizmor==1.32.0 zizmor ...`. Verified locally this session:
+`zizmor 1.32.0` (PyPI, released 2026-11-02), audit clean at
+`--min-severity low --min-confidence low` after adopting GitHub's `$/`
+self-repository syntax for the CodeQL reusable call (GA 2026-07;
+actionlint 1.7.12 does not parse it yet — upstream issue #711, no newer
+verified release — covered by a third exact, documented ignore).
+actionlint negative fixture: an invalid fixture workflow is REJECTED with
+exit 1 (proven locally).
+
+## One-canonical-package contract
+
+The run-42921967187 recovery artifacts (standalone EXE + staged package)
+are retired. Exactly two application artifacts exist (Windows ZIP, Linux
+TAR.GZ) plus the plain-text report
+`SHEYTAN-Music-Visualizer-all-logs.txt`. Upload decisions come from the
+build scripts' `ci-logs/package-status-<os>.json` (VERIFIED / TEST_ONLY /
+UNAVAILABLE; commit_expected from `github.sha`, fail-closed). Local
+verification this session: `scripts/ci/tests/test-ci-plumbing.sh`
+PASS=19 FAIL=0; package-gate bash fixtures PASS; the P/C/D pwsh fixtures
+are NOT RUN here (no pwsh) and stay owned by the preflight job.
+
+## Environment boundary of this session
+
+Linux x64 sandbox, go1.27.3. All non-GUI packages verified; `ui/fyne` and
+`cmd/sheytan-music-visualizer` are environment-BLOCKED locally (no root to
+install GL/wayland dev headers) and are owned by hosted CI. No physical
+GPU/audio/display hardware exists here: every hardware claim stays
+software-adapter evidence.

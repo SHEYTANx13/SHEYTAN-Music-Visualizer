@@ -32,15 +32,16 @@ name: build-desktop
 # distinct across retries and queued runs.
 #
 # Final user-facing diagnostics artifact: exactly ONE artifact named
-# `log.txt` containing exactly one file named `log.txt`. The per-job
+# `SHEYTAN-Music-Visualizer-all-logs.txt` containing exactly one file named
+# `SHEYTAN-Music-Visualizer-all-logs.txt`. The per-job
 # `*-logs-part-attempt*` artifacts are internal; the collect-logs job deletes
-# them only AFTER the consolidated log.txt is validated and uploaded
+# them only AFTER the consolidated report is validated and uploaded
 # successfully (needs `actions: write`, scoped to that job only — the reason
 # is the single-artifact requirement, not a way to hide failures: the final
 # job conclusion is still derived from the real build/CodeQL job results).
 # If the collector binary cannot be built or hard-fails, a tested emergency
 # fallback (scripts/ci/emergency-report.sh) still writes and uploads a
-# truthful log.txt, and the job then fails closed (coverage unverified).
+# truthful consolidated report, and the job then fails closed (coverage unverified).
 #
 # CodeQL runs as a reusable workflow called below, so same-commit CodeQL
 # evidence is part of the same run and its result feeds the manifest.
@@ -132,28 +133,81 @@ jobs:
       # runner-image capture or setup-go failed — each gate is attempted
       # and reported separately by the gate runner; missing tools are
       # recorded as honest failures with their real exit codes.
-      - name: Preflight gates (gofmt, tidy -diff, mod verify)
+      - name: Preflight gates (gofmt, tidy -diff, mod verify, docs consistency)
         if: ${{ always() && !cancelled() }}
         run: |
           set -Eeuo pipefail
           bash scripts/ci/bootstrap-logs.sh >/dev/null
-          bash scripts/build/build-linux.sh --mode preflight 2>&1 | tee ci-logs/preflight-build.log
-          exit "${PIPESTATUS[0]}"
+          rc=0
+          bash scripts/build/build-linux.sh --mode preflight 2>&1 | tee ci-logs/preflight-build.log || rc=${PIPESTATUS[0]}
+          # Documentation consistency (run 42939743766 §7): canonical
+          # artifact names match the workflow, local doc links resolve,
+          # and no obsolete artifact names/tool versions remain in the
+          # current doc text. Deterministic, no network.
+          if bash scripts/ci/tests/test-docs-consistency.sh 2>&1 | tee ci-logs/docs-consistency.log; then
+            echo "docs-consistency: PASS" >> ci-logs/preflight-build.log
+          else
+            echo "docs-consistency: FAIL" >> ci-logs/preflight-build.log
+            rc=1
+          fi
+          exit "$rc"
 
-      # Static workflow validation (run-42921967187 §6.D): actionlint and
-      # zizmor at PINNED versions with verified upstream checksums — never
-      # mutable "latest". The two actionlint -ignore patterns are narrowly
-      # scoped to documented schema-staleness false positives, each proven
-      # by a real hosted run executing this exact file (run 42921967187):
-      # `queue:` is accepted under the concurrency section, and
-      # `github.run_started_at` is a documented GitHub context property.
-      # No whole audit class is suppressed: every other actionlint finding
-      # and every zizmor low+ finding fails this step.
-      - name: Static workflow validation (actionlint + zizmor, pinned)
+      # Static workflow validation (run-42921967187 §6.D, repaired for run
+      # 42939743766 §3.1/§3.2): actionlint and zizmor at PINNED versions
+      # with verified upstream checksums — never mutable "latest".
+      #
+      # zizmor runs in ONE isolated, pinned uvx environment
+      # (zizmor==1.32.0). The version check and the audit use the SAME
+      # `uvx --from zizmor==1.32.0` invocation, so the interpreter that
+      # reports the version is the interpreter that runs the audit. The
+      # run-42939743766 defect — `pip install` into one environment while
+      # `/usr/bin/python3 -m zizmor` ran in another ("No module named
+      # zizmor") — is structurally impossible here: no system interpreter
+      # is invoked, and a failed install/version/audit step fails the gate.
+      # Online audits are disabled (deterministic, no network-dependent
+      # findings); that exact limitation is documented in note.md and
+      # docs/CI-DIAGNOSTICS.md.
+      #
+      # The THREE actionlint -ignore patterns are narrowly scoped to
+      # documented compatibility exceptions, each with its official
+      # reference and a one-line reason — no whole audit class is
+      # suppressed:
+      #  1. `queue:` under concurrency is valid per the GitHub workflow
+      #     syntax docs
+      #     (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency);
+      #     pinned actionlint 1.7.12 predates it (proven by hosted run
+      #     42921967187).
+      #  2. `github.run_started_at` is a documented GitHub context property
+      #     (https://docs.github.com/en/actions/reference/workflows-and-actions/context#github-context).
+      #  3. The `$/` self-repository reusable-workflow call is GA on
+      #     github.com since July 2026
+      #     (https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows;
+      #     zizmor 1.32.0 REQUIRES it via its self-repository audit), but
+      #     pinned actionlint 1.7.12 does not know the syntax yet
+      #     (https://github.com/rhysd/actionlint/issues/711 — open, no
+      #     verified newer release exists). The ignore is pinned to THIS
+      #     exact call; any other workflow-call finding still fails.
+      # Every other actionlint finding and every zizmor low+ finding fails
+      # this step. A NEGATIVE FIXTURE proves actionlint actually detects a
+      # broken workflow, so an install failure or silent no-op can never
+      # masquerade as a clean scan (run 42939743766 §3.2).
+      # uv is installed through astral-sh/setup-uv pinned to its verified
+      # upstream v8.2.0 commit (full 40-char SHA; reviewed release). uvx
+      # then runs zizmor==1.32.0 in ONE isolated cached environment that
+      # is used for BOTH the version check and the audit (§3.1).
+      - name: Install pinned uv (for the isolated zizmor environment)
+        if: ${{ always() && !cancelled() }}
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: '0.9.9'
+          enable-cache: false
+
+      - name: Static workflow validation (actionlint + zizmor, pinned, fixture-proven)
         if: ${{ always() && !cancelled() }}
         run: |
           set -Eeuo pipefail
-          mkdir -p ci-logs bin-tools
+          mkdir -p ci-logs bin-tools gate-results
+          start_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           {
             echo "=== actionlint v1.7.12 (pinned, checksum-verified) ==="
             curl -fsSL -o bin-tools/actionlint.tgz \
@@ -161,28 +215,74 @@ jobs:
             echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  bin-tools/actionlint.tgz" | sha256sum -c -
             tar -xzf bin-tools/actionlint.tgz -C bin-tools actionlint
             bin-tools/actionlint --version | head -1
-            echo "=== zizmor 1.16.2 (pinned via PyPI) ==="
-            python3 -m pip install --quiet --disable-pip-version-check 'zizmor==1.16.2'
-            python3 -m zizmor --version || zizmor --version || true
+            echo "=== uv/uvx identity (installed by the SHA-pinned setup-uv action above) ==="
+            command -v uvx >/dev/null 2>&1 || { echo "ERROR: uvx not on PATH after setup-uv"; exit 1; }
+            uvx --version | tee ci-logs/uv-version.txt
+            UVX_PATH="$(command -v uvx)"
+            echo "uvx executable path: $UVX_PATH"
+            echo "=== zizmor 1.32.0 version check (SAME isolated uvx environment as the audit) ==="
+            uvx --from 'zizmor==1.32.0' zizmor --version | tee ci-logs/zizmor-version.txt
+            grep -q '^zizmor 1\.32\.0$' ci-logs/zizmor-version.txt || { echo "ERROR: pinned zizmor version verification failed"; exit 1; }
           } 2>&1 | tee ci-logs/workflow-static-tools.log
+          st=${PIPESTATUS[0]}
+          if [ "$st" -ne 0 ]; then
+            echo "ERROR: static-tool installation/version verification failed (exit $st)"
+            exit "$st"
+          fi
+
+          # actionlint scan (raw log kept even when empty)
           rc=0
           bin-tools/actionlint \
             -ignore 'unexpected key "queue" for "concurrency" section' \
             -ignore 'property "run_started_at" is not defined' \
+            -ignore 'reusable workflow call "\$/\.github/workflows/codeql\.yml" at "uses" is not following the format' \
             > ci-logs/actionlint.log 2>&1 || rc=$?
           cat ci-logs/actionlint.log
           if [ "$rc" -ne 0 ]; then
             echo "ERROR: actionlint findings (outside the two documented false positives above)"
           fi
+
+          # NEGATIVE FIXTURE (§3.2): a deliberately invalid workflow must
+          # make actionlint exit nonzero. A tool that exits 0 on garbage is
+          # broken, not clean.
+          fixture_failed=0
+          mkdir -p .actionlint-fixture/.github/workflows
+          # (ubuntu-26.04 keeps the E-no-ubuntu-latest structural fixture
+          # green; the fixture is invalid because run: and uses: collide
+          # on one step, not because of the runner label.)
+          printf 'on: push\njobs:\n  broken:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: echo hi\n        uses: actions/checkout@v9\n' \
+            > .actionlint-fixture/.github/workflows/broken.yml
+          if bin-tools/actionlint .actionlint-fixture/.github/workflows/broken.yml > ci-logs/actionlint-fixture.log 2>&1; then
+            echo "ERROR: actionlint accepted an INVALID workflow — the scan cannot be trusted"
+            fixture_failed=1
+          else
+            echo "actionlint negative fixture PASSED (invalid workflow correctly rejected, exit nonzero)"
+          fi
+          rm -rf .actionlint-fixture
+
+          # zizmor audit through the SAME isolated environment (§3.1)
           zrc=0
-          python3 -m zizmor --no-online-audits --min-severity low --min-confidence low \
+          uvx --from 'zizmor==1.32.0' zizmor --no-online-audits --min-severity low --min-confidence low \
             --format plain .github/workflows/ > ci-logs/zizmor.log 2>&1 || zrc=$?
           cat ci-logs/zizmor.log
           if [ "$zrc" -ne 0 ]; then
             echo "ERROR: zizmor findings at low severity or above"
           fi
-          if [ "$rc" -ne 0 ] || [ "$zrc" -ne 0 ]; then exit 1; fi
-          echo "workflow static validation PASSED (actionlint clean, zizmor clean at low+)"
+          end_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+          # structured result record for the collector (§4.1)
+          python3 -c "import json,sys; run_id,attempt,commit,start,end,arc,zrc,fix=sys.argv[1:9]; rec={\
+            'gate':'static-workflow-validation','run_id':run_id,'attempt':attempt,'commit':commit,\
+            'started_utc':start,'ended_utc':end,'actionlint_exit':int(arc),'zizmor_exit':int(zrc),\
+            'negative_fixture_failed':bool(int(fix)),\
+            'zizmor':{'version':'1.32.0','invocation':'uvx --from zizmor==1.32.0 zizmor --no-online-audits --min-severity low --min-confidence low --format plain .github/workflows/','online_audits':'disabled (documented limitation)'},\
+            'actionlint':{'version':'1.7.12','ignores':['unexpected key \"queue\" for \"concurrency\" section','property \"run_started_at\" is not defined','reusable workflow call \"\$/\.github/workflows/codeql\.yml\" at \"uses\" is not following the format (self-repository syntax GA 2026-07; actionlint issue #711)']},\
+            'verdict':'PASS' if (int(arc)==0 and int(zrc)==0 and int(fix)==0) else 'FAIL'};\
+            json.dump(rec,open('gate-results/static-workflow-validation.result.json','w'),indent=2); print(json.dumps(rec))" \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_SHA" "$start_utc" "$end_utc" "$rc" "$zrc" "$fixture_failed" || true
+
+          if [ "$rc" -ne 0 ] || [ "$zrc" -ne 0 ] || [ "$fixture_failed" -ne 0 ]; then exit 1; fi
+          echo "workflow static validation PASSED (actionlint clean + fixture-proven, zizmor 1.32.0 clean at low+)"
 
       # Explicit BLOCKED marker whenever this job ends red: the report must
       # distinguish "a gate failed with records" from "gates never reached".
@@ -317,151 +417,74 @@ jobs:
           exit $LASTEXITCODE
 
       # ------------------------------------------------------------------
-      # GUARANTEED RECOVERY ARTIFACT PATH (run 42921967187 contract):
-      # that run produced a VALID Windows GUI executable (65,843,400 bytes,
-      # PE subsystem 2, correct commit, self-check pass) but its artifact
-      # upload was skipped because a later packaging-only gate failed on the
-      # null repo-root defect. The user was left with no testable binary.
-      # These steps run ALWAYS after the build step and independently
-      # re-validate the EXE (they never trust a failed step's claims):
-      #   - eligibility is decided from fresh evidence only
-      #     (ci-logs/recovery-eligibility.json is the machine-readable record),
-      #   - a recovery EXE is uploaded ONLY when it exists, is non-empty,
-      #     is PE GUI subsystem 2, reports the expected commit and passes
-      #     --self-check through the captured-process helper,
-      #   - the staged app folder is uploaded as a test-only package even
-      #     when the final ZIP gate failed,
-      #   - the final portable ZIP is uploaded ONLY on full step success
-      #     (it already passed extraction verification inside the build).
-      # A recovery upload NEVER turns a failed required gate into success:
-      # the job conclusion still comes from the build step itself, and the
-      # artifacts are explicitly labeled recovery/test-only.
+      # CANONICAL ONE-PACKAGE CONTRACT (run 42939743766 §5, replacing the
+      # run-42921967187 recovery path): there is EXACTLY ONE Windows x64
+      # application artifact — SHEYTAN-Music-Visualizer-windows-x64.zip.
+      # No raw EXE, no staged-folder archive, no "recovery executable",
+      # no duplicate portable variant is ever uploaded. The package is
+      # uploaded when it exists AND its own package gates passed:
+      #   - package_status VERIFIED → the canonical package of a green run
+      #   - package_status TEST_ONLY → the canonical package of a run
+      #     where a non-package gate failed; the job and workflow stay red
+      #     and the summary labels it TEST-ONLY
+      #   - package_status UNAVAILABLE / file missing → NO package is
+      #     uploaded; diagnostics only
+      # Uploads use actions/upload-artifact v7 archive:false, so the
+      # downloaded artifact IS the ZIP (no double-zip wrapper); the
+      # artifact name is the file's basename.
       # ------------------------------------------------------------------
-      - name: Decide recovery artifact eligibility (independent re-validation)
-        id: recovery_eligibility
+      - name: Decide Windows package upload (canonical, status-driven)
+        id: win_package_decision
         if: always()
         shell: pwsh
         run: |
           Set-StrictMode -Version 3.0
-          $ErrorActionPreference = 'Stop'
-          . (Join-Path $env:SHEYTAN_REPO_ROOT 'scripts/ci/Invoke-CapturedProcess.ps1')
-          $exe = 'bin/sheytan-music-visualizer.exe'
-          $exeExists = Test-Path $exe
-          $size = 0; if ($exeExists) { $size = (Get-Item $exe).Length }
-          $peOk = $false
-          if ($exeExists -and $size -gt 0) {
-            $bytes = [System.IO.File]::ReadAllBytes($exe)
-            if ($bytes.Length -ge 0x100 -and $bytes[0] -eq 77 -and $bytes[1] -eq 90) {
-              $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
-              if ($peOff -gt 0 -and ($peOff + 4 + 20 + 68 + 2) -le $bytes.Length) {
-                $subsystem = [BitConverter]::ToUInt16($bytes, $peOff + 4 + 20 + 68)
-                $peOk = ($subsystem -eq 2)
-                Write-Output "recovery PE subsystem: $subsystem (2 = GUI)"
-              }
-            }
+          $status = 'UNAVAILABLE'
+          $statusFile = 'ci-logs/package-status-windows.json'
+          if (Test-Path $statusFile) {
+            try { $status = (Get-Content $statusFile -Raw | ConvertFrom-Json).package_status } catch { $status = 'UNAVAILABLE' }
           }
-          $commitOk = $false; $selfOk = $false; $commitObserved = 'not-observed'
-          if ($exeExists -and $peOk) {
-            $verRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @('--version') -TimeoutSeconds 120
-            if ($verRun.Kind -eq 'exited' -and $verRun.ExitCode -eq 0 -and $verRun.StdOut.Count -gt 0) {
-              $verLine = $verRun.StdOut[0]
-              Write-Output "recovery --version: $verLine"
-              $commitObserved = if ($verLine -match 'commit ([0-9a-f]{40})') { $Matches[1] } else { 'unknown' }
-              if (-not [string]::IsNullOrWhiteSpace($env:SHEYTAN_BUILD_COMMIT)) {
-                $commitOk = ($commitObserved -eq $env:SHEYTAN_BUILD_COMMIT.Trim())
-              } else { $commitOk = ($commitObserved -ne 'unknown') }
-            }
-            $selfOut = Join-Path ([System.IO.Path]::GetTempPath()) 'recovery-self-check.txt'
-            if (Test-Path $selfOut) { Remove-Item $selfOut -Force }
-            $selfRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @('--self-check', '--self-check-out', $selfOut) -TimeoutSeconds 180
-            if ($selfRun.Kind -eq 'exited' -and $selfRun.ExitCode -eq 0 -and (Test-Path $selfOut)) {
-              $selfText = Get-Content $selfOut
-              $selfOk = [bool]($selfText | Where-Object { $_ -match 'self-check: all foundation invariants hold' })
-            }
+          $zip = 'dist/SHEYTAN-Music-Visualizer-windows-x64.zip'
+          $exists = (Test-Path -LiteralPath $zip) -and ((Get-Item -LiteralPath $zip).Length -gt 0)
+          Write-Output "package_status=$status zip_exists=$exists"
+          $upload = ($status -in @('VERIFIED','TEST_ONLY')) -and $exists
+          if ($upload) {
+            $size = (Get-Item -LiteralPath $zip).Length
+            if ($size -lt 1048576) { Write-Output "ERROR: package implausibly small ($size bytes)"; $upload = $false }
+            else { Write-Output "package size: $size bytes" }
           }
-          $exeEligible = ($exeExists -and $size -gt 0 -and $peOk -and $commitOk -and $selfOk)
-          $stageDir = 'dist/SHEYTAN-Music-Visualizer-windows-x64-portable/SHEYTAN-Music-Visualizer-windows-x64'
-          $stageExists = (Test-Path (Join-Path $stageDir 'sheytan-music-visualizer.exe')) -and (Test-Path (Join-Path $stageDir 'license.md'))
-          $zipExists = Test-Path 'dist/SHEYTAN-Music-Visualizer-windows-x64-portable.zip'
-          $elig = [ordered]@{
-            run_id = $env:GITHUB_RUN_ID; attempt = $env:GITHUB_RUN_ATTEMPT
-            decided_utc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-            exe_exists = $exeExists; exe_bytes = $size
-            pe_subsystem_gui = $peOk
-            commit_expected = $env:SHEYTAN_BUILD_COMMIT; commit_observed = $commitObserved
-            commit_verified = $commitOk
-            self_check_passed = $selfOk
-            recovery_executable_eligible = $exeEligible
-            staged_package_exists = $stageExists
-            final_zip_exists = $zipExists
-            note = 'recovery artifacts are test-only; a recovery upload never substitutes for a failed required package gate'
+          if (-not $upload) {
+            Write-Output "NO Windows package upload: an unusable package is never published (status=$status). Diagnostics remain available."
           }
-          $json = $elig | ConvertTo-Json
-          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
-          Set-Content -Path ci-logs/recovery-eligibility.json -Value $json -Encoding utf8NoBOM
-          $json
-          if ($exeEligible) {
-            New-Item -ItemType Directory -Force -Path dist/recovery | Out-Null
-            Copy-Item $exe 'dist/recovery/sheytan-music-visualizer.exe' -Force
-            Write-Output "RECOVERY EXECUTABLE STAGED: dist/recovery/sheytan-music-visualizer.exe (validated above)"
-          } else {
-            Write-Output "NO recovery executable: eligibility not proven (see ci-logs/recovery-eligibility.json). This is honest evidence, never a silent skip."
-          }
-          "executable=$(if ($exeEligible) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
-          "staged=$(if ($stageExists) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
-          "finalzip=$(if ($zipExists) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+          "package_uploaded=$(if ($upload) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+          "package_status=$status" >> $env:GITHUB_OUTPUT
 
-      - name: Upload Windows x64 recovery executable (validated, single file, unzipped)
-        if: always() && steps.recovery_eligibility.outputs.executable == 'true'
+      - name: Upload the canonical Windows x64 package (single artifact)
+        if: always() && steps.win_package_decision.outputs.package_uploaded == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-x64-recovery-executable
-          path: dist/recovery/sheytan-music-visualizer.exe
+          path: dist/SHEYTAN-Music-Visualizer-windows-x64.zip
           archive: false
           if-no-files-found: error
           overwrite: true
 
-      - name: Upload Windows x64 recovery staged package (test-only)
-        if: always() && steps.recovery_eligibility.outputs.staged == 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-x64-recovery-staged-package
-          path: dist/SHEYTAN-Music-Visualizer-windows-x64-portable
-          if-no-files-found: error
-          overwrite: true
-
-      - name: Check Windows portable build exists before upload
-        if: success()
+      - name: Label the Windows package state in the job summary (TEST-ONLY contract)
+        if: always()
         shell: pwsh
         run: |
-          $zip = "dist/SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
-          if (-not (Test-Path $zip)) {
-            Write-Output "ERROR: portable build ZIP not found: $zip"
-            exit 1
-          }
-          $size = (Get-Item $zip).Length
-          Write-Output "portable ZIP size: $size bytes"
-          if ($size -lt 1048576) {
-            Write-Output "ERROR: portable ZIP implausibly small ($size bytes)"
-            exit 1
+          $status = '${{ steps.win_package_decision.outputs.package_status }}'
+          $uploaded = '${{ steps.win_package_decision.outputs.package_uploaded }}'
+          if ($env:GITHUB_STEP_SUMMARY) {
+            if ($uploaded -eq 'true' -and $status -eq 'VERIFIED') {
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- Artifact: SHEYTAN-Music-Visualizer-windows-x64.zip (VERIFIED — every required gate passed)"
+            } elseif ($uploaded -eq 'true') {
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- Artifact: SHEYTAN-Music-Visualizer-windows-x64.zip`n- **TEST-ONLY — required gates failed** (see the gate table below; the job and workflow remain red)"
+            } else {
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- NOT UPLOADED (package_status=$status; an unusable package is never published)"
+            }
           }
 
-      - name: Upload final Windows portable ZIP (only on full build success)
-        # archive: false delivers the ALREADY-COMPRESSED portable ZIP
-        # directly — the downloaded artifact IS the portable ZIP, not an
-        # artifact ZIP wrapping another ZIP. v7 non-archive mode accepts
-        # exactly one file path and names the artifact after its
-        # basename; the name input is ignored in this mode.
-        if: success()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows-x64-portable-build
-          path: dist/SHEYTAN-Music-Visualizer-windows-x64-portable.zip
-          archive: false
-          if-no-files-found: error
-          overwrite: true
-
-      - name: Record Windows gate table and recovery outcome in the job summary
+      - name: Record Windows gate table and package outcome in the job summary
         if: always()
         shell: pwsh
         run: |
@@ -476,8 +499,8 @@ jobs:
             elseif ($line -match '^BLOCKED: gate (\S+)') { $n = $Matches[1]; if (-not $gates.ContainsKey($n)) { $order += $n; $gates[$n] = 'BLOCKED' } }
             elseif ($line -match '^SKIPPED: gate (\S+)') { $n = $Matches[1]; if (-not $gates.ContainsKey($n)) { $order += $n; $gates[$n] = 'SKIPPED' } }
           }
-          $eligFile = 'ci-logs/recovery-eligibility.json'
-          $recov = if (Test-Path $eligFile) { (Get-Content $eligFile -Raw | ConvertFrom-Json).recovery_executable_eligible } else { $false }
+          $pkgFile = 'ci-logs/package-status-windows.json'
+          $pkg = if (Test-Path $pkgFile) { (Get-Content $pkgFile -Raw | ConvertFrom-Json) } else { $null }
           if ($env:GITHUB_STEP_SUMMARY) {
             {
               '### build-windows gate table'
@@ -486,7 +509,11 @@ jobs:
               '|---|---|'
               foreach ($n in $order) { "| $n | $($gates[$n]) |" }
               ''
-              "Recovery executable uploaded: $recov (test-only; never substitutes for a failed required gate)"
+              if ($null -ne $pkg) {
+                "package_status=$($pkg.package_status) commit_verified=$($pkg.commit_verified) (expected=$($pkg.commit_expected), observed=$($pkg.commit_observed))"
+              } else {
+                'package_status=NOT RECORDED (the build script did not reach the package-status step)'
+              }
               'Evidence distinctions: local != hosted; software adapter != physical GPU; staged != extracted-and-verified.'
             } | ForEach-Object { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $_ }
           }
@@ -626,25 +653,68 @@ jobs:
           bash scripts/build/build-linux.sh --mode desktop 2>&1 | tee ci-logs/linux-build.log
           exit "${PIPESTATUS[0]}"
 
-      - name: Check Linux build exists before upload
-        if: success()
+      # CANONICAL ONE-PACKAGE CONTRACT (run 42939743766 §5): exactly ONE
+      # Linux x64 application artifact —
+      # SHEYTAN-Music-Visualizer-linux-x64.tar.gz — uploaded when it exists
+      # AND its own package gates passed (VERIFIED or TEST_ONLY per
+      # ci-logs/package-status-linux.json). An unusable package is never
+      # uploaded; the job stays red either way.
+      - name: Decide Linux package upload (canonical, status-driven)
+        id: linux_package_decision
+        if: always()
         run: |
-          test -s bin/sheytan-music-visualizer || { echo "ERROR: linux executable missing or empty"; exit 1; }
-          test -s dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz || { echo "ERROR: linux portable tarball missing or empty"; exit 1; }
-          ls -l bin/sheytan-music-visualizer dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz
+          set -Eeuo pipefail
+          status=UNAVAILABLE
+          if [ -s ci-logs/package-status-linux.json ]; then
+            status="$(python3 -c 'import json;print(json.load(open("ci-logs/package-status-linux.json")).get("package_status","UNAVAILABLE"))' 2>/dev/null || echo UNAVAILABLE)"
+          fi
+          tarball=dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz
+          if [ -s "$tarball" ] && { [ "$status" = "VERIFIED" ] || [ "$status" = "TEST_ONLY" ]; }; then
+            size=$(stat -c%s "$tarball")
+            echo "package_status=$status tarball_bytes=$size"
+            if [ "$size" -lt 1048576 ]; then
+              echo "ERROR: package implausibly small ($size bytes); not uploaded"
+              echo "package_uploaded=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "package_uploaded=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "package_status=$status tarball missing or invalid — NO Linux package upload (an unusable package is never published)"
+            echo "package_uploaded=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "package_status=$status" >> "$GITHUB_OUTPUT"
 
-      - name: Upload Linux x64 build artifact (CI artifact, not a release)
-        # The portable tar.gz preserves the executable bit (a plain
-        # binary artifact upload would not) and archive: false delivers
-        # the prebuilt archive directly — no artifact ZIP wrapper.
-        if: success()
+      - name: Upload the canonical Linux x64 package (single artifact)
+        # The tar.gz preserves the executable bit (a plain binary upload
+        # would not) and archive: false delivers the prebuilt archive
+        # directly — no artifact ZIP wrapper; the artifact name is the
+        # file's basename.
+        if: always() && steps.linux_package_decision.outputs.package_uploaded == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-x64-portable-build
-          path: dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz
+          path: dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz
           archive: false
           if-no-files-found: error
           overwrite: true
+
+      - name: Label the Linux package state in the job summary (TEST-ONLY contract)
+        if: always()
+        run: |
+          status="${{ steps.linux_package_decision.outputs.package_status }}"
+          uploaded="${{ steps.linux_package_decision.outputs.package_uploaded }}"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            if [ "$uploaded" = "true" ] && [ "$status" = "VERIFIED" ]; then
+              echo "### Linux x64 package" >> "$GITHUB_STEP_SUMMARY"
+              echo "- Artifact: SHEYTAN-Music-Visualizer-linux-x64.tar.gz (VERIFIED — every required gate passed)" >> "$GITHUB_STEP_SUMMARY"
+            elif [ "$uploaded" = "true" ]; then
+              echo "### Linux x64 package" >> "$GITHUB_STEP_SUMMARY"
+              echo "- Artifact: SHEYTAN-Music-Visualizer-linux-x64.tar.gz" >> "$GITHUB_STEP_SUMMARY"
+              echo "- **TEST-ONLY — required gates failed** (see the gate table inside the consolidated report; the job and workflow remain red)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "### Linux x64 package" >> "$GITHUB_STEP_SUMMARY"
+              echo "- NOT UPLOADED (package_status=$status; an unusable package is never published)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
 
       - name: Record setup failure as BLOCKED evidence (never silent)
         if: failure()
@@ -667,7 +737,7 @@ jobs:
   # Same-run CodeQL analysis (reusable workflow). Its `analyze` job
   # uploads a temporary codeql-logs-part-<language>-attempt* artifact
   # inside THIS run, so the collector can consolidate same-commit CodeQL
-  # evidence into the single log.txt without a second visible log artifact.
+  # evidence into the single consolidated report without a second visible log artifact.
   #
   # Reusable-workflow permissions are validated against EVERY nested job,
   # even when a nested job's `if:` condition will skip it. codeql.yml's
@@ -682,12 +752,16 @@ jobs:
       actions: write
       contents: read
       security-events: write
-    uses: ./.github/workflows/codeql.yml
+    # Self-repository syntax (GA July 2026, GitHub docs): "$/" resolves
+    # this repository at the exact running commit, so the reusable CodeQL
+    # workflow can never drift from the caller's SHA. zizmor 1.32.0
+    # (self-repository audit) flagged the previous "./" form.
+    uses: $/.github/workflows/codeql.yml
     with:
       called: true
 
   collect-logs:
-    name: collect-logs (single log.txt evidence)
+    name: collect-logs (single consolidated report evidence)
     # always() so a failed build/CodeQL job still yields its report;
     # !cancelled() so a user-cancelled run does not start a pointless
     # collection. `needs` guarantees every evidence-producing job has
@@ -701,7 +775,7 @@ jobs:
     permissions:
       contents: read
       # actions:write is required ONLY to delete the temporary per-job
-      # log-part artifacts after the consolidated log.txt has been
+      # log-part artifacts after the consolidated report has been
       # validated and uploaded, so the run exposes exactly one
       # diagnostic artifact. It never changes job conclusions.
       actions: write
@@ -835,7 +909,7 @@ jobs:
             date -u '+utc=%Y-%m-%dT%H:%M:%SZ'
           } | tee ci-logs/collector-build.log
           if [ "$rc" -ne 0 ]; then
-            echo "ERROR: collector binary build failed (rc=$rc); the emergency fallback path will still produce a truthful log.txt"
+            echo "ERROR: collector binary build failed (rc=$rc); the emergency fallback path will still produce a truthful consolidated report"
           fi
           exit "$rc"
 
@@ -855,7 +929,7 @@ jobs:
             cap="$(mktemp)"
             start_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             ./bin/ci-log-collector \
-              --report ci-out/log.txt \
+              --report ci-out/SHEYTAN-Music-Visualizer-all-logs.txt \
               --parts-root ci-parts \
               --manifest ci-parts/manifest.json \
               --github-repo "${GITHUB_REPOSITORY}" \
@@ -864,11 +938,11 @@ jobs:
             rc=$?
             end_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             {
-              echo "command: ./bin/ci-log-collector --report ci-out/log.txt --parts-root ci-parts --manifest ci-parts/manifest.json --github-repo ${GITHUB_REPOSITORY} --run-id ${GITHUB_RUN_ID} --attempt ${GITHUB_RUN_ATTEMPT}"
+              echo "command: ./bin/ci-log-collector --report ci-out/SHEYTAN-Music-Visualizer-all-logs.txt --parts-root ci-parts --manifest ci-parts/manifest.json --github-repo ${GITHUB_REPOSITORY} --run-id ${GITHUB_RUN_ID} --attempt ${GITHUB_RUN_ATTEMPT}"
               echo "cwd: $PWD"
               echo "manifest_path_absolute: $PWD/ci-parts/manifest.json"
               echo "manifest_bytes: $(wc -c < ci-parts/manifest.json)"
-              echo "report_path_absolute: $PWD/ci-out/log.txt"
+              echo "report_path_absolute: $PWD/ci-out/SHEYTAN-Music-Visualizer-all-logs.txt"
               echo "run_id: ${GITHUB_RUN_ID} attempt: ${GITHUB_RUN_ATTEMPT}"
               echo "started_utc: $start_utc"
               echo "ended_utc: $end_utc"
@@ -891,7 +965,7 @@ jobs:
             {
               echo "BLOCKED: collector cannot run — $diag"
               echo "collector_build_rc=$build_rc"
-              echo "the emergency fallback report step will write ci-out/log.txt; the job still fails closed"
+              echo "the emergency fallback report step will write the consolidated report; the job still fails closed"
             } | tee ci-logs/collector-run.log
             rc=2
           fi
@@ -909,13 +983,13 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p ci-out ci-parts ci-logs
-          if [ -s ci-out/log.txt ]; then
+          if [ -s ci-out/SHEYTAN-Music-Visualizer-all-logs.txt ]; then
             echo "collector report present; emergency fallback not needed"
             exit 0
           fi
           reason="collector rc=$(cat collector.rc 2>/dev/null || echo unknown); build rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
           bash scripts/ci/emergency-report.sh \
-            --out ci-out/log.txt \
+            --out ci-out/SHEYTAN-Music-Visualizer-all-logs.txt \
             --parts-root ci-parts \
             --manifest ci-parts/manifest.json \
             --reason "$reason" \
@@ -925,38 +999,38 @@ jobs:
             --result-codeql "${RESULT_CODEQL:-unknown}"
           printf 'used\n' > collector-fallback.used
 
-      - name: Validate final log.txt before upload
+      - name: Validate the final consolidated report before upload
         id: validate_report
         if: ${{ always() && !cancelled() }}
         run: |
           set -Eeuo pipefail
-          test -s ci-out/log.txt || { echo "ERROR: consolidated log.txt missing or empty"; exit 1; }
-          test "$(find ci-out -maxdepth 1 -type f | wc -l)" -eq 1 || { echo "ERROR: ci-out must contain exactly one file (log.txt)"; exit 1; }
-          size=$(stat -c%s ci-out/log.txt)
-          echo "log.txt validated: $size bytes"
+          test -s ci-out/SHEYTAN-Music-Visualizer-all-logs.txt || { echo "ERROR: consolidated report missing or empty"; exit 1; }
+          test "$(find ci-out -maxdepth 1 -type f | wc -l)" -eq 1 || { echo "ERROR: ci-out must contain exactly one file (the consolidated report)"; exit 1; }
+          size=$(stat -c%s ci-out/SHEYTAN-Music-Visualizer-all-logs.txt)
+          echo "consolidated report validated: $size bytes"
           # Direct-delivery contract: the artifact must be PLAIN TEXT —
           # never a ZIP. A ZIP signature (PK\x03\x04) here would mean
           # the consolidated report got wrapped and the direct
-          # log.txt download contract is broken.
-          sig=$(head -c 2 ci-out/log.txt)
+          # direct-download contract is broken.
+          sig=$(head -c 2 ci-out/SHEYTAN-Music-Visualizer-all-logs.txt)
           if [ "$sig" = $'PK\x03\x04' ] || [ "$sig" = "PK" ]; then
-            echo "ERROR: ci-out/log.txt carries a ZIP signature — plain-text contract violated"
+            echo "ERROR: the consolidated report carries a ZIP signature — plain-text contract violated"
             exit 1
           fi
-          head -3 ci-out/log.txt
+          head -3 ci-out/SHEYTAN-Music-Visualizer-all-logs.txt
 
       - name: Upload the single consolidated diagnostics artifact (plain text, no outer ZIP)
         id: upload_report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: log.txt
-          path: ci-out/log.txt
+          name: SHEYTAN-Music-Visualizer-all-logs.txt
+          path: ci-out/SHEYTAN-Music-Visualizer-all-logs.txt
           # archive: false uploads the single file DIRECTLY: the
-          # downloaded artifact is plain log.txt (UTF-8 text), not a
-          # ZIP containing log.txt. Exactly one file path is supplied;
+          # downloaded artifact is plain text (UTF-8), not a
+          # ZIP containing the report. Exactly one file path is supplied;
           # in this mode the artifact is named after the file's
-          # basename (log.txt) and the name input is ignored.
+          # basename (SHEYTAN-Music-Visualizer-all-logs.txt) and the name input is ignored.
           archive: false
           if-no-files-found: error
           overwrite: true
@@ -972,13 +1046,13 @@ jobs:
             echo "final consolidated artifact upload outcome:"
             echo "  artifact_id=${ARTIFACT_ID:-not-reported}"
             echo "  artifact_url=${ARTIFACT_URL:-not-reported}"
-            echo "  delivery_mode=direct (archive: false; downloaded artifact is plain log.txt)"
+            echo "  delivery_mode=direct (archive: false; downloaded artifact is plain text)"
             date -u '+  uploaded_utc=%Y-%m-%dT%H:%M:%SZ'
           } | tee ci-logs/final-artifact.txt
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
             {
               echo "### Consolidated report"
-              echo "- Artifact: log.txt (plain text, non-archived direct upload)"
+              echo "- Artifact: SHEYTAN-Music-Visualizer-all-logs.txt (plain text, non-archived direct upload)"
               echo "- artifact id: ${ARTIFACT_ID:-not-reported}"
               echo "- [download URL](${ARTIFACT_URL:-not-reported})"
               # Gate table excerpt (run-42921967187 §5.I): surface the
@@ -986,13 +1060,13 @@ jobs:
               # report remains the authoritative, complete evidence; a
               # missing section is stated honestly instead of guessed.
               echo ""
-              echo "### Gate status (excerpt from log.txt)"
+              echo "### Gate status (excerpt from the consolidated report)"
               echo ""
               echo '```'
-              if grep -q "GATE / COMMAND STATUS" ci-out/log.txt 2>/dev/null; then
-                awk '/GATE \/ COMMAND STATUS/{flag=1} flag{print} /^C\. |^D\. |^E\. |^=====/ && flag && !/GATE \/ COMMAND STATUS/{if (++n>1) exit}' ci-out/log.txt | head -60
+              if grep -q "GATE / COMMAND STATUS" ci-out/SHEYTAN-Music-Visualizer-all-logs.txt 2>/dev/null; then
+                awk '/GATE \/ COMMAND STATUS/{flag=1} flag{print} /^C\. |^D\. |^E\. |^=====/ && flag && !/GATE \/ COMMAND STATUS/{if (++n>1) exit}' ci-out/SHEYTAN-Music-Visualizer-all-logs.txt | head -60
               else
-                echo "(gate-status section not found in the report — see the full log.txt for the raw evidence)"
+                echo "(gate-status section not found in the report — see the full report for the raw evidence)"
               fi
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
@@ -1020,7 +1094,7 @@ jobs:
             echo "ERROR: artifact-list API response was not a valid artifacts array."
             cleanup_failed=1
           else
-            ids=$(jq -r '.artifacts[]? | select(.name != "log.txt") | select((.name | test("-logs-part(-attempt[0-9]+)?$")) or (.name | startswith("codeql-logs-part-")) or (.name == "consolidated-run-log")) | .id' "$tmp")
+            ids=$(jq -r '.artifacts[]? | select(.name != "SHEYTAN-Music-Visualizer-all-logs.txt") | select((.name | test("-logs-part(-attempt[0-9]+)?$")) or (.name | startswith("codeql-logs-part-")) or (.name == "consolidated-run-log")) | .id' "$tmp")
             for id in $ids; do
               url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
               if curl -sf -X DELETE \
@@ -1046,7 +1120,7 @@ jobs:
           rc="$(cat collector.rc 2>/dev/null || echo 2)"
           if [ -f collector-fallback.used ]; then
             echo "EMERGENCY FALLBACK REPORT WAS USED: consolidated coverage is unverified;"
-            echo "the collecting job fails even though a truthful log.txt was uploaded."
+            echo "the collecting job fails even though a truthful consolidated report was uploaded."
             if [ "$rc" -eq 0 ]; then rc=1; fi
           fi
           if [ -f cleanup.failed ] && [ "$rc" = "0" ]; then
@@ -1056,7 +1130,7 @@ jobs:
           echo "collector exit code: $rc"
           if [ "$rc" != "0" ]; then
             if [ "$rc" = "3" ]; then
-              echo "One or more required jobs did not succeed (see the job status table inside log.txt)."
+              echo "One or more required jobs did not succeed (see the job status table inside the consolidated report)."
             elif [ "$rc" = "1" ]; then
               echo "Consolidated log coverage is INCOMPLETE; failing this job after the report upload."
             else

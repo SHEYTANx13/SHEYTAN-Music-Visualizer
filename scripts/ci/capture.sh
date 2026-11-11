@@ -67,6 +67,10 @@ ci_capture() {
 
   ended="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   if [ "$rc" -eq 0 ]; then verdict="PASS"; else verdict="FAIL"; fi
+  # Elapsed milliseconds (spec §4.1): derived from the epoch, immune to
+  # date-format differences between runner images.
+  elapsed_ms=$(( $(date -u '+%s') - $(date -u -d "$started" '+%s' 2>/dev/null || date -u '+%s') * 1 ))
+  [ "$elapsed_ms" -lt 0 ] && elapsed_ms=0
   {
     printf -- '--- END OUTPUT ---\n'
     printf 'EXIT_CODE: %d %s\n' "$rc" "$verdict"
@@ -97,6 +101,11 @@ ci_capture() {
       printf '  "log_file": %s,\n' "$(_ci_json_str "$CI_LOG_FILE")"
       printf '  "started_utc": %s,\n' "$(_ci_json_str "$started")"
       printf '  "ended_utc": %s,\n' "$(_ci_json_str "$ended")"
+      printf '  "elapsed_ms": %d,\n' "$elapsed_ms"
+      printf '  "run_id": %s,\n' "$(_ci_json_str "${GITHUB_RUN_ID:-local}")"
+      printf '  "attempt": %s,\n' "$(_ci_json_str "${GITHUB_RUN_ATTEMPT:-1}")"
+      printf '  "commit": %s,\n' "$(_ci_json_str "${SHEYTAN_BUILD_COMMIT:-${GITHUB_SHA:-unknown}}")"
+      printf '  "platform": %s,\n' "$(_ci_json_str "${RUNNER_OS:-$(uname -s 2>/dev/null || echo unknown)}")"
       printf '  "exit_code": %d,\n' "$rc"
       printf '  "verdict": %s,\n' "$(_ci_json_str "$verdict")"
       printf '  "executed": true\n'

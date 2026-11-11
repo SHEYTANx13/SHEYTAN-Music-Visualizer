@@ -166,7 +166,12 @@ if [ "$MODE" = "preflight" ]; then
   exit 1
 fi
 
-CI_TOOL_CONTEXT="gate:go-test" ci_capture "$JOB" go-test go test $GO_TAGS ./... ||
+# Test ownership (run 42939743766 §2.4): the dedicated GPU integration
+# test TestPaletteReachesGPUShader is owned EXCLUSIVELY by the
+# gpu-validation gate below (it runs there once per platform with its
+# readback diagnostics). It is excluded here ONLY by that exact name;
+# every other internal/render test stays in the default suite.
+CI_TOOL_CONTEXT="gate:go-test" ci_capture "$JOB" go-test go test $GO_TAGS -skip '^TestPaletteReachesGPUShader$' ./... ||
   fail_gate go-test
 
 CI_TOOL_CONTEXT="gate:go-vet" ci_capture "$JOB" go-vet go vet $GO_TAGS ./... ||
@@ -204,14 +209,29 @@ if [ "$MODE" = "desktop" ]; then
     skip_gate run-self-check "executable build failed"
   fi
 
+  # Failure-counter snapshots for the package-status record: gates BEFORE
+  # staging (build/version/self-check) must be green for VERIFIED, and the
+  # package gates themselves (stage/license/tar/extract) must additionally
+  # be green. Later non-package gates (race/export/audio/gpu/studio/GUI)
+  # intentionally do NOT invalidate a verified package — they produce the
+  # TEST-ONLY state in the workflow instead (run 42939743766 §5.2).
+  FAILURES_BEFORE_PACKAGE="$FAILURES"
+
   # ---- portable package staging (run 42481815519 directory contract) ----
   # One top-level application folder: executable, license.md, readme.md,
   # portable.mode marker, tools/ffmpeg app-local dependency location and
   # the documented data/ bootstrap. A tar.gz preserves the executable
   # bit (a ZIP would not), so the portable contract survives extraction.
-  STAGE_ROOT="$REPO_ROOT/dist/SHEYTAN-Music-Visualizer-linux-x64-portable"
+  # CANONICAL ONE-PACKAGE CONTRACT (run 42939743766 §5.1): the GitHub
+  # Actions artifact is EXACTLY dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz
+  # containing exactly one top-level app directory
+  # SHEYTAN-Music-Visualizer-linux-x64/. The staging root below is an
+  # INTERNAL directory that is never uploaded, never archived, and is
+  # deleted before the source ZIP is produced; it must never be renamed
+  # into a second distributable.
+  STAGE_ROOT="$REPO_ROOT/dist/linux-x64-stage"
   STAGE_APP="$STAGE_ROOT/SHEYTAN-Music-Visualizer-linux-x64"
-  TARBALL="$REPO_ROOT/dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz"
+  TARBALL="$REPO_ROOT/dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz"
   rm -rf "$STAGE_ROOT" "$TARBALL"
   mkdir -p "$STAGE_APP/tools/ffmpeg/bin" "$STAGE_APP/data"
   if [ "$EXE_OK" -eq 1 ]; then
@@ -257,10 +277,10 @@ if [ "$MODE" = "desktop" ]; then
     # prove what a user receives.
     CI_TOOL_CONTEXT="gate:create-portable-tar" ci_capture "$JOB" create-portable-tar bash -c '
       set -euo pipefail
-      tar -czf "dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz" -C "dist/SHEYTAN-Music-Visualizer-linux-x64-portable" "SHEYTAN-Music-Visualizer-linux-x64"
-      test -s "dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz" || { echo "ERROR: tarball missing/empty"; exit 1; }
+      tar -czf "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz" -C "dist/linux-x64-stage" "SHEYTAN-Music-Visualizer-linux-x64"
+      test -s "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz" || { echo "ERROR: tarball missing/empty"; exit 1; }
       echo "tarball contents:"
-      tar -tzf "dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz"
+      tar -tzf "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz"
     ' || fail_gate create-portable-tar
 
     if [ -s "$TARBALL" ]; then
@@ -268,7 +288,7 @@ if [ "$MODE" = "desktop" ]; then
       CI_TOOL_CONTEXT="gate:package-verify (extracted tarball)" ci_capture "$JOB" verify-extracted-package bash -c '
         set -euo pipefail
         VERIFY_DIR="$1"
-        tar -xzf "dist/SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz" -C "$VERIFY_DIR"
+        tar -xzf "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz" -C "$VERIFY_DIR"
         APP="$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64"
         cmp license.md "$APP/license.md" || { echo "ERROR: DISTRIBUTED license.md differs from canonical (post-archive)"; exit 1; }
         test -x "$APP/sheytan-music-visualizer" || { echo "ERROR: executable bit lost in tarball"; exit 1; }
@@ -277,8 +297,69 @@ if [ "$MODE" = "desktop" ]; then
         echo "extracted package verified: license byte-identical, executable bit preserved, portable.mode present"
       ' _ "$VERIFY_DIR" || fail_gate verify-extracted-package
       rm -rf "$VERIFY_DIR"
+
+      # PATH-WITH-SPACES RUNTIME CHECK (run 42939743766 §5.3): extract the
+      # SAME canonical tarball under a directory containing spaces and run
+      # the extracted executable's --version there. A package that only
+      # runs from a clean temp path is not shippable.
+      SPACES_DIR="$(mktemp -d)/SHEYTAN Package Dir (x64)"
+      mkdir -p "$SPACES_DIR"
+      CI_TOOL_CONTEXT="gate:package-verify (path with spaces)" ci_capture "$JOB" verify-extracted-path-with-spaces bash -c '
+        set -euo pipefail
+        SPACES_DIR="$1"
+        tar -xzf "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz" -C "$SPACES_DIR"
+        APP="$SPACES_DIR/SHEYTAN-Music-Visualizer-linux-x64"
+        test -x "$APP/sheytan-music-visualizer" || { echo "ERROR: executable bit lost in spaces-path extraction"; exit 1; }
+        "$APP/sheytan-music-visualizer" --version || { echo "ERROR: extracted EXE --version failed from a path containing spaces"; exit 1; }
+        echo "spaces-path runtime check PASSED"
+      ' _ "$SPACES_DIR" || fail_gate verify-extracted-path-with-spaces
+      rm -rf "$(dirname "$SPACES_DIR")"
+
+      # PACKAGE-STATUS RECORD (run 42939743766 §6): machine-readable
+      # package state for the workflow upload decision. package_status is
+      # VERIFIED only when every package gate above passed AND the
+      # expected commit (from the immutable workflow context) matches the
+      # embedded metadata. It is never inferred from file existence.
+      pkg_status="UNAVAILABLE"
+      commit_verified="false"
+      commit_expected="${SHEYTAN_BUILD_COMMIT:-}"
+      commit_observed="not-observed"
+      PACKAGE_GATES_FAILED=$(( FAILURES - FAILURES_BEFORE_PACKAGE ))
+      if [ "$EXE_OK" -eq 1 ] && [ -s "$TARBALL" ] && [ "$FAILURES_BEFORE_PACKAGE" -eq 0 ]; then
+        ver_line="$(./bin/sheytan-music-visualizer --version 2>/dev/null | head -1 || true)"
+        commit_observed="$(printf '%s' "$ver_line" | sed -n 's/.*commit \([0-9a-f]\{40\}\).*/\1/p')"
+        [ -n "$commit_observed" ] || commit_observed="unknown"
+        if [ -n "$commit_expected" ] && [ "$commit_observed" = "$commit_expected" ]; then
+          commit_verified="true"
+        fi
+        if [ "$commit_verified" = "true" ] && [ "$PACKAGE_GATES_FAILED" -eq 0 ]; then
+          pkg_status="VERIFIED"
+        else
+          pkg_status="TEST_ONLY"
+        fi
+      fi
+      python3 - "$REPO_ROOT/ci-logs/package-status-linux.json" "$pkg_status" "$commit_expected" "$commit_observed" "$commit_verified" <<'PYJSON' || true
+import json, sys
+out, status, expected, observed, verified = sys.argv[1:6]
+record = {
+    "platform": "linux-x64",
+    "package_status": status,
+    "package_file": "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz",
+    "app_dir": "SHEYTAN-Music-Visualizer-linux-x64",
+    "commit_expected": expected if expected else None,
+    "commit_observed": observed,
+    "commit_verified": verified == "true",
+    "note": "package_status is VERIFIED only with a non-blank expected commit that exactly matches the embedded metadata; TEST_ONLY packages are valid but the required job stays red",
+}
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(record, f, indent=2)
+    f.write("\n")
+print(json.dumps(record))
+PYJSON
     else
       skip_gate verify-extracted-package "tarball not created"
+      skip_gate verify-extracted-path-with-spaces "tarball not created"
+      printf '{"platform":"linux-x64","package_status":"UNAVAILABLE","package_file":"dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz","commit_expected":%s,"commit_observed":"not-observed","commit_verified":false,"note":"package was not produced"}\n'         "$(printf '%s' "${SHEYTAN_BUILD_COMMIT:-}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read() or None))' 2>/dev/null || echo null)"         > "$REPO_ROOT/ci-logs/package-status-linux.json" || true
     fi
   else
     skip_gate stage-portable "executable build failed"
@@ -288,7 +369,11 @@ if [ "$MODE" = "desktop" ]; then
   fi
 
   # race tests on concurrent core packages
-  CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race $GO_TAGS -timeout 480s ./internal/audio/... ./internal/playback/... ./internal/dsp/... ./internal/export/... ./internal/studio/... ./internal/project/... ./internal/render/... ||
+  # Race ownership: same exact single-test exclusion as go-test — the
+# dedicated GPU gate owns the palette integration test; the rest of
+# internal/render stays under -race. The exclusion is NOT a
+# reliability waiver.
+CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race $GO_TAGS -skip '^TestPaletteReachesGPUShader$' -timeout 480s ./internal/audio/... ./internal/playback/... ./internal/dsp/... ./internal/export/... ./internal/studio/... ./internal/project/... ./internal/render/... ||
     fail_gate go-test-race
 
   # export validation (real FFmpeg; skips honestly when unavailable)
@@ -299,10 +384,16 @@ if [ "$MODE" = "desktop" ]; then
   CI_TOOL_CONTEXT="gate:audio-validation" ci_capture "$JOB" audio-validation go test $GO_TAGS -timeout 240s ./internal/audio/ ./internal/playback/ ||
     fail_gate audio-validation
 
-  # GPU validation: wgpu render/readback proof on the noop/software
-  # adapter (honest: this host has no hardware GPU; a hardware run must
-  # be executed on a real machine and recorded separately)
-  CI_TOOL_CONTEXT="gate:gpu-validation" ci_capture "$JOB" gpu-validation go test $GO_TAGS -timeout 240s -v ./internal/render/ ||
+  # GPU validation — DEDICATED OWNER of TestPaletteReachesGPUShader
+  # (run 42939743766 §2.4): the palette end-to-end proof runs EXACTLY
+  # ONCE per platform, here, with verbose output and its readback
+  # diagnostics. The other internal/render tests are NOT duplicated
+  # here; they run in go-test and go-test-race. Honest adapter note:
+  # hosted runners exercise the project's supported software adapter
+  # (labelled noop/software, never reported as a physical GPU); a
+  # hardware run must be executed on a real machine and recorded
+  # separately.
+  CI_TOOL_CONTEXT="gate:gpu-validation (dedicated palette owner)" ci_capture "$JOB" gpu-validation go test $GO_TAGS -timeout 240s -v -run '^TestPaletteReachesGPUShader$' -count=1 ./internal/render/ ||
     fail_gate gpu-validation
 
   # studio end-to-end integration

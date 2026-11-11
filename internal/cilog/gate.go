@@ -89,11 +89,36 @@ type GateRecord struct {
 	// artifact namespace), sorted and deduplicated. Copies from
 	// repeated log sections never create a second gate.
 	Wheres []string
+	// RootCause carries a known root-cause signature matched inside the
+	// gate's captured output (run 42939743766 §4.4). Empty means the
+	// failure did not match a known signature — it is then reported as
+	// an unclassified failure, never force-fitted into a group.
+	RootCause string
+}
+
+// rootCauseSignatures maps known failure signatures to root-cause
+// labels (run 42939743766 §4.4). Matching is a plain substring scan
+// over the record's captured output: deterministic, dependency-free,
+// and honest — a signature that does not appear never produces a label.
+var rootCauseSignatures = []struct {
+	label     string
+	signature string
+}{
+	{
+		label:     "GPU palette uniform not reaching shader",
+		signature: "--- FAIL: TestPaletteReachesGPUShader",
+	},
+	{
+		label:     "zizmor invocation uses interpreter without installed module",
+		signature: "No module named zizmor",
+	},
 }
 
 var (
 	reRecordBegin = regexp.MustCompile(`^===== COMMAND BEGIN =====\s*$`)
 	reRecordEnd   = regexp.MustCompile(`^===== COMMAND END =====\s*$`)
+	reOutputBegin = regexp.MustCompile(`^--- OUTPUT \(stdout\+stderr from first byte\) ---\s*$`)
+	reOutputEnd   = regexp.MustCompile(`^--- END OUTPUT ---\s*$`)
 	reStepField   = regexp.MustCompile(`^STEP: (.*)$`)
 	reExitCode    = regexp.MustCompile(`^EXIT_CODE: (\d+) (PASS|FAIL)\b`)
 	reSkippedGate = regexp.MustCompile(`^SKIPPED: gate (\S+) \((.*)\)\s*$`)
@@ -114,6 +139,9 @@ type gateStepObs struct {
 	exitCode int
 	pass     bool
 	where    string
+	// rootCause is the first known signature matched inside this
+	// record's captured output, if any.
+	rootCause string
 }
 
 type gateSkipObs struct {
@@ -139,17 +167,26 @@ func parseGateFile(job, artifact, rel, abs string) (gateScan, error) {
 
 	lineNo := 0
 	inRecord := false
+	inOutput := false
 	step := ""
+	rootCause := ""
 	for br.Scan() {
 		lineNo++
 		line := br.Text()
 		switch {
 		case reRecordBegin.MatchString(line):
 			inRecord = true
+			inOutput = false
 			step = ""
+			rootCause = ""
 		case reRecordEnd.MatchString(line):
 			inRecord = false
+			inOutput = false
 			step = ""
+		case inRecord && reOutputBegin.MatchString(line):
+			inOutput = true
+		case inRecord && reOutputEnd.MatchString(line):
+			inOutput = false
 		case inRecord && reExitCode.MatchString(line):
 			m := reExitCode.FindStringSubmatch(line)
 			code, cerr := strconv.Atoi(m[1])
@@ -157,14 +194,25 @@ func parseGateFile(job, artifact, rel, abs string) (gateScan, error) {
 				continue // never fabricate: unparseable codes are ignored here
 			}
 			sc.steps = append(sc.steps, gateStepObs{
-				job:      job,
-				step:     step,
-				exitCode: code,
-				pass:     m[2] == "PASS",
-				where:    "[" + job + " | " + artifact + "/" + rel + ":" + strconv.Itoa(lineNo) + "]",
+				job:       job,
+				step:      step,
+				exitCode:  code,
+				pass:      m[2] == "PASS",
+				where:     "[" + job + " | " + artifact + "/" + rel + ":" + strconv.Itoa(lineNo) + "]",
+				rootCause: rootCause,
 			})
 		case inRecord && reStepField.MatchString(line):
 			step = strings.TrimSpace(reStepField.FindStringSubmatch(line)[1])
+			rootCause = ""
+		case inOutput && rootCause == "":
+			// Known root-cause signature scan (§4.4): the FIRST matching
+			// signature labels the record; later signatures never stack.
+			for _, sig := range rootCauseSignatures {
+				if strings.Contains(line, sig.signature) {
+					rootCause = sig.label
+					break
+				}
+			}
 		case !inRecord && reSkippedGate.MatchString(line):
 			m := reSkippedGate.FindStringSubmatch(line)
 			sc.skipped = append(sc.skipped, gateSkipObs{
@@ -221,6 +269,9 @@ func ParseGates(files []logFile) ([]GateRecord, error) {
 		k := key{obs.job, obs.step}
 		g := get(k)
 		g.Wheres = appendUnique(g.Wheres, obs.where)
+		if obs.rootCause != "" && g.RootCause == "" {
+			g.RootCause = obs.rootCause
+		}
 		if obs.pass && obs.exitCode == 0 {
 			continue // a PASS record can never make a gate FAIL
 		}

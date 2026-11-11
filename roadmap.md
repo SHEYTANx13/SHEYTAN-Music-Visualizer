@@ -235,9 +235,10 @@ had (reproduced verbatim pre-fix: `evidence/repro-run42921967187-repo-root.json`
 The contract now has three independent layers (workflow job env, parent
 assignment, generated-gate preamble with GITHUB_WORKSPACE fallback and
 validated helpers via the new `scripts/ci/Resolve-RepoRoot.ps1`).
-Additionally delivered this session: guaranteed Windows recovery
-artifacts (re-validated EXE + staged folder, never masking a failed
-required gate), machine-readable per-gate result records, CodeQL Go test
+Additionally delivered this session: the single canonical Windows package
+path (VERIFIED or TEST-ONLY upload; the run-42939743766 repair retired the
+recovery-EXE/staged-folder duplicates), machine-readable per-gate result
+records, CodeQL Go test
 extraction, pinned actionlint/zizmor preflight validation, Dependabot,
 SECURITY/CONTRIBUTING docs, the docs/ set (ci, diagnostics, architecture,
 performance), and two measured output-identical optimizations (DSP

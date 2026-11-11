@@ -90,7 +90,8 @@ function Capture-Step {
         throw "Capture-Step: `$env:CI_LOG_FILE must be set before the first call."
     }
     $workdir = (Get-Location).Path
-    $started = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    $startedDate = Get-Date
+    $started = $startedDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
     Add-Content -Path $env:CI_LOG_FILE -Value @(
         ""
@@ -258,6 +259,11 @@ foreach ($tagToken in $goTags) {
             log_file    = $env:CI_LOG_FILE
             started_utc = $started
             ended_utc   = $ended
+            elapsed_ms  = [int64]((Get-Date) - $startedDate).TotalMilliseconds
+            run_id      = $(if ($env:GITHUB_RUN_ID) { $env:GITHUB_RUN_ID } else { 'local' })
+            attempt     = $(if ($env:GITHUB_RUN_ATTEMPT) { $env:GITHUB_RUN_ATTEMPT } else { '1' })
+            commit      = $(if ($env:SHEYTAN_BUILD_COMMIT) { $env:SHEYTAN_BUILD_COMMIT } elseif ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { 'unknown' })
+            platform    = $(if ($env:RUNNER_OS) { $env:RUNNER_OS } else { 'windows' })
             exit_code   = $rc
             verdict     = $verdict
             executed    = $gateExecuted

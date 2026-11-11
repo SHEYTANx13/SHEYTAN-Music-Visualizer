@@ -1073,6 +1073,64 @@ func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, fil
 	}
 	fmt.Fprintf(w, "\n   Distinct passed gates: %d\n", res.PassedGateCount)
 
+	// B2. ROOT-CAUSE GROUPING (run 42939743766 §4.4). One functional
+	// defect can fail several gates; the flat table above preserves
+	// every raw failure, this grouping adds the shared causes. A gate
+	// joins a group ONLY when its own captured output contains the
+	// group's exact failure signature; failures without a known
+	// signature stay unclassified and are never force-fitted.
+	fmt.Fprintf(w, "\n   ROOT-CAUSE GROUPING of failed gates (each gate keeps its raw failure above;\n")
+	fmt.Fprintf(w, "   grouping adds shared causes — membership requires the exact failure signature in\n")
+	fmt.Fprintf(w, "   the gate's own captured output):\n")
+	type causeGroup struct {
+		label string
+		gates []string
+	}
+	var groups []causeGroup
+	var unclassified []string
+	for _, g := range res.Gates {
+		if g.Status != GateFail {
+			continue
+		}
+		if g.RootCause != "" {
+			found := false
+			for i := range groups {
+				if groups[i].label == g.RootCause {
+					groups[i].gates = append(groups[i].gates, g.Job+"/"+g.Step)
+					found = true
+					break
+				}
+			}
+			if !found {
+				groups = append(groups, causeGroup{label: g.RootCause, gates: []string{g.Job + "/" + g.Step}})
+			}
+		} else {
+			unclassified = append(unclassified, g.Job+"/"+g.Step)
+		}
+	}
+	if len(groups) == 0 && len(unclassified) == 0 {
+		fmt.Fprintf(w, "   (no failed gates — nothing to group)\n")
+	}
+	for _, grp := range groups {
+		fmt.Fprintf(w, "   - %s\n", grp.label)
+		fmt.Fprintf(w, "     occurrences: %s\n", strings.Join(grp.gates, "; "))
+	}
+	if len(unclassified) > 0 {
+		fmt.Fprintf(w, "   - UNCLASSIFIED (no known signature in the captured output; inspect the raw records):\n")
+		fmt.Fprintf(w, "     %s\n", strings.Join(unclassified, "; "))
+	}
+
+	// Environment capability limitations (§4.4): recorded facts, not
+	// failures. They are stated once here so a red run is never read
+	// as "the runner had a real GPU and it broke".
+	fmt.Fprintf(w, "\n   ENVIRONMENT CAPABILITY LIMITATIONS (informational, never gate outcomes):\n")
+	fmt.Fprintf(w, "   - hosted runners exercise the project's supported software adapter; no physical\n")
+	fmt.Fprintf(w, "     GPU/NPU/display-driver/audio-device execution is proven by this run\n")
+	fmt.Fprintf(w, "   - Windows hosted runners carry no FFmpeg: Windows MP4 export is NOT exercised\n")
+	fmt.Fprintf(w, "     by hosted CI and must not be claimed as tested\n")
+	fmt.Fprintf(w, "   - GUI smoke is virtual-display (Xvfb) evidence on Linux and a process/window\n")
+	fmt.Fprintf(w, "     fixture on Windows; it is not physical-display evidence\n")
+
 	// GATES NOT REACHED (run 42026322748 evidence C/J): zero parsed gate
 	// records for a required job that did not succeed is NOT a passing
 	// preflight — the gates never executed. This must be distinguishable

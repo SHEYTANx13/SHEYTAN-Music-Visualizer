@@ -4,6 +4,58 @@ All notable changes to the application and its engineering machinery.
 The canonical licensing document is `license.md`; this changelog is
 informational only.
 
+<!-- END HISTORICAL RECORD -->
+
+## 2026-11-11 — run 42939743766 repair
+
+- **GPU: palettes now provably reach the shader.** The fragment color
+  target declared no `WriteMask`; in the pinned gputypes the zero value is
+  `ColorWriteMaskNone`, so every fragment write was silently dropped and
+  all GPU frames stayed at the clear color (identical for every palette).
+  Fixed with an explicit `ColorWriteMaskAll` and a formalized Go↔WGSL
+  uniform contract: one `packUniforms` encoder, documented offset table,
+  16-byte vec4 color lanes (R,G,B,A), a WGSL peak-highlight lane read and
+  five contract tests pinning offsets, lane order, packed bytes, WGSL
+  member order and the end-to-end palette difference
+  (`TestPaletteReachesGPUShader` now passes).
+- **GPU test ownership.** `TestPaletteReachesGPUShader` runs exactly once
+  per platform in the dedicated `gpu-validation` gate; the default and
+  race suites exclude it by exact name only. No other test was removed.
+- **CI security tooling.** zizmor upgraded to pinned 1.32.0 executed
+  through ONE isolated `uvx` environment (version-verified before the
+  audit; the previous `pip`-install vs `/usr/bin/python3` interpreter
+  mismatch cannot recur). actionlint negative fixture added; the `$/`
+  self-repository reusable-workflow syntax adopted (zizmor requirement);
+  a third narrowly-documented actionlint ignore covers actionlint 1.7.12
+  not knowing that syntax yet (upstream issue #711).
+- **One canonical build per OS.** The recovery-EXE / staged-package
+  artifacts are retired. GitHub Actions produces exactly
+  `SHEYTAN-Music-Visualizer-windows-x64.zip`,
+  `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` and the plain-text
+  `SHEYTAN-Music-Visualizer-all-logs.txt`. Package uploads are driven by
+  machine-readable package-status records (VERIFIED / TEST_ONLY /
+  UNAVAILABLE) with fail-closed commit verification against `github.sha`;
+  valid packages of red runs are labeled TEST-ONLY and the workflow stays
+  red.
+- **Diagnostics.** Per-gate JSON records gained run/attempt/commit/
+  platform/elapsed fields; the consolidated report gained a root-cause
+  grouping (exact-signature membership, unclassified failures listed
+  honestly) and environment-capability limitation statements; a path-with-
+  spaces extracted-package runtime check was added on both platforms.
+- **Toolchain.** `go.mod` toolchain bumped go1.27.3 → go1.27.4 to clear
+  GO-2026-6859 (net/http MaxBytesReader header race, fixed in 1.27.4);
+  `govulncheck` now reports "No vulnerabilities found." on the scanned
+  packages. The runners provision the version from `go.mod`
+  (`actions/setup-go` `go-version-file`), so no workflow change is needed.
+- **Docs.** New `docs/BUILDING.md`, `docs/GPU-RENDERING.md`,
+  `docs/CI-DIAGNOSTICS.md`, `docs/PERFORMANCE.md`, `docs/TROUBLESHOOTING.md`
+  and `docs/REQUIREMENTS-TRACEABILITY.md`; a deterministic docs-consistency
+  gate validates artifact names and local links.
+
+
+<!-- BEGIN HISTORICAL RECORD — run-42921967187 session (superseded artifact/tool
+claims are historical; the current contract is the run-42939743766 entry below) -->
+
 ## [Unreleased] — run-42921967187 repair session (2026-11-11)
 
 ### Fixed

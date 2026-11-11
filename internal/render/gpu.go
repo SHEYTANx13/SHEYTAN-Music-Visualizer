@@ -261,6 +261,11 @@ fn fs(@builtin(position) frag : vec4f) -> @location(0) vec4f {
         let tc = clamp(v, 0.0, 1.0);
         var barCol = mix(vec3f(P.colLow.x, P.colLow.y, P.colLow.z), vec3f(P.colMid.x, P.colMid.y, P.colMid.z), tc);
         barCol = mix(barCol, vec3f(P.colHigh.x, P.colHigh.y, P.colHigh.z), pow(tc, 2.0));
+        // peak highlight: the strongest bins tip toward the peak color,
+        // mirroring the CPU renderer's peak-hold markers on strong bars.
+        // Every packed lane (colLow..colBack) is read here so the shader
+        // and the Go packer stay in contract (see TestWGSLParamsContractMatchesGoLayout).
+        barCol = mix(barCol, vec3f(P.colPeak.x, P.colPeak.y, P.colPeak.z), smoothstep(0.85, 1.0, tc));
         col = mix(col, barCol, bar * (0.55 + 0.45 * v));
 
         // ring
@@ -300,6 +305,12 @@ type GPURenderer struct {
 }
 
 func f32bits(v float64) uint32 { return mathFloat32bits(float32(v)) }
+
+// f32le decodes a little-endian float32 from b (diagnostics and tests).
+func f32le(b []byte) float64 {
+	bits := uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24
+	return float64(math.Float32frombits(bits))
+}
 
 func mathFloat32bits(f float32) uint32 {
 	return math.Float32bits(f)
@@ -436,7 +447,7 @@ func (g *GPURenderer) buildPipeline() error {
 		Entries: []gputypes.BindGroupLayoutEntry{{
 			Binding:    0,
 			Visibility: gputypes.ShaderStageFragment,
-			Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: uniformSize},
+			Buffer:     &gputypes.BufferBindingLayout{Type: gputypes.BufferBindingTypeUniform, MinBindingSize: uniformBindMinSize},
 		}},
 	})
 	if err != nil {
@@ -474,6 +485,18 @@ func (g *GPURenderer) buildPipeline() error {
 			EntryPoint: "fs",
 			Targets: []gputypes.ColorTargetState{{
 				Format: gputypes.TextureFormatRGBA8Unorm,
+				// WriteMask MUST be stated explicitly: in the
+				// pinned gputypes the zero value of
+				// ColorWriteMask is ColorWriteMaskNone, and the
+				// project's supported software adapter applies
+				// the mask verbatim (color_target.go takes
+				// state.WriteMask as-is; the nil-state default
+				// never applies because we pass a state). A
+				// zero mask silently dropped EVERY fragment
+				// write, so every frame kept the load-op clear
+				// color and palettes rendered identically
+				// (run 42939743766, TestPaletteReachesGPUShader).
+				WriteMask: gputypes.ColorWriteMaskAll,
 			}},
 		},
 	})
@@ -483,17 +506,141 @@ func (g *GPURenderer) buildPipeline() error {
 	return nil
 }
 
-// uniformSize matches the WGSL Params struct layout: scalars 0..36,
-// 16-byte alignment pads bins to 48, bins 48..304 (16 x vec4), colors
-// 304..384 (5 x vec4) = 384 bytes total.
+// Uniform layout contract — the single authoritative Go↔WGSL table.
+//
+// The WGSL Params struct (wgslShader above) is laid out under the current
+// WGSL uniform address-space constraints (W3C WGSL §14.4.5,
+// https://www.w3.org/TR/2026/CRD-WGSL-20261021/#address-space-layout-constraints):
+//
+//	Offset  Size  Member     WGSL type          Alignment
+//	     0     8  res        vec2f               8
+//	     8     4  time       f32                 4
+//	    12     4  bass       f32                 4
+//	    16     4  beat       f32                 4
+//	    20     4  glow       f32                 4
+//	    24     4  rotSpeed   f32                 4
+//	    32     8  (pad)      vec2f (unused)      8   (28 rounds up to 32)
+//	    48   256  bins       array<vec4f, 16>   16
+//	   304    16  colLow     vec4f              16
+//	   320    16  colMid     vec4f              16
+//	   336    16  colHigh    vec4f              16
+//	   352    16  colPeak    vec4f              16
+//	   368    16  colBack    vec4f              16
+//	   384        (end)      struct size          16
+//
+// Every color is one 16-byte vec4f lane written R,G,B,A (alpha = 1.0).
+// The packer below is the ONLY writer of this block; offsets live here and
+// in the WGSL contract test, nowhere else.
 const (
-	uniformSize     = 384
-	uniformBinsAt   = 48
-	uniformColorsAt = 304
+	uniformSize = 384
+
+	uniformResAt      = 0  // vec2f: width, height
+	uniformTimeAt     = 8  // f32
+	uniformBassAt     = 12 // f32
+	uniformBeatAt     = 16 // f32
+	uniformGlowAt     = 20 // f32
+	uniformRotSpeedAt = 24 // f32
+	uniformPadAt      = 32 // vec2f padding, written as zeros
+
+	uniformBinsAt = 48 // array<vec4f, 16> — 64 interleaved f32s
+
+	uniformColorsAt = 304 // first vec4f color lane (colLow)
+
+	// colorLaneStride is the byte distance between consecutive color
+	// lanes: each color is one 16-byte vec4f (R,G,B,A).
+	colorLaneStride = 16
+
+	// uniformColorCount is the number of color lanes the shader consumes:
+	// colLow, colMid, colHigh, colPeak, colBack in this order.
+	uniformColorCount = 5
+
+	// uniformBindMinSize is the bind-group MinBindingSize; it must equal
+	// the struct size so a truncation cannot pass validation silently.
+	uniformBindMinSize = uniformSize
 )
+
+// colorLaneAt returns the byte offset of color lane i (0=colLow …
+// 4=colBack). Lanes start at uniformColorsAt, each on its own 16-byte
+// boundary.
+func colorLaneAt(i int) int { return uniformColorsAt + i*colorLaneStride }
+
+// paletteColors returns the five shader colors of a palette in the exact
+// lane order the WGSL struct declares: colLow, colMid, colHigh, colPeak,
+// colBack.
+func paletteColors(p visualizer.Palette) [uniformColorCount][3]float64 {
+	return [uniformColorCount][3]float64{p.Low, p.Mid, p.High, p.Peak, p.Back}
+}
+
+// packUniforms fills dst (uniformSize bytes) with the little-endian byte
+// sequence the WGSL Params struct consumes for one frame. This is the
+// single packer for the whole renderer: no other call site may write
+// uniform bytes or restate offsets. dst is fully cleared first, so a
+// reused staging buffer can never leak a previous palette's bytes.
+func packUniforms(dst []byte, in visualizer.FrameInput, cfg visualizer.Config, pal visualizer.Palette) {
+	if len(dst) != uniformSize {
+		panic(fmt.Sprintf("render: uniform staging buffer is %d bytes, want %d", len(dst), uniformSize))
+	}
+	for i := range dst {
+		dst[i] = 0
+	}
+	putF32 := func(off int, v float64) {
+		bits := f32bits(v)
+		dst[off] = byte(bits)
+		dst[off+1] = byte(bits >> 8)
+		dst[off+2] = byte(bits >> 16)
+		dst[off+3] = byte(bits >> 24)
+	}
+	putF32(uniformResAt, float64(in.Width))
+	putF32(uniformResAt+4, float64(in.Height))
+	putF32(uniformTimeAt, in.Time)
+	putF32(uniformBassAt, in.Audio.Bass*cfg.Sensitivity)
+	// beat pulse approximated by bass impact (WGSL offset 16)
+	putF32(uniformBeatAt, in.Audio.Bass*cfg.PulseResponse*0.5)
+	putF32(uniformGlowAt, 1.0+cfg.Glow*0.2)
+	putF32(uniformRotSpeedAt, 0.15+0.1*float64(cfg.MotionStyle%3))
+	// bins: 64 floats; the array starts at 48 because vec4f alignment
+	// (16) rounds the vec2f pad (28..35) up to the next multiple of 16.
+	bins := in.Audio.Bins
+	if len(bins) < visualizer.NumVizBins {
+		bins = visualizer.InterpolateBins(bins, cfg.SpectrumTilt)
+	}
+	for i, v := range bins {
+		if i >= 64 {
+			break
+		}
+		putF32(uniformBinsAt+i*4, v*cfg.Sensitivity)
+	}
+	// five 16-byte color lanes, R,G,B,A with alpha 1.0
+	cols := paletteColors(pal)
+	for ci, c := range cols {
+		base := colorLaneAt(ci)
+		putF32(base, c[0])
+		putF32(base+4, c[1])
+		putF32(base+8, c[2])
+		putF32(base+12, 1)
+	}
+}
 
 // Info reports the honest backend state.
 func (g *GPURenderer) Info() BackendInfo { return g.info }
+
+// uniformDiagnostics renders a bounded, test-only summary of the uniform
+// path: adapter identity/class, the documented layout offsets, the
+// staging buffer length and the bytes currently staged for the color
+// lanes. It never dumps the whole uniform block or frame memory.
+func (g *GPURenderer) uniformDiagnostics() string {
+	info := g.Info()
+	return fmt.Sprintf(
+		"diagnostics: adapter=%q backend=%s class=%s deviceType=%s state=%s detail=%q; uniform len=%d (want %d), bins@%d, colors@%d, laneStride=%d, lanes=%d; staged colLow RGBA=[%v %v %v %v], colBack=[%v %v %v %v]",
+		info.Adapter, info.BackendAPI, info.DeviceClass, info.DeviceType, info.GpuState, info.Detail,
+		len(g.uniformData), uniformSize,
+		uniformBinsAt, uniformColorsAt, colorLaneStride, uniformColorCount,
+		f32le(g.uniformData[colorLaneAt(0):]), f32le(g.uniformData[colorLaneAt(0)+4:]),
+		f32le(g.uniformData[colorLaneAt(0)+8:]), f32le(g.uniformData[colorLaneAt(0)+12:]),
+		f32le(g.uniformData[colorLaneAt(4):]), f32le(g.uniformData[colorLaneAt(4)+4:]),
+		f32le(g.uniformData[colorLaneAt(4)+8:]), f32le(g.uniformData[colorLaneAt(4)+12:]),
+	)
+}
 
 // Close releases GPU resources.
 func (g *GPURenderer) Close() {
@@ -583,56 +730,14 @@ func (g *GPURenderer) renderGPU(in visualizer.FrameInput) error {
 	pal := paletteFor(cfg.Palette)
 	g.info.GpuState = GpuSelected
 
-	// build uniform data (little-endian; the exact layout mirrors the
-	// WGSL Params struct)
-	// Reused staging buffer (allocation-free steady state; owned by the
-	// renderer, uploaded into the GPU uniform buffer each frame).
+	// build uniform data via the single packer (see the layout table
+	// above packUniforms). The staging buffer is reused across frames;
+	// packUniforms clears it fully, so no stale palette bytes survive.
 	if len(g.uniformData) != uniformSize {
 		g.uniformData = make([]byte, uniformSize)
 	}
-	data := g.uniformData
-	for i := range data {
-		data[i] = 0
-	}
-	putF32 := func(off int, v float64) {
-		bits := f32bits(v)
-		data[off] = byte(bits)
-		data[off+1] = byte(bits >> 8)
-		data[off+2] = byte(bits >> 16)
-		data[off+3] = byte(bits >> 24)
-	}
-	putF32(0, float64(w))
-	putF32(4, float64(h))
-	putF32(8, in.Time)
-	putF32(12, in.Audio.Bass*cfg.Sensitivity)
-	// beat pulse approximated by bass impact (WGSL offset 16)
-	putF32(16, in.Audio.Bass*cfg.PulseResponse*0.5)
-	putF32(20, 1.0+cfg.Glow*0.2)
-	putF32(24, 0.15+0.1*float64(cfg.MotionStyle%3))
-	// bins: 64 floats at offset 48 — the WGSL Params struct aligns
-	// the vec4f array to 16 bytes after the vec2f pad at offset 28,
-	// so the array starts at 48 (NOT 32; the previous offset
-	// misaligned every spectrum bin and shifted the palette by 16
-	// bytes inside the shader).
-	bins := in.Audio.Bins
-	if len(bins) < visualizer.NumVizBins {
-		bins = visualizer.InterpolateBins(bins, cfg.SpectrumTilt)
-	}
-	for i, v := range bins {
-		if i >= 64 {
-			break
-		}
-		putF32(uniformBinsAt+i*4, v*cfg.Sensitivity)
-	}
-	// colors at offset 304 (5 vec4s: low, mid, high, peak, back)
-	cols := [][3]float64{pal.Low, pal.Mid, pal.High, pal.Peak, pal.Back}
-	for ci, c := range cols {
-		putF32(uniformColorsAt+ci*16, c[0])
-		putF32(uniformColorsAt+ci*16+4, c[1])
-		putF32(uniformColorsAt+ci*16+8, c[2])
-		putF32(uniformColorsAt+ci*16+12, 1)
-	}
-	if err := g.queue.WriteBuffer(g.uniform, 0, data); err != nil {
+	packUniforms(g.uniformData, in, cfg, pal)
+	if err := g.queue.WriteBuffer(g.uniform, 0, g.uniformData); err != nil {
 		return fmt.Errorf("uniform upload: %w", err)
 	}
 
