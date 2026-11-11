@@ -110,6 +110,67 @@ export integration tests; the run-42837709122 hosted-runner reference
 environment-specific sample. Re-run `go test ./internal/export/` on the
 same host to compare.
 
+## Run-42921967187 measurement pass (2026-11-11)
+
+Method: `go test -tags goffi_static -bench <name> -benchmem -benchtime=5x
+-count=3`, hot path first (`go test -cpuprofile`), same host for before
+and after (see host identity above — a 2-vCPU shared sandbox, slower and
+noisier than the packaged reference host; only the deltas measured on it
+are meaningful). Every change below preserves bit-identical outputs and
+is covered by the deterministic package tests.
+
+### DSP analysis (one minute of canonical audio, streamed in 1 s chunks)
+
+`BenchmarkDSPAnalyzeOneMinute` — before / after:
+
+| metric | before | after | Δ |
+| --- | --- | --- | --- |
+| wall time | 399.1–405.0 ms/op | 401.6–407.9 ms/op | unchanged (within host noise) |
+| memory | 55.71 MB/op | 49.32 MB/op | **−11.5 %** |
+| allocations | 5 649 allocs/op | 115 allocs/op | **−98 %** |
+
+Changes (output-identical):
+
+1. `Analyzer.emitFrame` no longer allocates one 1025-float64 display
+   spectrum per hop. Per-frame `Bins` are sliced from a chunked backing
+   store (64 frames per allocation, `nextBins`), eliminating ≈5.6 k
+   allocator operations and their GC bookkeeping per minute of audio.
+2. Bin center frequencies come from a precomputed `binHzTable` (identical
+   values to the previous per-bin recomputation; same float64 rounding).
+   A per-bin energy scratch table was also tried and REJECTED: it traded
+   a small wall-time regression for a negligible gain and was reverted.
+
+The analyzer retains its other scratch buffers (`buf`, `coeff`, `spec`,
+`prev`, `wrk`) from previous optimization passes; `Reset` releases the
+chunked backing store together with the frame list.
+
+### CPU renderer frame cost
+
+`BenchmarkCPURender*` — before / after (10× × 2 counts):
+
+| Benchmark | before (ns/op) | after (ns/op) | Δ time |
+| --- | --- | --- | --- |
+| CPURender1080pBars | 30.70–30.91 M | 24.98–25.02 M | **−18.7 %** |
+| CPURender1080pRadial | 12.39–12.43 M | 12.386 M | unchanged (centered disc — clip is a no-op) |
+| CPURender4KWaveform | 110.72–110.96 M | 103.23–104.47 M | **−6.0 %** |
+| CPURender1080pBarsWithLayer | 56.34–56.63 M | 48.72–49.61 M | **−13.0 %** |
+
+Change (output-identical, verified by the deterministic frame tests):
+`glowCircle` clips its disc bounding box to the canvas once instead of
+iterating off-screen rows/columns that `addPixel` rejected per pixel.
+
+### What was measured but NOT changed
+
+- The render profile after the clip shows `glowCircle`'s in-disc blend
+  (`addPixel` per channel) as the irreducible remaining cost; further
+  gains would require approximation changes that risk visual output
+  identity — out of scope for a correctness-preserving pass.
+- Startup stage timings (`startup stages complete`) require a display
+  (Xvfb) and are measured by `scripts/bench/startup-bench.sh` on hosts
+  that provide one; this sandbox had no Xvfb, so no startup numbers were
+  produced here and none are claimed. The hosted Windows/Linux jobs
+  remain the startup-evidence path.
+
 ## Runtime memory / GC evidence
 
 One structured record (`runtime snapshot`) is logged once at startup

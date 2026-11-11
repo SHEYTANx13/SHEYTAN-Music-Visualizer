@@ -1,0 +1,20 @@
+
+===== COMMAND BEGIN =====
+JOB: phase2-windows-build
+STEP: verify-build-metadata
+STARTED: 2026-11-11T00:19:12Z
+WORKDIR: /home/z/my-project/repo
+COMMAND: . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/Invoke-CapturedProcess.ps1")
+    Write-Output "helper loaded (this line was never reached in run 42921967187)"
+    exit 0
+TOOL_CONTEXT: gate:repro
+--- OUTPUT (stdout+stderr from first byte) ---
+Join-Path: /home/z/my-project/repo/evidence/repro-step-scripts/step-scripts/gate-verify-build-metadata.ps1:4
+Line |
+   4 |  . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/Invoke-CapturedProces …
+     |               ~~~~~~~~~~~~~~~~~~~~~~
+     | Cannot bind argument to parameter 'Path' because it is null.
+--- END OUTPUT ---
+EXIT_CODE: 1 FAIL
+ENDED: 2026-11-11T00:19:13Z
+===== COMMAND END =====

@@ -85,6 +85,10 @@ type Result struct {
 	WaveformMax float32   `json:"waveformMax"`
 }
 
+// binsChunkFrames is the number of per-frame display spectra pooled in
+// one backing allocation (64 frames ≈ 0.69 s of audio ≈ 520 KB chunk).
+const binsChunkFrames = 64
+
 // hannWindow is the precomputed Hann window for FFTSize.
 var hannWindow = buildHann(FFTSize)
 
@@ -98,6 +102,22 @@ func buildHann(n int) []float64 {
 
 // binHz is the center frequency of analysis bin i.
 func binHz(i int) float64 { return float64(i) * SampleRate / FFTSize }
+
+// binHzTable precomputes the center frequency of every analysis bin
+// once (run-42921967187 performance repair: emitFrame previously
+// re-evaluated the same division twice per bin per frame in the
+// centroid/band pass and again in the rolloff pass). Values are
+// identical to binHz(i) — same expression, same float64 rounding — so
+// analysis output stays deterministic and unchanged.
+var binHzTable = buildBinHz()
+
+func buildBinHz() []float64 {
+	t := make([]float64, FFTSize/2+1)
+	for i := range t {
+		t[i] = binHz(i)
+	}
+	return t
+}
 
 // Analyzer converts canonical interleaved stereo float32 samples into
 // a Result. One instance analyzes one stream; it is not safe for
@@ -113,6 +133,16 @@ type Analyzer struct {
 
 	frames   []Frame
 	waveform []float32
+
+	// binsBacking chunks the per-frame display spectra into one
+	// allocation per binsChunkFrames frames (run-42921967187
+	// performance repair: emitFrame previously made one 1025-float64
+	// allocation per hop, ≈5.6k allocator calls and ≈46 MB of churn
+	// per minute of audio). Frame.Bins still slices into this
+	// backing store, so JSON output and byte-level analysis results
+	// are unchanged.
+	binsBacking []float64
+	binsUsed    int
 
 	samplesPerPoint int
 	samplesInPoint  int
@@ -138,6 +168,8 @@ func (a *Analyzer) Reset() {
 		a.wrk[i] = 0
 	}
 	a.prev = nil
+	a.binsBacking = nil
+	a.binsUsed = 0
 	a.frames = a.frames[:0]
 	a.waveform = a.waveform[:0]
 	a.samplesPerPoint = 0
@@ -214,9 +246,9 @@ func (a *Analyzer) emitFrame() {
 		}
 		totalSum += e
 		ms := m * m
-		centNum += binHz(i) * ms
+		centNum += binHzTable[i] * ms
 		centDen += ms
-		f := binHz(i)
+		f := binHzTable[i]
 		switch {
 		case f <= BassMaxHz:
 			bassSum += e
@@ -248,7 +280,7 @@ func (a *Analyzer) emitFrame() {
 			}
 			cum += e
 			if cum >= 0.85*totalSum {
-				rolloff = binHz(i)
+				rolloff = binHzTable[i]
 				break
 			}
 		}
@@ -271,8 +303,11 @@ func (a *Analyzer) emitFrame() {
 	}
 	copy(a.prev, spec)
 
-	// display spectrum: dB-scaled, bounded to 96 dB, 0..1
-	bins := make(Spectrum, half+1)
+	// display spectrum: dB-scaled, bounded to 96 dB, 0..1. Sliced
+	// from the chunked backing store instead of one allocation per
+	// frame (run-42921967187 performance repair; identical values,
+	// identical JSON shape).
+	bins := a.nextBins(half + 1)
 	for i, m := range spec {
 		db := 20 * math.Log10(m+1e-9)
 		if db < -96 {
@@ -302,6 +337,23 @@ func (a *Analyzer) emitFrame() {
 	if len(a.frames) > maxFrames {
 		a.frames = a.frames[1:]
 	}
+}
+
+// nextBins returns the next half+1 slice of the chunked backing store,
+// allocating a fresh chunk when the current one is exhausted.
+func (a *Analyzer) nextBins(n int) Spectrum {
+	need := a.binsUsed + n
+	if len(a.binsBacking) < need {
+		chunk := binsChunkFrames * n
+		if chunk < n {
+			chunk = n
+		}
+		a.binsBacking = make([]float64, chunk)
+		a.binsUsed = 0
+	}
+	s := a.binsBacking[a.binsUsed : a.binsUsed+n : a.binsUsed+n]
+	a.binsUsed += n
+	return Spectrum(s)
 }
 
 // Finish computes onset events, summary metrics and the tempo

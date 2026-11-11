@@ -17,9 +17,12 @@ machine. No account, no telemetry, no bundled codec binaries.
 > 2026-11-05 repair session additionally delivered the optional AAC/M4A
 > input adapter, layered compositions, manual tempo/offset correction,
 > spectral rolloff, keyboard transport shortcuts, benchmarks and the
-> consolidated-diagnostics gate repair. See [roadmap.md](roadmap.md) for
-> the honest status of every capability and [ai-notes.md](ai-notes.md)
-> for the evidence trail of the current session.
+> consolidated-diagnostics gate repair. The 2026-11-11 session (run
+> 42921967187 repair) fixed the shared Windows packaging-gate root cause,
+> added guaranteed recovery artifacts, machine-readable gate evidence,
+> measured startup/render/DSP performance work, and the docs set under
+> [docs/](docs). See [roadmap.md](roadmap.md) for the honest status of
+> every capability and [ai-notes.md](ai-notes.md) for the evidence trail.
 
 ---
 
@@ -55,7 +58,7 @@ brand palettes used by the visualizer (`internal/visualizer`).
 | Runtime logging in every interactive launch: UTC text log, rotation, stderr fallback, startup/subsystem/error records, panic stacks | DELIVERED (`internal/logging` + startup wiring; real-run probe evidence captured) |
 | User-facing diagnostics: Help / Diagnostics dialog with Open Logs Folder, Copy Log Path, resolved data mode + log path | DELIVERED (`ui/fyne` actions; button execution needs an interactive desktop: NOT RUN here) |
 | Predictable app-local data layout: portable `data/` beside the executable (portable.mode marker) or installed per-user location (Windows LOCALAPPDATA, Linux XDG), with visible fallback and non-destructive legacy migration | DELIVERED (`internal/apppaths` + package staging gates; resolver/bootstrap/migration tests PASS) |
-| Windows x64 build | DELIVERED as script/workflow definition; **native Windows execution: NOT RUN on this Linux verification host** |
+| Windows x64 build | DELIVERED as script/workflow definition with a guaranteed recovery-artifact path (`windows-x64-recovery-executable` / `-staged-package`, uploaded from fresh re-validation even when a later packaging gate fails); **native Windows execution: NOT RUN on this Linux verification host** |
 
 ## Supported formats
 
@@ -128,10 +131,30 @@ CI regression fixtures (deterministic, no GitHub credentials needed):
 
 ```bash
 scripts/ci/tests/test-ci-plumbing.sh                 # bootstrap/capture/DAG/UCRT64-static/fallback fixtures
-scripts/ci/tests/test-codeql-coverage-inventory.sh   # CodeQL 40/66 file-coverage proof
+scripts/ci/tests/test-package-gates.sh               # packaging/process/root-resolution fixtures (P1–P7)
+scripts/ci/tests/test-codeql-coverage-inventory.sh   # CodeQL file-coverage proof
 scripts/ci/tests/Test-CaptureStep.ps1                # PowerShell capture fixtures (needs pwsh 7)
+scripts/ci/tests/Test-ResolveRepoRoot.ps1            # repository-root resolution scenarios (needs pwsh 7)
 go test ./internal/cilog/                            # collector correctness fixtures
 ```
+
+## Documentation map
+
+- [docs/architecture.md](docs/architecture.md) — package map, startup
+  sequence, threading and single-window contracts.
+- [docs/ci.md](docs/ci.md) — build requirements, the exact gate list,
+  the repository-root resolution contract, recovery vs final artifacts,
+  and how to reproduce a failed gate locally.
+- [docs/diagnostics.md](docs/diagnostics.md) — log layout and rotation,
+  startup metrics, benchmark/profiling commands, and how to read the
+  DETECTED/SUPPORTED/SELECTED/EXECUTING/VERIFIED capability states.
+- [docs/performance-baseline.md](docs/performance-baseline.md) —
+  measured baselines and before/after records of every accepted
+  optimization.
+- [CHANGELOG.md](CHANGELOG.md) — what changed, grouped by session.
+- [.github/SECURITY.md](.github/SECURITY.md) — private security
+  reporting; [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) —
+  ground rules and workflow.
 
 ## GPU backend preference
 
@@ -219,8 +242,11 @@ Keyboard: **Space** play/pause, **←/→** seek, **F11** fullscreen toggle,
   bundled; see `packaging/FFMPEG-TOOLS-LICENSING.md` for the legal
   position and the user-approved local setup path.
 - **Build/CI logs**: `ci-logs/` (bootstrapped by `scripts/ci/bootstrap-logs.sh`
-  / `Bootstrap-Logs.ps1` before anything writes into it); CI uploads one
-  namespaced, attempt-suffixed log-part artifact per evidence-producing job
+  / `Bootstrap-Logs.ps1` before anything writes into it). Every executed
+  gate writes a structured text record AND a machine-readable
+  `ci-logs/gate-results/<gate>.result.json`; unexecuted gates have no
+  record — absence is never a pass. CI uploads one namespaced,
+  attempt-suffixed log-part artifact per evidence-producing job
   (`preflight-logs-part-attempt<N>`, `windows-logs-part-attempt<N>`,
   `linux-logs-part-attempt<N>`, `codeql-logs-part-{go,actions}-attempt<N>`),
   then `cmd/ci-log-collector` aggregates them (plus the authoritative GitHub
@@ -232,7 +258,8 @@ Keyboard: **Space** play/pause, **←/→** seek, **F11** fullscreen toggle,
   Windows portable ZIP and the Linux portable tar.gz are likewise uploaded
   non-archived, so downloads are never double-wrapped. The internal log parts
   are deleted only after the final upload is validated. Every Linux CI job
-  runs on the explicit `ubuntu-26.04` runner label.
+  runs on the explicit `ubuntu-26.04` runner label. Details:
+  [docs/ci.md](docs/ci.md).
 - The packaged Phase 2 verification transcript lives in `evidence/`.
 
 ## License

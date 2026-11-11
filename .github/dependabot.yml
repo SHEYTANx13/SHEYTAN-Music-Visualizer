@@ -1,0 +1,36 @@
+# Dependabot configuration (run-42921967187 §6.C).
+#
+# Version-control hygiene without surprise: weekly updates for the Go
+# module graph and the GitHub Actions used by the workflows. Action PRs
+# still require the pinned full commit SHA (see the workflows' # comments
+# next to every `uses:`); Dependabot rewrites the SHA when it bumps an
+# action, which keeps the pinning invariant intact while the version
+# comment is updated by the PR itself.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: go
+    groups:
+      go-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: ci

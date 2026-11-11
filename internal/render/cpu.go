@@ -285,6 +285,24 @@ func (c *canvas) glowCircle(cx, cy, radius, intensity float64, r, g, b float64) 
 	maxX := int(math.Ceil(cx + radius*2))
 	minY := int(math.Floor(cy - radius*2))
 	maxY := int(math.Ceil(cy + radius*2))
+	// Hot-path arithmetic (profiled, run-42921967187 pass): clip the
+	// disc's bounding box to the canvas ONCE instead of letting addPixel
+	// reject whole off-screen rows/columns per pixel. Pixels outside the
+	// canvas were never drawn before, so the rendered output is bit-for-
+	// bit identical; edge-adjacent glows stop paying for the invisible
+	// part of the box.
+	if minX < 0 {
+		minX = 0
+	}
+	if minY < 0 {
+		minY = 0
+	}
+	if maxX > c.w-1 {
+		maxX = c.w - 1
+	}
+	if maxY > c.h-1 {
+		maxY = c.h - 1
+	}
 	// Hot-path arithmetic (profiled): the squared-distance test rejects
 	// every out-of-disc box pixel WITHOUT the sqrt; the in-disc branch
 	// keeps the identical d = sqrt(d2) value the alpha uses. At the

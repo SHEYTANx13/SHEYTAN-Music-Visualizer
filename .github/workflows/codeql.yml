@@ -10,8 +10,10 @@ name: codeql
 #
 # Go analysis is a manual traced build using the production-relevant
 # CGO_ENABLED=1, CC=gcc and goffi_static build tag. Test-file extraction is
-# explicitly disabled (CodeQL's Go extractor default) and the live source
-# inventory is logged on every run rather than hard-coding an old file count.
+# explicitly ENABLED (CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS=true; the
+# extractor excludes *_test.go by default and run 42921967187 scanned only
+# 58/102 tracked Go files with it disabled) and the live source inventory
+# is logged on every run rather than hard-coding an old file count.
 #
 # The analyze jobs deliberately have read-only Actions permission. The
 # standalone collector needs actions:write only to delete its temporary
@@ -47,7 +49,16 @@ jobs:
     env:
       CGO_ENABLED: '1'
       CC: gcc
-      CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS: 'false'
+      # Run-42921967187 coverage repair: the Go CodeQL extractor EXCLUDES
+      # *_test.go by default; that run scanned only 58 of 102 tracked Go
+      # files (39 test files + 4 non-test files unextracted) with tests
+      # disabled. GitHub documents CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS
+      # for compiled-language builds; it is now explicitly true so test
+      # files are extracted by the traced build. The inventory step below
+      # still records the source truth, and the exact remaining
+      # unextracted-file list is reconciled from the extractor output —
+      # coverage claims follow the evidence, never a count target.
+      CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,7 +139,10 @@ jobs:
             echo "go_non_test_files=$non_test_go"
             echo "CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS=$CODEQL_EXTRACTOR_GO_OPTION_EXTRACT_TESTS"
             echo "Note: these are source inventory counts, not a claim that every file was extracted."
+            echo "The extractor's own scanned-file count (reported during analysis) is the coverage evidence; any remaining difference must be listed file-by-file, not assumed to be tests or platform-specific."
           } | tee ci-logs/codeql-go-source-inventory.log
+          find . -type d -name vendor -prune -o -type f -name '*.go' -print | sort > ci-logs/codeql-go-inventory-files.txt
+          wc -l ci-logs/codeql-go-inventory-files.txt
 
       - name: go vet quality gate (before CodeQL tracing)
         env:

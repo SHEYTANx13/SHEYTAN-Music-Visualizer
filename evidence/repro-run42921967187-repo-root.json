@@ -1,0 +1,27 @@
+{
+  "run_id": 42921967187,
+  "reproduced_utc": "2026-11-11T00:19:14Z",
+  "reproduction_host": "linux x86_64 pwsh 7.4.6 (local sandbox, not the hosted runner)",
+  "generator": "scripts/ci/Capture-Step.ps1 (production gate generator)",
+  "generated_gate": "evidence/repro-step-scripts/gate-verify-build-metadata.ps1",
+  "failing_import_line": ". (Join-Path $env:SHEYTAN_REPO_ROOT \"scripts/ci/Invoke-CapturedProcess.ps1\")",
+  "child_invocation": "pwsh -NoProfile -NonInteractive -File <generated gate>",
+  "env": {
+    "SHEYTAN_REPO_ROOT_present": false,
+    "GITHUB_WORKSPACE_present": false
+  },
+  "child_exit_code": 1,
+  "exact_error_observed": "Cannot bind argument to parameter 'Path' because it is null.",
+  "exact_error_matched": true,
+  "helper_was_loaded": false,
+  "control_with_var_set_exit_code": 0,
+  "control_helper_loaded": true,
+  "reported_stage_state_run42921967187": {
+    "stage_portable": "PASS (reported)",
+    "verify_package_license": "PASS (reported)",
+    "validate_pe_subsystem": 2,
+    "final_portable_zip": "ABSENT (reported)"
+  },
+  "shared_root_cause": "repo-root environment variable was referenced but not defined for the spawned gate process",
+  "fix_owner_boundary": "workflow/gate-generation/helper boundary (NOT the product executable)"
+}

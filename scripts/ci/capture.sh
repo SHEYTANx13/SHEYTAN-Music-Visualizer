@@ -8,6 +8,13 @@
 #   - Append a structured command record: JOB, STEP, STARTED, WORKDIR,
 #     COMMAND, TOOL_CONTEXT, output, EXIT_CODE with PASS|FAIL verdict,
 #     ENDED.
+#   - Machine-readable gate record (run-42921967187 diagnostics
+#     contract): every executed command also writes ONE
+#     `<log-dir>/gate-results/<step>.result.json` record with the
+#     command vector, working directory, UTC window, exit status and
+#     verdict — trustworthy per-gate evidence that survives even when
+#     later steps fail, and is parseable without text scraping. Every
+#     NOT-executed gate has no record: absence is NOT PASS.
 #   - The caller decides whether to continue after a failure; this
 #     helper never masks a non-zero status (no `|| true` inside).
 #
@@ -18,6 +25,13 @@
 #
 # Optional: export CI_TOOL_CONTEXT="go1.27.3 / gcc 14.2" before a call
 # to embed tool context in the record.
+
+# _ci_json_str — emit a JSON string literal for one argument.
+_ci_json_str() {
+  printf '"'
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' | tr -d '\n\r'
+  printf '"'
+}
 
 ci_capture() {
   if [ "$#" -lt 3 ]; then
@@ -59,6 +73,36 @@ ci_capture() {
     printf 'ENDED: %s\n' "$ended"
     printf '===== COMMAND END =====\n'
   } >>"$CI_LOG_FILE"
+
+  # Machine-readable per-gate record (run-42921967187 contract). A
+  # write failure here must not mask the command's own exit code: the
+  # record is evidence, not control flow.
+  local result_dir result_file
+  result_dir="$(dirname "$CI_LOG_FILE")/gate-results"
+  result_file="$result_dir/${step}.result.json"
+  if mkdir -p "$result_dir" 2>/dev/null; then
+    {
+      printf '{\n'
+      printf '  "job": %s,\n' "$(_ci_json_str "$job")"
+      printf '  "gate": %s,\n' "$(_ci_json_str "$step")"
+      printf '  "tool_context": %s,\n' "$(_ci_json_str "${CI_TOOL_CONTEXT:--}")"
+      printf '  "command": ['
+      local first=1 a
+      for a in "$@"; do
+        if [ "$first" -eq 1 ]; then first=0; else printf ', '; fi
+        printf '%s' "$(_ci_json_str "$a")"
+      done
+      printf '],\n'
+      printf '  "workdir": %s,\n' "$(_ci_json_str "$workdir")"
+      printf '  "log_file": %s,\n' "$(_ci_json_str "$CI_LOG_FILE")"
+      printf '  "started_utc": %s,\n' "$(_ci_json_str "$started")"
+      printf '  "ended_utc": %s,\n' "$(_ci_json_str "$ended")"
+      printf '  "exit_code": %d,\n' "$rc"
+      printf '  "verdict": %s,\n' "$(_ci_json_str "$verdict")"
+      printf '  "executed": true\n'
+      printf '}\n'
+    } >"$result_file" 2>/dev/null || rm -f "$result_file"
+  fi
 
   # CI_CAPTURE_EXIT is the documented post-call contract variable (callers
   # may read it in addition to the return code).

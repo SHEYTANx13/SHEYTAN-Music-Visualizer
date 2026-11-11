@@ -269,6 +269,46 @@ echo "$VE" | grep -q 'Invoke-CapturedProcess' || { echo "  verify-extracted-pack
 echo "$VE" | grep -q 'SHA256' || { echo "  verify-extracted-package missing license hash compare"; P6OK=0; }
 if [ "$P6OK" -eq 1 ]; then report PASS "P6" "static root-cause assertions hold"; else report FAIL "P6" "static root-cause assertions failed"; fi
 
+# ----------------------------------------------------------------------------
+# P7: repository-root resolution regression suite (run-42921967187 repair).
+# Dynamic subprocess fixtures live in Test-ResolveRepoRoot.ps1 so the same
+# tests execute unchanged on any pwsh 7 host, including the Windows runner.
+# ----------------------------------------------------------------------------
+if [ -f "$REPO_ROOT/scripts/ci/tests/Test-ResolveRepoRoot.ps1" ]; then
+  "$PWSH_BIN" -NoProfile -NonInteractive -File "$REPO_ROOT/scripts/ci/tests/Test-ResolveRepoRoot.ps1" > "$T/p7.out" 2>&1
+  P7_RC=$?
+  sed 's/^/  /' "$T/p7.out"
+  if [ "$P7_RC" -eq 0 ] && grep -q "SUMMARY: pass=.*fail=0" "$T/p7.out"; then
+    report PASS "P7" "repo-root resolution + gate preamble fixtures verified"
+  else
+    report FAIL "P7" "repo-root resolution fixtures failed (rc=$P7_RC)"
+  fi
+else
+  report "NOT RUN" "P7" "Test-ResolveRepoRoot.ps1 not present in this tree"
+fi
+
+# ----------------------------------------------------------------------------
+# P8: Windows GUI-process capture integration (run-42921967187 contract).
+# Real assertions require a Windows host with the built EXE; any other
+# environment records NOT RUN with the exact reason (never a fake pass).
+# ----------------------------------------------------------------------------
+if [ -f "$REPO_ROOT/scripts/ci/tests/Test-GuiProcessCapture.ps1" ]; then
+  "$PWSH_BIN" -NoProfile -NonInteractive -File "$REPO_ROOT/scripts/ci/tests/Test-GuiProcessCapture.ps1" > "$T/p8.out" 2>&1
+  P8_RC=$?
+  sed 's/^/  /' "$T/p8.out"
+  if [ "$P8_RC" -ne 0 ]; then
+    report FAIL "P8" "GUI-process capture fixture failed (rc=$P8_RC)"
+  elif grep -q "^SUMMARY: pass=0 fail=0 notrun=1" "$T/p8.out"; then
+    report "NOT RUN" "P8" "requires a Windows host with the built EXE (recorded by the fixture)"
+  elif grep -q "^SUMMARY: pass=[1-9]* fail=0" "$T/p8.out"; then
+    report PASS "P8" "GUI EXE --version/--self-check captured with real exit codes"
+  else
+    report FAIL "P8" "fixture summary not recognized"
+  fi
+else
+  report "NOT RUN" "P8" "Test-GuiProcessCapture.ps1 not present in this tree"
+fi
+
 echo "SUMMARY: pass=$PASSED fail=$FAILED notrun=$NOT_RUN"
 [ "$FAILED" -eq 0 ] || exit 1
 exit 0

@@ -225,3 +225,22 @@ and locally verified the studio slice listed above; every NOT DONE / NOT
 RUN / NOT AVAILABLE item is stated exactly and requires either real
 hardware (Windows host, hardware GPU) or explicit follow-up work. See
 `ai-notes.md` for the evidence-backed state and the next narrow mission.
+
+## CI repair session (2026-11-11, run 42921967187)
+
+The shared Windows-gate root-cause repair is complete and locally
+verified. Root cause: the three failed gates all dot-sourced helpers
+through `$env:SHEYTAN_REPO_ROOT`, which the spawned gate process never
+had (reproduced verbatim pre-fix: `evidence/repro-run42921967187-repo-root.json`).
+The contract now has three independent layers (workflow job env, parent
+assignment, generated-gate preamble with GITHUB_WORKSPACE fallback and
+validated helpers via the new `scripts/ci/Resolve-RepoRoot.ps1`).
+Additionally delivered this session: guaranteed Windows recovery
+artifacts (re-validated EXE + staged folder, never masking a failed
+required gate), machine-readable per-gate result records, CodeQL Go test
+extraction, pinned actionlint/zizmor preflight validation, Dependabot,
+SECURITY/CONTRIBUTING docs, the docs/ set (ci, diagnostics, architecture,
+performance), and two measured output-identical optimizations (DSP
+allocations −98%, render bars −18.7% — see
+`docs/performance-baseline.md`). Hosted verification of this source
+update remains NOT RUN (no push permitted).

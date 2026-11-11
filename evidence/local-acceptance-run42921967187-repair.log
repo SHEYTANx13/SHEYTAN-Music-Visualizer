@@ -1,0 +1,223 @@
+==============================================================
+FINAL LOCAL ACCEPTANCE — run 42921967187 repair session
+host: Linux 5.10.134-013.15.kangaroo.al8.x86_64 x86_64 / Debian GNU/Linux 13 (trixie)
+go: go1.27.3  pwsh: 7.4.6
+HEAD: c5161282ee1c91c6fc8346a9acf0e731959496c3 (base evidence commit)
+started_utc: 2026-11-11T01:06:08Z
+==============================================================
+
+--- GATE: gofmt-verify
+$ bash -c out=$(gofmt -l . 2>/dev/null); [ -z "$out" ]
+RESULT: PASS
+
+--- GATE: go-mod-tidy-diff
+$ go mod tidy -diff
+RESULT: PASS
+
+--- GATE: go-mod-verify
+$ go mod verify
+all modules verified
+RESULT: PASS
+
+--- GATE: go-vet-goffi_static
+$ go vet -tags goffi_static ./...
+RESULT: PASS
+
+--- GATE: go-build-goffi_static
+$ go build -tags goffi_static ./...
+RESULT: PASS
+
+--- GATE: go-test-goffi_static
+$ go test -tags goffi_static -count=1 ./...
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/ci-log-collector	[no test files]
+?   	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/cmd/sheytan-music-visualizer	[no test files]
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths	0.010s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio	2.087s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand	0.003s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo	0.002s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	0.084s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp	0.269s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export	19.579s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fflocate	0.004s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fullscreen	0.003s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging	0.010s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/perf	0.006s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback	0.483s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/procattr	0.006s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project	0.007s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render	0.793s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna	0.004s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio	6.744s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/sysprofile	0.287s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer	0.001s
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne	0.015s
+RESULT: PASS
+
+--- GATE: govulncheck
+$ /home/z/go/bin/govulncheck -tags goffi_static ./...
+No vulnerabilities found.
+RESULT: PASS
+
+--- GATE: package-gates-P1-P8
+$ bash scripts/ci/tests/test-package-gates.sh
+==============================================================
+PACKAGE/PROCESS GATE FIXTURES — 2026-11-11T01:06:44Z
+repo root: /home/z/my-project/repo
+pwsh: /home/z/pwsh/pwsh
+==============================================================
+  P1-INFO full entry manifest:
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/data/
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/data/DATA-FOLDERS.txt
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/license.md
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/portable.mode
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/readme.md
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/sheytan-music-visualizer.exe
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/tools/
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/tools/ffmpeg/
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/tools/ffmpeg/bin/
+    ENTRY: SHEYTAN-Music-Visualizer-windows-x64/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md
+  P1P2-VERDICT: PASS
+  P3-VERDICT: PASS
+  P4-VERDICT: PASS
+  P5-VERDICT: PASS
+PASS    P1P2     gate fixture P1P2 verified
+PASS    P3       gate fixture P3 verified
+PASS    P4       gate fixture P4 verified
+PASS    P5       gate fixture P5 verified
+PASS    P6       static root-cause assertions hold
+  ==============================================================
+  REPO-ROOT RESOLUTION REGRESSION FIXTURES — 2026-11-11T01:06:48Z
+  pwsh: 7.4.6
+  real repo root: /home/z/my-project/repo
+  ==============================================================
+  PASS    R1  SHEYTAN_REPO_ROOT set correctly resolves
+  PASS    R2  unset SHEYTAN_REPO_ROOT falls back to GITHUB_WORKSPACE
+  PASS    R3  both roots absent fails loudly and names gate + candidates
+  PASS    R4  repository root containing spaces resolves
+  PASS    R5  invalid SHEYTAN_REPO_ROOT falls back to valid GITHUB_WORKSPACE
+  PASS    R6  missing required helper fails naming the expected relative path
+  repo root resolved: $repoRoot
+  PASS    R7a  gate without root vars exits 1 BEFORE touching package output
+  PASS    R7b  gate with SHEYTAN_REPO_ROOT imports helper and reaches package output
+  PASS    R7c  gate with only GITHUB_WORKSPACE imports helper through the fallback
+  PASS    R8  build-windows.ps1: 3 declared RequireRepoRoot gate invocations, single documented env assignment, no direct gate-body use
+  SUMMARY: pass=10 fail=0
+PASS    P7       repo-root resolution + gate preamble fixtures verified
+  ==============================================================
+  GUI-PROCESS CAPTURE FIXTURES — 2026-11-11T01:06:52Z
+  pwsh: 7.4.6
+  is-windows: False
+  ==============================================================
+  NOT RUN: this fixture requires a Windows host (GUI-subsystem PE behavior is platform-defined).
+  SUMMARY: pass=0 fail=0 notrun=1
+NOT RUN P8       requires a Windows host with the built EXE (recorded by the fixture)
+SUMMARY: pass=6 fail=0 notrun=1
+RESULT: PASS
+
+--- GATE: ci-plumbing
+$ bash scripts/ci/tests/test-ci-plumbing.sh
+==============================================================
+CI PLUMBING FIXTURES — 2026-11-11T01:06:52Z
+repo root: /home/z/my-project/repo
+==============================================================
+PASS    A1       fresh workspace: bootstrap creates all dirs + non-empty bootstrap.log with context
+PASS    A2       runner-image capture after bootstrap: tee file created with OS/kernel output
+PASS    A3       early failure after bootstrap: always-run upload still has files (bootstrap.log + BLOCKED marker)
+PASS    A5       silent success (exit 0, empty stdout) still yields a non-empty structured record (C14)
+PASS    C15      PIPESTATUS[0] preserves the child's exact status (7) through tee
+PASS    C16      log-write failure surfaces the tee error on stderr (separately visible, A6)
+PASS    D34      per-gate result JSON: PASS and FAIL records with command vector, context, UTC window
+PASS    B7-13    workflow DAG/static structure fixtures (36 assertions)
+PASS    D22-25   UCRT64 static regressions: executed helper gate, header-aware probe, -X ldflags contract, opt-in tag preamble
+PASS    D26      GUI smoke: readiness polling + window-mapping proof + bounded graceful close
+PASS    E43      fallback report written, truthful red result, parts embedded (collector-binary-unavailable path)
+PASS    E44      emergency report redacts token-shaped secrets
+PASS    F49      coverage inventory executed separately: scripts/ci/tests/test-codeql-coverage-inventory.sh
+PASS    D27      run-42376176493 UCRT64 header-location repair: target root checked, private dir diagnostic-only, pacman verified, probe present
+PASS    G28      GUI smoke: IsViewable contract, re-queried map state, dpkg-query Xvfb identity, ALSA null-PCM scope
+PASS    G29      map-state checker: only IsViewable passes (0); IsUnMapped/IsUnviewable fail (1); query failure/no-id fail (2)
+H31-OK
+PASS    H30      manifest writer: hostile ref (quotes/backslash/Unicode/slashes), empty optional, all four job conclusions, atomic rename, no temp leftovers, diagnostics written
+PASS    H31      manifest writer fails closed with precise reasons and never leaves a manifest file
+PASS    H32      emergency report distinguishes empty vs missing manifest with the run-42376176493 signature called out
+PASS    C17-21   PowerShell capture fixtures: RESULT: PASS=11 FAIL=0
+PASS    D33      UCRT64 gate runtime fixtures (stub toolchain): UCRT64-FIXTURES PASS 10/10
+--------------------------------------------------------------
+RESULT: PASS=21 FAIL=0 NOT_RUN=0
+==============================================================
+RESULT: PASS
+
+--- GATE: collector-tests
+$ go test -count=1 ./internal/cilog/
+ok  	github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/cilog	0.048s
+RESULT: PASS
+
+--- GATE: repro-record-present
+$ bash -c test -s evidence/repro-run42921967187-repo-root.json
+RESULT: PASS
+
+--- GATE: exe-version-metadata
+$ bash -c ./bin/sheytan-music-visualizer --version | grep -q "commit c5161282ee1c91c6fc8346a9acf0e731959496c3"
+RESULT: PASS
+
+--- GATE: exe-self-check
+$ ./bin/sheytan-music-visualizer --self-check
+  version=run42921967187-repair commit=c5161282ee1c91c6fc8346a9acf0e731959496c3 go=go1.27.3
+self-check PASS buildinfo
+self-check PASS brand-identity
+  contract dirs OK under /home/z/.local/share/SHEYTAN Music Visualizer/data (mode=installed)
+self-check PASS data-layout
+  data-mode=installed root=/home/z/.local/share/SHEYTAN Music Visualizer/data
+  data-reason=installed per-user data location
+  log=/home/z/.local/share/SHEYTAN Music Visualizer/data/logs/app.log
+self-check PASS log-directory
+  decoders=7 (aac, alac, flac, m4a, mp3, ogg, wav)
+  ffmpeg-adapter=ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers (optional AAC/M4A family via local FFmpeg)
+self-check PASS decoder-registry
+  fixture: bass=1.00 mid=0.00 treble=0.00 rms=0.260
+self-check PASS dsp-fixture
+  modes=4 presets=4 palettes=4
+self-check PASS visualizer-config
+  backend=cpu gpu=none api=software adapter= devtype= class=
+  device class:  — NOT proven physical GPU acceleration
+  renderer detail: GPU fallback: Software Renderer (software, device class software) is not a proven hardware adapter; using the CPU renderer
+self-check PASS renderer-select
+  ffmpeg=ffmpeg version 7.1.5-0+deb13u1 Copyright (c) 2000-2026 the FFmpeg developers encoders=[libx264 h264_nvenc h264_qsv]
+  export capability: local FFmpeg present; actual MP4 export is proven only by the executed export tests (ffprobe-validated)
+self-check PASS export-env
+self-check: all foundation invariants hold
+RESULT: PASS
+
+--- GATE: workflow-yaml-parse
+$ python3 -c import yaml; [yaml.safe_load(open(f)) for f in ['.github/workflows/build-desktop.yml','.github/workflows/codeql.yml']]
+RESULT: PASS
+
+--- GATE: actionlint-pinned
+$ /tmp/actionlint -ignore unexpected key "queue" for "concurrency" section -ignore property "run_started_at" is not defined
+RESULT: PASS
+
+--- GATE: zizmor-low-plus
+$ /home/z/.venv/bin/zizmor --no-online-audits --min-severity low --min-confidence low --format plain .github/workflows/
+🌈 zizmor v1.16.2
+ INFO audit: zizmor: 🌈 completed .github/workflows/build-desktop.yml
+ INFO audit: zizmor: 🌈 completed .github/workflows/codeql.yml
+No findings to report. Good job! (4 ignored, 9 suppressed)
+RESULT: PASS
+
+--- GATE: license-unchanged
+$ bash -c git diff --quiet HEAD -- license.md && echo byte-identical-to-tracked-canonical
+byte-identical-to-tracked-canonical
+RESULT: PASS
+
+--- GATE: no-repo-root-direct-use
+$ bash -c [ "$(grep -c "Join-Path \$env:SHEYTAN_REPO_ROOT" scripts/build/build-windows.ps1)" = "0" ]
+RESULT: PASS
+
+==============================================================
+ACCEPTANCE SUMMARY: pass=18 fail=0
+Windows UCRT64 build/portable ZIP: BLOCKED (no Windows toolchain on this Linux host)
+Xvfb GUI smoke / startup-stage measurement: NOT RUN (Xvfb not installable without root)
+hosted GitHub Actions verification: NOT RUN (no push permitted)
+ended_utc: 2026-11-11T01:07:03Z
+==============================================================

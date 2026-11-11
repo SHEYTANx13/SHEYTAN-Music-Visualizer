@@ -140,6 +140,50 @@ jobs:
           bash scripts/build/build-linux.sh --mode preflight 2>&1 | tee ci-logs/preflight-build.log
           exit "${PIPESTATUS[0]}"
 
+      # Static workflow validation (run-42921967187 §6.D): actionlint and
+      # zizmor at PINNED versions with verified upstream checksums — never
+      # mutable "latest". The two actionlint -ignore patterns are narrowly
+      # scoped to documented schema-staleness false positives, each proven
+      # by a real hosted run executing this exact file (run 42921967187):
+      # `queue:` is accepted under the concurrency section, and
+      # `github.run_started_at` is a documented GitHub context property.
+      # No whole audit class is suppressed: every other actionlint finding
+      # and every zizmor low+ finding fails this step.
+      - name: Static workflow validation (actionlint + zizmor, pinned)
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ci-logs bin-tools
+          {
+            echo "=== actionlint v1.7.12 (pinned, checksum-verified) ==="
+            curl -fsSL -o bin-tools/actionlint.tgz \
+              https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+            echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  bin-tools/actionlint.tgz" | sha256sum -c -
+            tar -xzf bin-tools/actionlint.tgz -C bin-tools actionlint
+            bin-tools/actionlint --version | head -1
+            echo "=== zizmor 1.16.2 (pinned via PyPI) ==="
+            python3 -m pip install --quiet --disable-pip-version-check 'zizmor==1.16.2'
+            python3 -m zizmor --version || zizmor --version || true
+          } 2>&1 | tee ci-logs/workflow-static-tools.log
+          rc=0
+          bin-tools/actionlint \
+            -ignore 'unexpected key "queue" for "concurrency" section' \
+            -ignore 'property "run_started_at" is not defined' \
+            > ci-logs/actionlint.log 2>&1 || rc=$?
+          cat ci-logs/actionlint.log
+          if [ "$rc" -ne 0 ]; then
+            echo "ERROR: actionlint findings (outside the two documented false positives above)"
+          fi
+          zrc=0
+          python3 -m zizmor --no-online-audits --min-severity low --min-confidence low \
+            --format plain .github/workflows/ > ci-logs/zizmor.log 2>&1 || zrc=$?
+          cat ci-logs/zizmor.log
+          if [ "$zrc" -ne 0 ]; then
+            echo "ERROR: zizmor findings at low severity or above"
+          fi
+          if [ "$rc" -ne 0 ] || [ "$zrc" -ne 0 ]; then exit 1; fi
+          echo "workflow static validation PASSED (actionlint clean, zizmor clean at low+)"
+
       # Explicit BLOCKED marker whenever this job ends red: the report must
       # distinguish "a gate failed with records" from "gates never reached".
       # The collector derives GATES NOT REACHED from actual evidence; this
@@ -171,6 +215,18 @@ jobs:
     name: build-windows (windows-latest, x64, UCRT64)
     runs-on: windows-latest
     timeout-minutes: 40
+    # REPO-ROOT CONTRACT (run 42921967187 root cause): the generated gate
+    # scripts (gate-verify-build-metadata / gate-create-portable-zip /
+    # gate-verify-extracted-package) dot-source repository helpers through
+    # the repo root. That run's gates died on
+    #   Cannot bind argument to parameter 'Path' because it is null.
+    # because SHEYTAN_REPO_ROOT was never defined for the spawned gate
+    # process. It is now defined here at JOB scope so every step and every
+    # child process inherits it; the generated gates additionally fall back
+    # to the standard GITHUB_WORKSPACE (scripts/ci/Resolve-RepoRoot.ps1),
+    # so no single custom variable can ever break helper imports again.
+    env:
+      SHEYTAN_REPO_ROOT: ${{ github.workspace }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -260,6 +316,120 @@ jobs:
           ./scripts/build/build-windows.ps1
           exit $LASTEXITCODE
 
+      # ------------------------------------------------------------------
+      # GUARANTEED RECOVERY ARTIFACT PATH (run 42921967187 contract):
+      # that run produced a VALID Windows GUI executable (65,843,400 bytes,
+      # PE subsystem 2, correct commit, self-check pass) but its artifact
+      # upload was skipped because a later packaging-only gate failed on the
+      # null repo-root defect. The user was left with no testable binary.
+      # These steps run ALWAYS after the build step and independently
+      # re-validate the EXE (they never trust a failed step's claims):
+      #   - eligibility is decided from fresh evidence only
+      #     (ci-logs/recovery-eligibility.json is the machine-readable record),
+      #   - a recovery EXE is uploaded ONLY when it exists, is non-empty,
+      #     is PE GUI subsystem 2, reports the expected commit and passes
+      #     --self-check through the captured-process helper,
+      #   - the staged app folder is uploaded as a test-only package even
+      #     when the final ZIP gate failed,
+      #   - the final portable ZIP is uploaded ONLY on full step success
+      #     (it already passed extraction verification inside the build).
+      # A recovery upload NEVER turns a failed required gate into success:
+      # the job conclusion still comes from the build step itself, and the
+      # artifacts are explicitly labeled recovery/test-only.
+      # ------------------------------------------------------------------
+      - name: Decide recovery artifact eligibility (independent re-validation)
+        id: recovery_eligibility
+        if: always()
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version 3.0
+          $ErrorActionPreference = 'Stop'
+          . (Join-Path $env:SHEYTAN_REPO_ROOT 'scripts/ci/Invoke-CapturedProcess.ps1')
+          $exe = 'bin/sheytan-music-visualizer.exe'
+          $exeExists = Test-Path $exe
+          $size = 0; if ($exeExists) { $size = (Get-Item $exe).Length }
+          $peOk = $false
+          if ($exeExists -and $size -gt 0) {
+            $bytes = [System.IO.File]::ReadAllBytes($exe)
+            if ($bytes.Length -ge 0x100 -and $bytes[0] -eq 77 -and $bytes[1] -eq 90) {
+              $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+              if ($peOff -gt 0 -and ($peOff + 4 + 20 + 68 + 2) -le $bytes.Length) {
+                $subsystem = [BitConverter]::ToUInt16($bytes, $peOff + 4 + 20 + 68)
+                $peOk = ($subsystem -eq 2)
+                Write-Output "recovery PE subsystem: $subsystem (2 = GUI)"
+              }
+            }
+          }
+          $commitOk = $false; $selfOk = $false; $commitObserved = 'not-observed'
+          if ($exeExists -and $peOk) {
+            $verRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @('--version') -TimeoutSeconds 120
+            if ($verRun.Kind -eq 'exited' -and $verRun.ExitCode -eq 0 -and $verRun.StdOut.Count -gt 0) {
+              $verLine = $verRun.StdOut[0]
+              Write-Output "recovery --version: $verLine"
+              $commitObserved = if ($verLine -match 'commit ([0-9a-f]{40})') { $Matches[1] } else { 'unknown' }
+              if (-not [string]::IsNullOrWhiteSpace($env:SHEYTAN_BUILD_COMMIT)) {
+                $commitOk = ($commitObserved -eq $env:SHEYTAN_BUILD_COMMIT.Trim())
+              } else { $commitOk = ($commitObserved -ne 'unknown') }
+            }
+            $selfOut = Join-Path ([System.IO.Path]::GetTempPath()) 'recovery-self-check.txt'
+            if (Test-Path $selfOut) { Remove-Item $selfOut -Force }
+            $selfRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList @('--self-check', '--self-check-out', $selfOut) -TimeoutSeconds 180
+            if ($selfRun.Kind -eq 'exited' -and $selfRun.ExitCode -eq 0 -and (Test-Path $selfOut)) {
+              $selfText = Get-Content $selfOut
+              $selfOk = [bool]($selfText | Where-Object { $_ -match 'self-check: all foundation invariants hold' })
+            }
+          }
+          $exeEligible = ($exeExists -and $size -gt 0 -and $peOk -and $commitOk -and $selfOk)
+          $stageDir = 'dist/SHEYTAN-Music-Visualizer-windows-x64-portable/SHEYTAN-Music-Visualizer-windows-x64'
+          $stageExists = (Test-Path (Join-Path $stageDir 'sheytan-music-visualizer.exe')) -and (Test-Path (Join-Path $stageDir 'license.md'))
+          $zipExists = Test-Path 'dist/SHEYTAN-Music-Visualizer-windows-x64-portable.zip'
+          $elig = [ordered]@{
+            run_id = $env:GITHUB_RUN_ID; attempt = $env:GITHUB_RUN_ATTEMPT
+            decided_utc = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            exe_exists = $exeExists; exe_bytes = $size
+            pe_subsystem_gui = $peOk
+            commit_expected = $env:SHEYTAN_BUILD_COMMIT; commit_observed = $commitObserved
+            commit_verified = $commitOk
+            self_check_passed = $selfOk
+            recovery_executable_eligible = $exeEligible
+            staged_package_exists = $stageExists
+            final_zip_exists = $zipExists
+            note = 'recovery artifacts are test-only; a recovery upload never substitutes for a failed required package gate'
+          }
+          $json = $elig | ConvertTo-Json
+          New-Item -ItemType Directory -Force -Path ci-logs | Out-Null
+          Set-Content -Path ci-logs/recovery-eligibility.json -Value $json -Encoding utf8NoBOM
+          $json
+          if ($exeEligible) {
+            New-Item -ItemType Directory -Force -Path dist/recovery | Out-Null
+            Copy-Item $exe 'dist/recovery/sheytan-music-visualizer.exe' -Force
+            Write-Output "RECOVERY EXECUTABLE STAGED: dist/recovery/sheytan-music-visualizer.exe (validated above)"
+          } else {
+            Write-Output "NO recovery executable: eligibility not proven (see ci-logs/recovery-eligibility.json). This is honest evidence, never a silent skip."
+          }
+          "executable=$(if ($exeEligible) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+          "staged=$(if ($stageExists) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+          "finalzip=$(if ($zipExists) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+
+      - name: Upload Windows x64 recovery executable (validated, single file, unzipped)
+        if: always() && steps.recovery_eligibility.outputs.executable == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x64-recovery-executable
+          path: dist/recovery/sheytan-music-visualizer.exe
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Upload Windows x64 recovery staged package (test-only)
+        if: always() && steps.recovery_eligibility.outputs.staged == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-x64-recovery-staged-package
+          path: dist/SHEYTAN-Music-Visualizer-windows-x64-portable
+          if-no-files-found: error
+          overwrite: true
+
       - name: Check Windows portable build exists before upload
         if: success()
         shell: pwsh
@@ -276,7 +446,7 @@ jobs:
             exit 1
           }
 
-      - name: Upload Windows x64 build artifact (CI artifact, not a release)
+      - name: Upload final Windows portable ZIP (only on full build success)
         # archive: false delivers the ALREADY-COMPRESSED portable ZIP
         # directly — the downloaded artifact IS the portable ZIP, not an
         # artifact ZIP wrapping another ZIP. v7 non-archive mode accepts
@@ -290,6 +460,36 @@ jobs:
           archive: false
           if-no-files-found: error
           overwrite: true
+
+      - name: Record Windows gate table and recovery outcome in the job summary
+        if: always()
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version 3.0
+          $log = 'ci-logs/phase2-build.log'
+          if (-not (Test-Path $log)) { Write-Output 'phase2-build.log absent (build step may not have started)'; exit 0 }
+          $gates = @{}
+          $order = @()
+          foreach ($line in Get-Content $log) {
+            if ($line -match '^STEP: (.+)$') { $n = $Matches[1]; if (-not $gates.ContainsKey($n)) { $order += $n; $gates[$n] = 'NOT RUN' } }
+            elseif ($line -match '^EXIT_CODE: (\d+) (PASS|FAIL)$') { if ($order.Count -gt 0) { $gates[$order[-1]] = $Matches[2] } }
+            elseif ($line -match '^BLOCKED: gate (\S+)') { $n = $Matches[1]; if (-not $gates.ContainsKey($n)) { $order += $n; $gates[$n] = 'BLOCKED' } }
+            elseif ($line -match '^SKIPPED: gate (\S+)') { $n = $Matches[1]; if (-not $gates.ContainsKey($n)) { $order += $n; $gates[$n] = 'SKIPPED' } }
+          }
+          $eligFile = 'ci-logs/recovery-eligibility.json'
+          $recov = if (Test-Path $eligFile) { (Get-Content $eligFile -Raw | ConvertFrom-Json).recovery_executable_eligible } else { $false }
+          if ($env:GITHUB_STEP_SUMMARY) {
+            {
+              '### build-windows gate table'
+              ''
+              '| gate | result |'
+              '|---|---|'
+              foreach ($n in $order) { "| $n | $($gates[$n]) |" }
+              ''
+              "Recovery executable uploaded: $recov (test-only; never substitutes for a failed required gate)"
+              'Evidence distinctions: local != hosted; software adapter != physical GPU; staged != extracted-and-verified.'
+            } | ForEach-Object { Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $_ }
+          }
 
       - name: Record setup failure as BLOCKED evidence (never silent)
         if: failure()
@@ -781,6 +981,20 @@ jobs:
               echo "- Artifact: log.txt (plain text, non-archived direct upload)"
               echo "- artifact id: ${ARTIFACT_ID:-not-reported}"
               echo "- [download URL](${ARTIFACT_URL:-not-reported})"
+              # Gate table excerpt (run-42921967187 §5.I): surface the
+              # report's own parsed gate section on the run page. The
+              # report remains the authoritative, complete evidence; a
+              # missing section is stated honestly instead of guessed.
+              echo ""
+              echo "### Gate status (excerpt from log.txt)"
+              echo ""
+              echo '```'
+              if grep -q "GATE / COMMAND STATUS" ci-out/log.txt 2>/dev/null; then
+                awk '/GATE \/ COMMAND STATUS/{flag=1} flag{print} /^C\. |^D\. |^E\. |^=====/ && flag && !/GATE \/ COMMAND STATUS/{if (++n>1) exit}' ci-out/log.txt | head -60
+              else
+                echo "(gate-status section not found in the report — see the full log.txt for the raw evidence)"
+              fi
+              echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 

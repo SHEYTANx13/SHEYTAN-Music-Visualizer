@@ -27,6 +27,22 @@
 #     tag-consuming Go command (UCRT identity, gofmt, module hygiene,
 #     runtime output checks, portable staging, PE/ZIP validation) must
 #     not be blocked by a missing build-tag variable.
+#   - REPO-ROOT CONTRACT (run 42921967187 repair): gates that dot-source
+#     another repository script declare that dependency with
+#     -RequireRepoRoot and -RepoRootHelpers. The generated gate then
+#     carries a resolution preamble that resolves the repository root
+#     from the environment (SHEYTAN_REPO_ROOT, falling back to the
+#     standard GITHUB_WORKSPACE; never the current working directory),
+#     dot-sources the canonical scripts/ci/Resolve-RepoRoot.ps1, and
+#     validates every required helper file BEFORE the gate body runs.
+#     Run 42921967187 root cause: three gates referenced
+#     $env:SHEYTAN_REPO_ROOT directly and that variable was never
+#     defined for the spawned gate process, so all three died on
+#     "Cannot bind argument to parameter 'Path' because it is null."
+#     before any check executed. With the preamble, a missing root is a
+#     loud, precise, gate-named failure — never a null-Path binding
+#     error, and helper imports can never depend on one custom variable
+#     alone.
 #   - The generated script carries an EXIT-CODE EPILOGUE: pwsh -File
 #     exits 0 when a script ends normally without `exit`, so a failing
 #     native command at script end would otherwise be recorded as a
@@ -61,7 +77,14 @@ function Capture-Step {
         [string]$ToolContext = "-",
         # Opt-in: generate the SHEYTAN_GO_TAGS initialization preamble.
         # Only tag-consuming Go gates may set this (see header notes).
-        [switch]$GoTags
+        [switch]$GoTags,
+        # Opt-in: generate the repository-root resolution preamble (run
+        # 42921967187 repair). Required for every gate whose body dot-
+        # sources another repository script through $repoRoot.
+        [switch]$RequireRepoRoot,
+        # Repository-relative helper scripts the gate body will import;
+        # each is validated to exist before the gate body executes.
+        [string[]]$RepoRootHelpers = @()
     )
     if (-not $env:CI_LOG_FILE) {
         throw "Capture-Step: `$env:CI_LOG_FILE must be set before the first call."
@@ -88,13 +111,65 @@ function Capture-Step {
     $scriptDir = Join-Path (Split-Path -Parent $env:CI_LOG_FILE) "step-scripts"
     New-Item -ItemType Directory -Force -Path $scriptDir | Out-Null
     $scriptFile = Join-Path $scriptDir ("gate-{0}.ps1" -f $slug)
+    # Deterministic StrictMode version (never 'Latest': its meaning
+    # changes as PowerShell evolves, so the same generated gate could
+    # start failing on a future runner image with no repository change).
     $strictHeader = @'
-Set-StrictMode -Version Latest
+Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 '@
     # Single-quoted epilogue: it must reach the generated file verbatim.
     $epilogue = 'if (Test-Path Variable:LASTEXITCODE) { exit $LASTEXITCODE } else { exit 0 }'
+
+    # Repository-root preamble (run 42921967187 repair): generated only
+    # for gates that declare -RequireRepoRoot. The bootstrap below is the
+    # ONLY code allowed to locate scripts/ci/Resolve-RepoRoot.ps1 from
+    # nothing; after it loads, the canonical resolver owns the full
+    # validation contract (identity markers, required helpers, precise
+    # diagnostics). Placeholders: __GATE_NAME__ and __HELPERS__.
+    $repoRootPreamble = ""
+    if ($RequireRepoRoot -or $RepoRootHelpers.Count -gt 0) {
+        $helpersLiteral = "@()"
+        if ($RepoRootHelpers.Count -gt 0) {
+            $quoted = @($RepoRootHelpers | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" })
+            $helpersLiteral = "@(" + ($quoted -join ", ") + ")"
+        }
+        $gateNameLiteral = $Step -replace "'", "''"
+        $repoRootPreamble = @'
+
+# ---- repository-root resolution preamble (run 42921967187 repair) ----
+# The gate body below consumes $repoRoot. Resolution happens HERE, before
+# any package output is accessed, from the environment only (never the
+# current working directory: gate scripts run under ci-logs/step-scripts,
+# which is not the helper root).
+$__repoRootResolved = $null
+foreach ($__candidate in @($env:SHEYTAN_REPO_ROOT, $env:GITHUB_WORKSPACE)) {
+    if ([string]::IsNullOrWhiteSpace($__candidate)) { continue }
+    try { $__full = [System.IO.Path]::GetFullPath($__candidate.Trim()) } catch { continue }
+    $__resolver = Join-Path $__full 'scripts/ci/Resolve-RepoRoot.ps1'
+    if (-not (Test-Path -LiteralPath $__resolver -PathType Leaf)) { continue }
+    $__repoRootResolved = $__full
+    break
+}
+if ($null -eq $__repoRootResolved) {
+    Write-Output "ERROR: gate '__GATE_NAME__' could not bootstrap the repository root."
+    Write-Output "  candidates consulted: SHEYTAN_REPO_ROOT, then GITHUB_WORKSPACE (current working directory is never used)"
+    Write-Output "  SHEYTAN_REPO_ROOT present: $([bool]($env:SHEYTAN_REPO_ROOT))  GITHUB_WORKSPACE present: $([bool]($env:GITHUB_WORKSPACE))"
+    Write-Output "  expected marker under the root: scripts/ci/Resolve-RepoRoot.ps1"
+    Write-Output "  remedy: set SHEYTAN_REPO_ROOT (job env: `$env:SHEYTAN_REPO_ROOT = `$env:GITHUB_WORKSPACE) or the standard GITHUB_WORKSPACE to the checkout root"
+    exit 1
+}
+. (Join-Path $__repoRootResolved 'scripts/ci/Resolve-RepoRoot.ps1')
+$repoRoot = Resolve-SheytanRepoRoot -GateName '__GATE_NAME__' -RequiredRelativePaths __HELPERS__
+Write-Output "repo root resolved: `$repoRoot"
+'@
+        $repoRootPreamble = $repoRootPreamble.Replace("__GATE_NAME__", $gateNameLiteral).Replace("__HELPERS__", $helpersLiteral)
+    }
+    $assembledBody = $Command.ToString().Trim()
+    if ($repoRootPreamble -ne "") {
+        $assembledBody = $repoRootPreamble + "`n" + $assembledBody
+    }
     if ($GoTags) {
         $goTagsPreamble = @'
 
@@ -119,13 +194,14 @@ foreach ($tagToken in $goTags) {
     }
 }
 '@
-        Set-Content -Path $scriptFile -Value ($strictHeader + "`n" + $goTagsPreamble + "`n" + $Command.ToString().Trim() + "`n" + $epilogue + "`n") -Encoding utf8NoBOM
+        Set-Content -Path $scriptFile -Value ($strictHeader + "`n" + $goTagsPreamble + "`n" + $assembledBody + "`n" + $epilogue + "`n") -Encoding utf8NoBOM
     }
     else {
-        Set-Content -Path $scriptFile -Value ($strictHeader + "`n" + $Command.ToString().Trim() + "`n" + $epilogue + "`n") -Encoding utf8NoBOM
+        Set-Content -Path $scriptFile -Value ($strictHeader + "`n" + $assembledBody + "`n" + $epilogue + "`n") -Encoding utf8NoBOM
     }
 
     $rc = $null
+    $gateExecuted = $false
     $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)
     if ($null -eq $pwsh) {
         Add-Content -Path $env:CI_LOG_FILE -Value "ERROR: pwsh executable not found on PATH; cannot run the gate in a child process."
@@ -139,6 +215,7 @@ foreach ($tagToken in $goTags) {
         # whole transcript plus the exit code, and `if ($rc -ne 0)`
         # would become an array filter that is truthy for ANY passing
         # gate with output.
+        $gateExecuted = $true
         & $pwsh.Source -NoProfile -NonInteractive -File $scriptFile 2>&1 | Tee-Object -FilePath $env:CI_LOG_FILE -Append | ForEach-Object { Write-Host $_ }
         # Save the child's exit code immediately, before anything else
         # can overwrite $LASTEXITCODE.
@@ -160,6 +237,35 @@ foreach ($tagToken in $goTags) {
         "ENDED: $ended"
         "===== COMMAND END ====="
     )
+
+    # Machine-readable per-gate record (run-42921967187 diagnostics
+    # contract): every gate invocation writes ONE
+    # <log-dir>/gate-results/<gate>.result.json with the command, working
+    # directory, UTC window, exit status and verdict — parseable without
+    # text scraping, and honest about whether the gate body actually
+    # executed. A record-write failure is evidence-only: it can never
+    # mask the gate's own exit status.
+    try {
+        $gateResultsDir = Join-Path (Split-Path -Parent $env:CI_LOG_FILE) "gate-results"
+        New-Item -ItemType Directory -Force -Path $gateResultsDir | Out-Null
+        $resultFile = Join-Path $gateResultsDir ("{0}.result.json" -f $slug)
+        [ordered]@{
+            job         = $Job
+            gate        = $Step
+            tool_context = $ToolContext
+            command     = $Command.ToString().Trim()
+            workdir     = $workdir
+            log_file    = $env:CI_LOG_FILE
+            started_utc = $started
+            ended_utc   = $ended
+            exit_code   = $rc
+            verdict     = $verdict
+            executed    = $gateExecuted
+        } | ConvertTo-Json | Set-Content -Path $resultFile -Encoding utf8NoBOM
+    }
+    catch {
+        Add-Content -Path $env:CI_LOG_FILE -Value ("WARN: gate result record write failed for '{0}': {1}" -f $Step, $_.Exception.Message)
+    }
 
     $script:LastCaptureExit = $rc
     return $rc

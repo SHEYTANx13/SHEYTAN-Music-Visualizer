@@ -148,6 +148,37 @@ else
   report FAIL "C16" "tee failure was hidden"
 fi
 
+# ---------- D34: machine-readable per-gate result records (run-42921967187
+# diagnostics contract): every executed ci_capture writes one
+# <log-dir>/gate-results/<step>.result.json with command vector, workdir,
+# UTC window, exit code and verdict; a NOT-executed gate has no record.
+(
+  cd "$T" || exit 3
+  rm -rf ci-logs
+  mkdir -p ci-logs
+  export CI_LOG_FILE="$T/ci-logs/phase2-build.log"
+  : > "$CI_LOG_FILE"
+  export CI_TOOL_CONTEXT="test-context"
+  source "$REPO_ROOT/scripts/ci/capture.sh"
+  ci_capture fixture-job result-gate bash -c 'exit 0'
+  echo "rc=$?" > "$T/rc.txt"
+  ci_capture fixture-job fail-gate bash -c 'exit 3'
+) >/dev/null 2>&1
+if python3 -c "
+import json, sys
+ok = json.load(open('$T/ci-logs/gate-results/result-gate.result.json'))
+bad = json.load(open('$T/ci-logs/gate-results/fail-gate.result.json'))
+assert ok['gate'] == 'result-gate' and ok['exit_code'] == 0 and ok['verdict'] == 'PASS', ok
+assert ok['executed'] is True and ok['tool_context'] == 'test-context', ok
+assert ok['command'] == ['bash', '-c', 'exit 0'], ok
+assert bad['exit_code'] == 3 and bad['verdict'] == 'FAIL' and bad['executed'] is True, bad
+assert 'started_utc' in ok and 'ended_utc' in ok and 'workdir' in ok and 'log_file' in ok
+" 2>/dev/null; then
+  report PASS "D34" "per-gate result JSON: PASS and FAIL records with command vector, context, UTC window"
+else
+  report FAIL "D34" "gate-results JSON missing, invalid, or incomplete"
+fi
+
 # ---------- B7-B13: workflow DAG structure assertions (python) -------------
 python3 - "$BD" "$CQ" <<'PY' > "$T/dag.txt" 2>&1
 import re, sys

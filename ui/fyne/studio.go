@@ -68,6 +68,19 @@ func Run() error {
 	} else {
 		log.Info("runtime log opened", "path", lg.Path())
 	}
+	// Process-start identity + resolved layout (run-42921967187
+	// logging contract): the very first structured records carry the
+	// product version/commit and the exact app-data/log directories,
+	// so a support bundle can be attributed without any other source.
+	bi := buildinfo.Normalized()
+	log.Info("application starting",
+		"version", bi.Version,
+		"commit", bi.Commit,
+		"built_by", bi.BuiltBy,
+		"built_date", bi.Date,
+		"data_mode", lay.Mode,
+		"data_root", lay.DataRoot,
+		"log_dir", lay.Logs)
 
 	a := app.NewWithID(brand.AppID)
 	w := a.NewWindow(brand.WindowTitle())

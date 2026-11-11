@@ -38,12 +38,23 @@
     now fails the run when injected metadata does not match the
     environment that requested it.
 #>
-Set-StrictMode -Version Latest
+Set-StrictMode -Version 3.0
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSCommandPath))
 Set-Location $repoRoot
+
+# REPO-ROOT ENVIRONMENT CONTRACT (run 42921967187 root cause repair):
+# generated gate scripts run in CHILD pwsh processes; only ENVIRONMENT
+# variables cross that boundary, and the three packaging gates dot-source
+# repository helpers through the documented root. The workflow sets
+# SHEYTAN_REPO_ROOT at the build-windows job scope (github.workspace); this
+# assignment guarantees local runs AND acts as a second belt so every child
+# process inherits a defined root. Resolution/fallback/validation itself is
+# centralized in scripts/ci/Resolve-RepoRoot.ps1 and the Capture-Step
+# -RequireRepoRoot preamble — gates never hand-roll root resolution.
+$env:SHEYTAN_REPO_ROOT = $repoRoot
 
 $logDir = Join-Path $repoRoot "ci-logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -373,8 +384,8 @@ if ($exeOk) {
     # stdout+stderr, argument array, bounded wait, REAL Process.ExitCode,
     # fail-closed on any unobservable exit). $LASTEXITCODE is never read.
     # The GUI subsystem of the distributed binary is NOT touched.
-    $rc = Capture-Step -Job $job -Step "verify-build-metadata" -ToolContext "gate:build-metadata" -Command {
-        . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/Invoke-CapturedProcess.ps1")
+    $rc = Capture-Step -Job $job -Step "verify-build-metadata" -ToolContext "gate:build-metadata" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Invoke-CapturedProcess.ps1") -Command {
+        . (Join-Path $repoRoot "scripts/ci/Invoke-CapturedProcess.ps1")
         $exe = Join-Path (Get-Location).Path "bin\sheytan-music-visualizer.exe"
         if (-not (Test-Path -LiteralPath $exe)) {
             Write-Output "ERROR: executable not found at $exe (nothing to verify)"
@@ -557,8 +568,8 @@ if ($exeOk) {
     # (empty tools/ffmpeg/bin survives). Linux parity: the TAR gate
     # archives the inner app directory directly (build-linux.sh
     # create-portable-tar), producing the identical single-root layout.
-    $rc = Capture-Step -Job $job -Step "create-portable-zip" -ToolContext "gate:create-portable-zip" -Command {
-        . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/New-PortableZip.ps1")
+    $rc = Capture-Step -Job $job -Step "create-portable-zip" -ToolContext "gate:create-portable-zip" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/New-PortableZip.ps1") -Command {
+        . (Join-Path $repoRoot "scripts/ci/New-PortableZip.ps1")
         $stageRoot = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable"
         $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
         $mk = New-PortableZip -StageRoot $stageRoot -ZipPath $zip
@@ -640,8 +651,8 @@ if ($exeOk) {
     # root layout: with the run's defect the app files landed one level
     # deeper and the license lookup failed even though the staged copy
     # was byte-identical — the license itself was never wrong.
-    $rc = Capture-Step -Job $job -Step "verify-extracted-package" -ToolContext "gate:package-verify" -Command {
-        . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/Invoke-CapturedProcess.ps1")
+    $rc = Capture-Step -Job $job -Step "verify-extracted-package" -ToolContext "gate:package-verify" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Invoke-CapturedProcess.ps1") -Command {
+        . (Join-Path $repoRoot "scripts/ci/Invoke-CapturedProcess.ps1")
         $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64-portable.zip"
         $extractRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("sheytan-pkg-verify-" + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null

@@ -1,0 +1,34 @@
+=== REPRODUCTION: run 42921967187 shared gate failure (SHEYTAN_REPO_ROOT null) ===
+generated_utc: 2026-11-11T00:19:12Z
+pwsh: 7.4.6
+mechanism: Capture-Step serializes each gate into a standalone child script
+(ci-logs/step-scripts/gate-*.ps1) and runs it with 'pwsh -NoProfile
+-NonInteractive -File'; only ENVIRONMENT variables cross that boundary.
+env before isolation: SHEYTAN_REPO_ROOT_present=False GITHUB_WORKSPACE_present=False
+parent observed child exit code: 1
+--- generated gate script (first 8 lines) ---
+  | Set-StrictMode -Version Latest
+  | $ErrorActionPreference = "Stop"
+  | $PSNativeCommandUseErrorActionPreference = $false
+  | . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/Invoke-CapturedProcess.ps1")
+  |     Write-Output "helper loaded (this line was never reached in run 42921967187)"
+  |     exit 0
+  | if (Test-Path Variable:LASTEXITCODE) { exit $LASTEXITCODE } else { exit 0 }
+  | 
+generated gate references SHEYTAN_REPO_ROOT: True
+--- clean child pwsh output (exit 1) ---
+  | Join-Path: /home/z/my-project/repo/evidence/repro-step-scripts/step-scripts/gate-verify-build-metadata.ps1:4
+  | Line |
+  |    4 |  . (Join-Path $env:SHEYTAN_REPO_ROOT "scripts/ci/Invoke-CapturedProces …
+  |      |               ~~~~~~~~~~~~~~~~~~~~~~
+  |      | Cannot bind argument to parameter 'Path' because it is null.
+--- control child pwsh output with SHEYTAN_REPO_ROOT set (exit 0) ---
+  | helper loaded (this line was never reached in run 42921967187)
+--- reported stage state in run 42921967187 (from consolidated report) ---
+  stage-portable PASSED (app dir + exe + license.md + readme.md + portable.mode + data/DATA-FOLDERS.txt + tools/ffmpeg docs)
+  verify-package-license PASSED (staged license byte-identical)
+  validate-pe PASSED (subsystem 2)
+  no valid final portable ZIP exists from that run
+
+machine-readable record: /home/z/my-project/repo/evidence/repro-run42921967187-repo-root.json
+REPRODUCTION VERDICT: CONFIRMED (one root cause, three gates)
