@@ -10,12 +10,12 @@ require (
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
 	github.com/gogpu/gputypes v0.8.2
-	github.com/gogpu/wgpu v0.34.7
+	github.com/gogpu/wgpu v0.34.8
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/llehouerou/go-mp3 v1.5.0
 	github.com/tphakala/go-flac v1.4.0
-	golang.org/x/image v0.45.0
-	golang.org/x/sys v0.49.0
+	golang.org/x/image v0.47.0
+	golang.org/x/sys v0.50.0
 	gonum.org/v1/gonum v0.17.0
 )
 
@@ -40,7 +40,7 @@ require (
 	github.com/go-webgpu/webgpu v0.5.5 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/gogpu/gpucontext v0.31.3 // indirect
-	github.com/gogpu/naga v0.21.2 // indirect
+	github.com/gogpu/naga v0.21.3 // indirect
 	github.com/hack-pad/go-indexeddb v0.3.2 // indirect
 	github.com/hack-pad/safejs v0.1.0 // indirect
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
