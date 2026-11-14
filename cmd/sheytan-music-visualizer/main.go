@@ -3,10 +3,13 @@
 //
 // Usage:
 //
-//	sheytan-music-visualizer              start the studio window
-//	sheytan-music-visualizer --version    print product/build metadata
-//	sheytan-music-visualizer --self-check verify foundation invariants
-//	                                      and exit without a window
+//	sheytan-music-visualizer                 start the studio window
+//	sheytan-music-visualizer --version       print product/build metadata
+//	sheytan-music-visualizer --build-info-json
+//	                                         print machine-readable build
+//	                                         metadata as one JSON line
+//	sheytan-music-visualizer --self-check    verify foundation invariants
+//	                                         and exit without a window
 //
 // Real startup errors return a non-zero process exit code; errors are
 // never swallowed.
@@ -47,6 +50,7 @@ func run(args []string, out, errW io.Writer) int {
 	showVersion := fs.Bool("version", false, "print product and build metadata, then exit")
 	selfCheckFlag := fs.Bool("self-check", false, "run foundation self-checks, then exit without opening a window")
 	selfCheckOut := fs.String("self-check-out", "", "additionally write the --self-check result to this UTF-8 file (structured CI evidence for the GUI-subsystem build, whose stdout may not be captured)")
+	buildInfoJSONFlag := fs.Bool("build-info-json", false, "print the build metadata as one stable JSON line (machine-readable CI evidence; the non-GUI authority for commit identity), then exit")
 	debugFlag := fs.Bool("debug", false, "write debug-level records to the runtime log (default log volume unchanged)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -59,6 +63,9 @@ func run(args []string, out, errW io.Writer) int {
 		os.Setenv("SHEYTAN_DEBUG", "1") // consumed by the UI runtime bootstrap
 	}
 	switch {
+	case *buildInfoJSONFlag:
+		fmt.Fprintln(out, string(buildinfo.JSON()))
+		return 0
 	case *showVersion:
 		fmt.Fprintf(out, "%s %s\n", brand.ProductName, buildinfo.Line())
 		for _, line := range brand.AttributionBlock() {

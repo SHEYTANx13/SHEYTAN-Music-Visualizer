@@ -75,6 +75,8 @@ type Studio struct {
 	transport  *playback.Transport
 	output     playback.Output
 	deviceReal bool
+	outputOnce sync.Once
+	outputErr  string
 
 	analysisCancel context.CancelFunc
 	exportJob      *export.Job
@@ -108,16 +110,59 @@ func New() (*Studio, error) {
 		return nil, err
 	}
 	s := &Studio{cacheDir: cacheDir, cache: cache}
-	// device: real when possible, silent otherwise (honest state)
-	out, err := playback.NewOtoOutput()
-	if err == nil {
-		s.output = out
-		s.deviceReal = true
-	} else {
-		s.output = playback.NewSilentOutput()
-	}
+	// Device deferral (run 43090342995 startup contract): opening the
+	// audio device (WASAPI/ALSA/oto context) is deferred to the first
+	// playback attempt, so the first visual frame never waits on device
+	// enumeration. DeviceReal() stays false until a device is proven —
+	// an uninitialized state is never reported as real.
 	s.vizConfig = defaultConfig()
 	return s, nil
+}
+
+// ensureOutput lazily opens the audio device exactly once: real device
+// when possible, silent fallback otherwise (honest state, logged by the
+// caller via DeviceReal/OutputReason).
+func (s *Studio) ensureOutput() {
+	s.outputOnce.Do(func() {
+		out, err := playback.NewOtoOutput()
+		if err == nil {
+			s.mu.Lock()
+			s.output = out
+			s.deviceReal = true
+			s.outputErr = ""
+			s.mu.Unlock()
+			return
+		}
+		s.mu.Lock()
+		s.output = playback.NewSilentOutput()
+		s.deviceReal = false
+		s.outputErr = err.Error()
+		s.mu.Unlock()
+	})
+}
+
+// OutputStarted reports whether the device has been initialized at all
+// (lazy startup: an untouched device is not a failure).
+func (s *Studio) OutputStarted() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.output != nil
+}
+
+// OutputReason reports why a real device is (or is not yet) in use.
+func (s *Studio) OutputReason() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.deviceReal {
+		return "active (Oto)"
+	}
+	if s.outputErr != "" {
+		return s.outputErr
+	}
+	if s.output == nil {
+		return "device opens with the first playback (not yet initialized)"
+	}
+	return "silent preview mode"
 }
 
 // DataDir resolves the app-owned cache directory through the SINGLE
@@ -444,12 +489,14 @@ func (s *Studio) PlayPause() error {
 	return err
 }
 
-// newTransportLocked creates the transport for the current track.
+// newTransportLocked creates the transport for the current track. The
+// audio device opens lazily on this first playback attempt.
 func (s *Studio) newTransportLocked() (*playback.Transport, error) {
 	if s.transport != nil {
 		_ = s.transport.Close()
 		s.transport = nil
 	}
+	s.ensureOutput()
 	tr, err := playback.NewTransport(s.output, s.cache.RawPath(s.track.Fingerprint))
 	if err != nil {
 		return nil, err
@@ -816,7 +863,28 @@ func (s *Studio) ApplyPreset(name string) bool {
 	return false
 }
 
-// Close releases playback resources.
+// IsPlayingLike reports whether audio is actively being consumed, so
+// the UI render loop can run full rate while playing and throttle when
+// idle. Truthful when no transport exists yet (false = idle).
+func (s *Studio) IsPlayingLike() bool {
+	s.mu.RLock()
+	tr := s.transport
+	s.mu.RUnlock()
+	if tr == nil {
+		return false
+	}
+	return tr.IsPlaying()
+}
+
+// Importing reports whether an import/analysis is currently running,
+// so the shutdown path can offer cancellation instead of destroying it.
+func (s *Studio) Importing() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.importing
+}
+
+// Close releases playback resources. Idempotent.
 func (s *Studio) Close() {
 	s.mu.Lock()
 	tr := s.transport

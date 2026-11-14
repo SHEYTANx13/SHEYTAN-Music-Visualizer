@@ -226,6 +226,25 @@ RUN / NOT AVAILABLE item is stated exactly and requires either real
 hardware (Windows host, hardware GPU) or explicit follow-up work. See
 `ai-notes.md` for the evidence-backed state and the next narrow mission.
 
+## CI repair session (2026-11-13, run 43090342995 — delivered locally, awaiting user-triggered CI run)
+
+DELIVERED (code + local Linux verification; hosted CI is the platform authority):
+
+- Playback transport clock contract (APP-19), close/shutdown state
+  machine (APP-20), responsive breakpoint shell with viewport matrix
+  tests (APP-21), first-frame deferral + idle throttle (APP-22/23),
+  `--build-info-json` identity authority + package-status observer
+  repair with enforced VERIFIED/TEST_ONLY/UNAVAILABLE semantics
+  (APP-24/25), resolver contract R8 + interpolation R9 (APP-26),
+  SC2129 fix + online zizmor mode (APP-27), docs index + traceability
+  (APP-29). Local evidence and honest gaps: `docs/REQUIREMENTS-
+  TRACEABILITY.md` and the session `note.md`.
+
+PLANNED (unchanged, owned by the next hosted run): Windows-hosted rerun
+of the playback suite and observer fixtures, online zizmor audit result
+with the workflow token, CodeQL on the repaired commit, and the
+consolidated-log collector reaching terminal success.
+
 ## CI repair session (2026-11-11, run 42921967187)
 
 The shared Windows-gate root-cause repair is complete and locally

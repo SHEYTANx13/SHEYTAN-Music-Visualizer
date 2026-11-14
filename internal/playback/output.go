@@ -93,21 +93,24 @@ func NewSilentOutput() *SilentOutput {
 	return &SilentOutput{cancel: make(chan struct{})}
 }
 
-// silentPlayer paces reads at the canonical byte rate.
+// silentPlayer paces reads at the canonical byte rate. It runs at most
+// one pacer goroutine per play session; Pause ends the session and the
+// goroutine exits promptly, so repeated play/pause cycles never
+// accumulate idle tickers.
 type silentPlayer struct {
-	r        io.Reader
-	out      *SilentOutput
-	bufSize  int
-	playing  bool
-	volume   float64
-	offset   int64
-	mu       sync.Mutex
-	stopOnce sync.Once
-	done     chan struct{}
+	r       io.Reader
+	out     *SilentOutput
+	playing bool
+	volume  float64
+	offset  int64
+	session bool // a pacer session is live (its stop channel is open)
+	mu      sync.Mutex
+	stop    chan struct{} // owned by the current session
+	done    chan struct{} // closed when the current pacer exits
 }
 
 func (o *SilentOutput) NewPlayer(r io.Reader) Player {
-	return &silentPlayer{r: r, out: o, done: make(chan struct{}), volume: 1}
+	return &silentPlayer{r: r, out: o, volume: 1}
 }
 
 func (o *SilentOutput) Close() error {
@@ -122,49 +125,66 @@ func (o *SilentOutput) Close() error {
 
 func (p *silentPlayer) Play() {
 	p.mu.Lock()
-	if p.playing {
-		p.mu.Unlock()
+	defer p.mu.Unlock()
+	if p.playing || p.session {
 		return
 	}
 	p.playing = true
-	p.mu.Unlock()
-	go func() {
-		defer p.stopOnce.Do(func() { close(p.done) })
-		tick := time.NewTicker(10 * time.Millisecond)
-		defer tick.Stop()
-		// canonical bytes per 10 ms
-		chunk := SampleRate / 100 * BytesPerFrame
-		sink := make([]byte, chunk)
-		for {
-			select {
-			case <-p.out.cancel:
-				return
-			case <-tick.C:
-			}
-			p.mu.Lock()
-			playing := p.playing
-			p.mu.Unlock()
-			if !playing {
-				continue
-			}
-			n, err := p.r.Read(sink)
-			p.mu.Lock()
-			p.offset += int64(n)
-			p.mu.Unlock()
-			if err != nil {
-				p.mu.Lock()
-				p.playing = false
-				p.mu.Unlock()
-				return
-			}
+	p.session = true
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	p.stop = stop
+	p.done = done
+	go p.pace(stop, done)
+}
+
+// pace is the one live pacer goroutine of a play session. It exits on
+// session stop, output cancel, or EOF, exactly once per session.
+func (p *silentPlayer) pace(stop, done chan struct{}) {
+	defer close(done)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	// canonical bytes per 10 ms
+	chunk := SampleRate / 100 * BytesPerFrame
+	sink := make([]byte, chunk)
+	for {
+		select {
+		case <-p.out.cancel:
+			return
+		case <-stop:
+			return
+		case <-tick.C:
 		}
-	}()
+		p.mu.Lock()
+		playing := p.playing
+		p.mu.Unlock()
+		if !playing {
+			continue
+		}
+		n, err := p.r.Read(sink)
+		p.mu.Lock()
+		p.offset += int64(n)
+		p.mu.Unlock()
+		if err != nil {
+			p.mu.Lock()
+			p.playing = false
+			p.session = false
+			p.mu.Unlock()
+			return
+		}
+	}
 }
 
 func (p *silentPlayer) Pause() {
 	p.mu.Lock()
 	p.playing = false
+	live := p.session
+	p.session = false
+	stop := p.stop
 	p.mu.Unlock()
+	if live && stop != nil {
+		close(stop)
+	}
 }
 
 func (p *silentPlayer) Reset() { p.Seek(0, io.SeekStart) }

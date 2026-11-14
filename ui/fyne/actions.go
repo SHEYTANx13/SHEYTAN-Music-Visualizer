@@ -236,10 +236,41 @@ func (u *studioUI) showExportDialog(env *export.Environment) {
 // swapped on the UI thread via fyne.Do.
 func (u *studioUI) startRenderLoop() {
 	go func() {
+		idleSkip := 0
 		ticker := time.NewTicker(time.Second / 30)
 		defer ticker.Stop()
 	forRunning:
 		for {
+			// FIRST-FRAME DEFERRAL (run 43090342995): the initial
+			// renderer selection happens HERE — on this loop goroutine,
+			// after the window is already visible — instead of blocking
+			// the pre-show startup path. The window shows the honest
+			// "probing" state until selection completes.
+			u.selectOnce.Do(func() {
+				pref := render.PrefAuto
+				if u.storedPrefFound {
+					pref = u.storedPref
+				}
+				r, info := render.SelectRendererExplicit(pref)
+				u.renderMu.Lock()
+				u.renderer = r
+				u.rendererInfo = info
+				u.renderMu.Unlock()
+				pol := sysprofile.ModePolicyFor(u.policyMode, sysprofile.Collect(info))
+				u.logInfo("renderer selected (background)",
+					"preference", string(pref),
+					"backend", string(info.Backend),
+					"gpu_state", string(info.GpuState),
+					"adapter", info.Adapter,
+					"device_class", info.DeviceClass,
+					"detail", info.Detail,
+					"policy_mode", string(u.policyMode),
+					"policy_workers", pol.Workers,
+					"policy_source", pol.Source)
+				fyne.Do(func() {
+					u.rendererLB.SetText("renderer: " + rendererSummary(info))
+				})
+			})
 			// Renderer preference changes are handled by THIS goroutine
 			// between frames, so a renderer can never be swapped or
 			// closed mid-flight. Newest request supersedes (buffered).
@@ -274,6 +305,17 @@ func (u *studioUI) startRenderLoop() {
 				continue forRunning
 			}
 			<-ticker.C
+			// Idle throttle (run 43090342995 performance contract):
+			// while nothing is playing the preview repaints at ~6 fps
+			// instead of 30 — no tight polling loop, and playback (or an
+			// in-flight scrub) restores the full 30 fps rate immediately.
+			if !u.svc.IsPlayingLike() && !u.scrubbing {
+				idleSkip++
+				if idleSkip < 5 {
+					continue forRunning
+				}
+			}
+			idleSkip = 0
 			fr, err := u.svc.PreviewFrame(960, 540, r)
 			if err != nil || fr == nil || fr.Image == nil {
 				continue

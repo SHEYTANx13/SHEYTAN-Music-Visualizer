@@ -4,6 +4,28 @@ package playback
 // The transport wraps the cache file in a bounded section reader with
 // byte counting so the playhead reflects handed-to-device samples
 // minus the device-buffered remainder.
+//
+// Clock contract (one coherent state-transition model):
+//
+//   - The canonical position source is the epoch triple
+//     (basePos, baseCount, baseBuf). It is captured under the transport
+//     mutex at every state transition (spawn, pause, resume, seek,
+//     stop), which is the acknowledgement protocol for device ticks:
+//     ticks delivered before the transition are folded into the epoch,
+//     ticks delivered after it are excluded by the frozen-state rule.
+//   - While playing, the playhead is
+//     basePos + (counting.n - baseCount) - (buffered - baseBuf),
+//     clamped to [0, total]. Bytes read while the device is paused are
+//     excluded from the epoch on resume, so they can never move the
+//     playhead.
+//   - Once Pause() returns, the visible position is frozen at the
+//     position captured by the pause transition: no late tick, buffered
+//     fill or in-flight read can move it until a later successful
+//     Play(). Seek while paused re-captures the epoch at the new
+//     offset; resume starts from the seek position.
+//   - Play/Pause/Stop/Seek are idempotent and spawn or release at most
+//     one device player per transition; teardown closes owned resources
+//     exactly once.
 
 import (
 	"fmt"
@@ -14,8 +36,8 @@ import (
 )
 
 // Transport is one track's playback state machine. It is safe for
-// concurrent use (UI goroutines call it; one worker goroutine polls
-// the clock).
+// concurrent use (UI goroutines call it; the device goroutine consumes
+// the counting reader).
 type Transport struct {
 	mu sync.Mutex
 
@@ -27,9 +49,13 @@ type Transport struct {
 	done     chan struct{}
 	closed   bool
 
-	volume     float64
-	state      State
-	posAtPause int64 // device bytes handed off when paused/stopped
+	volume float64
+	state  State
+
+	// Clock epoch, captured together under mu at every transition.
+	basePos   int64 // canonical playhead at the transition
+	baseCount int64 // counting.n at the transition
+	baseBuf   int   // player.BufferedSize() at the transition
 	// deviceLatency is the documented uncertainty of the playhead.
 	deviceLatency time.Duration
 }
@@ -93,7 +119,9 @@ func durationToBytes(d time.Duration) int64 {
 	return frames * BytesPerFrame
 }
 
-// Play starts or resumes playback.
+// Play starts or resumes playback. Resuming from a paused position
+// re-captures the clock epoch so counters moved while paused are
+// excluded from the resumed playhead.
 func (t *Transport) Play() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -110,25 +138,47 @@ func (t *Transport) Play() error {
 	}
 	t.player.SetVolume(t.volume)
 	t.player.Play()
+	t.captureEpochLocked()
 	t.state = StatePlaying
 	return nil
 }
 
-// spawnPlayerLocked creates the oto player from the current position.
-// Caller holds mu.
+// spawnPlayerLocked creates the oto player from the current canonical
+// position. Caller holds mu.
 func (t *Transport) spawnPlayerLocked() error {
 	if t.player != nil {
 		return nil
 	}
 	// a fresh section reader from the current position
-	r := io.NewSectionReader(t.file, t.posAtPause, t.total-t.posAtPause)
+	r := io.NewSectionReader(t.file, t.basePos, t.total-t.basePos)
 	pr := &countingReader{r: r}
 	t.player = t.out.NewPlayer(pr)
 	t.counting = pr
 	if err := t.player.Err(); err != nil {
+		// drop the broken player so the next Play spawns fresh
+		t.player = nil
+		t.counting = nil
 		return fmt.Errorf("playback: player: %w", err)
 	}
+	t.captureEpochLocked()
 	return nil
+}
+
+// captureEpochLocked records the current counter values as the new
+// clock epoch. Caller holds mu.
+func (t *Transport) captureEpochLocked() {
+	if t.counting != nil {
+		t.counting.mu.Lock()
+		t.baseCount = t.counting.n
+		t.counting.mu.Unlock()
+	} else {
+		t.baseCount = 0
+	}
+	if t.player != nil {
+		t.baseBuf = t.player.BufferedSize()
+	} else {
+		t.baseBuf = 0
+	}
 }
 
 // countingReader counts bytes actually read (handed to the device).
@@ -160,15 +210,23 @@ func (c *countingReader) Seek(offset int64, whence int) (int64, error) {
 	return 0, fmt.Errorf("playback: reader not seekable")
 }
 
-// Pause pauses playback, retaining the position.
+// Pause pauses playback, freezing the playhead at the position captured
+// by this transition. Idempotent: pausing a paused or stopped transport
+// is a no-op. The device player is kept so resume keeps its buffer, but
+// every counter the device moves after this transition is excluded from
+// the frozen position and re-based on resume.
 func (t *Transport) Pause() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed || t.state != StatePlaying {
 		return nil
 	}
+	// Capture the live playhead from the playing epoch before
+	// stopping the device; all under mu, so the freeze is atomic.
+	p := t.livePositionLocked()
 	t.player.Pause()
-	t.posAtPause = t.rawPositionLocked()
+	t.basePos = p
+	t.captureEpochLocked()
 	t.state = StatePaused
 	return nil
 }
@@ -181,7 +239,9 @@ func (t *Transport) Stop() error {
 		return ErrClosed
 	}
 	t.releasePlayerLocked()
-	t.posAtPause = 0
+	t.basePos = 0
+	t.baseCount = 0
+	t.baseBuf = 0
 	t.state = StateStopped
 	return nil
 }
@@ -195,11 +255,15 @@ func (t *Transport) releasePlayerLocked() {
 		t.player = nil
 		t.counting = nil
 	}
+	t.baseCount = 0
+	t.baseBuf = 0
 }
 
-// Seek repositions the playhead. Playback state is preserved: playing
-// tracks continue (the player is respawned at the new position), and
-// the device buffer is flushed by replacing the player.
+// Seek repositions the playhead. The canonical position moves to the
+// clamped offset and the device buffer is flushed by replacing the
+// player. Playback state is preserved: a playing track continues from
+// the new position, a paused track stays paused exactly at it, and a
+// stopped track starts from it on the next Play.
 func (t *Transport) Seek(d time.Duration) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -213,9 +277,10 @@ func (t *Transport) Seek(d time.Duration) error {
 	if off > t.total {
 		off = t.total
 	}
+	off -= off % BytesPerFrame // frame-align the canonical offset
 	wasPlaying := t.state == StatePlaying
 	t.releasePlayerLocked()
-	t.posAtPause = off
+	t.basePos = off
 	if wasPlaying {
 		if err := t.spawnPlayerLocked(); err != nil {
 			t.state = StatePaused
@@ -251,20 +316,20 @@ func (t *Transport) Volume() float64 {
 	return t.volume
 }
 
-// rawPositionLocked estimates the device playhead: handed-off bytes
-// minus buffered remainder. Caller holds mu.
-func (t *Transport) rawPositionLocked() int64 {
-	if t.player == nil {
-		return t.posAtPause
-	}
-	handed := t.posAtPause
+// livePositionLocked computes the playhead from the current epoch while
+// the device is consuming. Caller holds mu; state must be playing.
+func (t *Transport) livePositionLocked() int64 {
+	handed := t.basePos
 	if t.counting != nil {
 		t.counting.mu.Lock()
-		handed += t.counting.n
+		handed += t.counting.n - t.baseCount
 		t.counting.mu.Unlock()
 	}
-	buffered := int64(t.player.BufferedSize())
-	pos := handed - buffered
+	buffered := t.baseBuf
+	if t.player != nil {
+		buffered = t.player.BufferedSize()
+	}
+	pos := handed - int64(buffered-t.baseBuf)
 	if pos < 0 {
 		pos = 0
 	}
@@ -274,7 +339,18 @@ func (t *Transport) rawPositionLocked() int64 {
 	return pos
 }
 
-// Position returns the current playhead position.
+// rawPositionLocked returns the canonical playhead. While paused or
+// stopped it is the frozen epoch base; device counters moved after the
+// transition are ignored by design. Caller holds mu.
+func (t *Transport) rawPositionLocked() int64 {
+	if t.state != StatePlaying || t.player == nil {
+		return t.basePos
+	}
+	return t.livePositionLocked()
+}
+
+// Position returns the current playhead position. After Pause returns,
+// this value is frozen until a later successful Play.
 func (t *Transport) Position() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -313,6 +389,7 @@ func (t *Transport) IsPlaying() bool {
 }
 
 // Close stops playback and releases the device player and file.
+// Idempotent: a second Close is a no-op.
 func (t *Transport) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

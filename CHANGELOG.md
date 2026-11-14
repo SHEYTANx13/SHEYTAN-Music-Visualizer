@@ -6,6 +6,57 @@ informational only.
 
 <!-- END HISTORICAL RECORD -->
 
+## 2026-11-13 — run 43090342995 repair
+
+- **Playback clock contract fixed at its source.** The Windows
+  `TestSilentTransportClockAndSeek` failure (`position advanced while
+  paused: 580ms → 590ms`) was a real state race: the playhead was
+  recomputed from live device counters even when paused, and the silent
+  pacer could deliver one in-flight tick after `Pause()` returned. The
+  transport now owns one epoch triple (`basePos/baseCount/baseBuf`)
+  captured atomically at every transition; a paused/stopped transport
+  returns the frozen epoch base and ignores every late tick; seeks are
+  frame-aligned; the silent pacer runs one goroutine per play session
+  and exits on pause (no idle ticker accumulation). A deterministic
+  test suite (`transport_clock_test.go`) drives device consumption
+  synchronously — pending-tick, pause-before/after-tick, seek-while-
+  paused, 60 repeated cycles, buffered arithmetic, zero-duration,
+  end-of-track, close idempotence and goroutine-leak checks — with the
+  original test text unchanged.
+- **One authoritative shutdown path.** New `internal/appclose` state
+  machine behind the titlebar close intercept and a File→Quit menu:
+  duplicate close events never duplicate dialogs or teardown; active
+  playback/export/import get exactly one confirmation; cancel→flush→
+  release stages are bounded and evidence-recorded; the window closes
+  explicitly once after cleanup.
+- **Responsive studio.** Breakpoint recomposition of shared regions
+  (phone <480 px single column with touch-sized action grid; compact
+  split; desktop workspace; ultrawide content capped at 1680 px and
+  centered), long-title truncation, phone-safe dialogs, and a
+  23-viewport layout-contract test suite (no overlap/overflow, actions
+  reachable, state preserved across breakpoint transitions).
+- **First-frame deferral.** The renderer probe and the audio-device
+  open no longer block the first frame (truthful "probing…"/not-yet-
+  initialized states instead); the idle preview repaints at ~6 fps.
+- **Machine-readable build identity.** `--build-info-json` prints one
+  stable JSON line; the package-status observers (PowerShell +
+  bash/python) parse typed JSON from the built AND the extracted
+  executable — the false `commit_observed: not-observed` class is
+  structurally impossible now. Package-status semantics enforced:
+  commit-identity failure is UNAVAILABLE (never TEST_ONLY), integrity
+  gates run even when unrelated tests already failed (valid TEST_ONLY
+  packages are no longer withheld).
+- **Root-resolver contract.** R8 now pins the real 4-gate
+  `-RequireRepoRoot` contract with exact helper call sites; the
+  generated-gate diagnostic prints the actual resolved root (the
+  literal `$repoRoot` interpolation bug is fixed); new R9 and P9/P10
+  fixture blocks.
+- **Workflow hygiene.** The ShellCheck SC2129 finding at
+  `build-desktop.yml:702` fixed by grouping the step-summary appends
+  (order and append semantics preserved); zizmor runs online with the
+  workflow's scoped token; the documented actionlint ignores and the
+  negative fixture are unchanged.
+
 ## 2026-11-11 — run 42939743766 repair
 
 - **GPU: palettes now provably reach the shader.** The fragment color

@@ -191,3 +191,34 @@ No pprof HTTP listener is exposed by the release application.
   startup record; first-launch data creation is included in cold runs.
 - Benchmarks on shared CI runners have scheduler noise; medians over ≥5
   samples are the comparison basis, single runs are not.
+
+## Run 43090342995 — same-host before/after (2026-11-13)
+
+Same host and profile as the table above (Linux sandbox, Xvfb, 2 logical
+CPUs). Command: `scripts/bench/startup-bench.sh 7 <bin>` per binary; the
+metric is the app-recorded `first-window-usable` stage from the true
+process-start anchor.
+
+| Session | Binary | cold median | warm median | samples |
+|---|---|---|---|---|
+| baseline (commit acc64d80, pristine worktree) | `/tmp/baseline-tree` build | **1196 ms** | **1187 ms** | 7 + 7 |
+| after repair (first-frame deferral + idle throttle) | repaired tree build | **1183 ms** | **1191 ms** | 7 + 7 |
+
+Stage breakdown (single representative runs, process-start anchor):
+
+| Stage | baseline | after |
+|---|---|---|
+| runtime-entry (Go runtime + library load — NOT addressable) | ~952 ms | ~957 ms |
+| logger-and-data-paths | +0 ms | +1 ms |
+| app-shell-created | +24 ms | +51 ms |
+| studio-service-and-audio-init | +57 ms (audio device opened here) | +55 ms (device deferred to first playback) |
+| ui-shell-built | +57 ms (renderer probe ran here) | +57 ms (probe now runs in the render-loop goroutine) |
+| first-window-usable | +91 ms (GLFW/GL window creation — NOT addressable) | +93 ms |
+
+Conclusion, stated honestly: the measured bottleneck on this host is the
+~950 ms process/runtime/library load plus ~90 ms of window creation —
+outside application control. The two removed blocking waits (renderer
+probe, audio-device open) are real first-frame-contract repairs (they
+are the slow paths on hosts with real GPU/audio hardware) but they do
+not move this host's median beyond noise. No speculative optimization
+was shipped; correctness suites were re-run after each change.

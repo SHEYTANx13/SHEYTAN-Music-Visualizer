@@ -16,6 +16,33 @@ for the details; it does not duplicate them.
 into one binary; the build scripts set it via the single documented source
 `$env:SHEYTAN_GO_TAGS` / its bash counterpart.
 
+## Build identity: `--build-info-json` is the commit authority (run 43090342995)
+
+The desktop binary prints one stable JSON line with `--build-info-json`
+(`version`, `commit`, `date`, `built_by`, `go_version`, `os`, `arch`;
+`internal/buildinfo.JSON()`). The package-status observers parse THIS
+output with typed JSON decoders — never regexes over human `--version`
+text:
+
+- `scripts/ci/Get-PackageCommitStatus.ps1` (PowerShell side, used by
+  `build-windows.ps1` for the built AND the extracted executable),
+- `scripts/ci/observe_commit.py` (bash side, used by `build-linux.sh`).
+
+Verification rules (identical in both, proven by the P9/P10 fixture
+matrix): a non-zero exit is never verified; empty/malformed output,
+a missing/empty commit field and the literal `unknown` default are never
+verified; a non-blank expected commit must equal the observed commit
+exactly (case-sensitive); trailing LF/CRLF/whitespace is tolerated by
+the decoder. Human `--version` output remains user-facing only.
+
+### Package-status contract
+
+| Status | Meaning | Upload |
+|---|---|---|
+| `VERIFIED` | every package-integrity gate passed AND the expected commit (immutable `github.sha`) matches the embedded metadata of the built AND extracted executable AND no unrelated gate failed | yes |
+| `TEST_ONLY` | package integrity AND commit identity fully passed, but an unrelated quality gate failed — the job/workflow stay red and the summary labels the artifact TEST-ONLY | yes |
+| `UNAVAILABLE` | no valid package, unverified embedded commit, or any failed package-integrity gate | never |
+
 ## The build scripts and their gates
 
 - `scripts/build/build-windows.ps1` — UCRT64 identity, gofmt,

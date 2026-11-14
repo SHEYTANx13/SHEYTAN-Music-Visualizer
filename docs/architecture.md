@@ -85,6 +85,25 @@ that reaches FFmpeg, ffprobe validation before atomic finalize).
   `fyne.Do`/`fyne.DoAndWait` (Fyne 2.8 threading contract); the UI
   thread never blocks on adapter enumeration, FFmpeg probes, filesystem
   scans or project analysis.
+- **Close/shutdown (run 43090342995):** every close surface — titlebar
+  (via `Window.SetCloseIntercept`), File→Quit — enters ONE state machine
+  (`internal/appclose`): running → closeRequested → confirming →
+  cancelling → flushing → closing → closed. Duplicate requests never
+  duplicate dialogs or teardown; active playback/export/import get ONE
+  confirmation; cancel→flush→release stages are bounded and their
+  outcomes recorded; `Window.Close()` is called explicitly and exactly
+  once after cleanup.
+- **Responsive shell (run 43090342995):** one set of shared widget
+  regions is recomposed per breakpoint by `ui/fyne/responsive.go` —
+  phone <480 px (single column, touch-sized action grid, focal preview),
+  compact <1024 px (draggable preview/side-panel split), desktop <1680
+  px (three-region workspace), ultrawide ≥1680 px (content capped at
+  1680 px and centered). State survives resize because instances are
+  re-parented, never rebuilt.
+- **First-frame deferral (run 43090342995):** the renderer probe runs in
+  the render-loop goroutine after the window is visible ("probing…"
+  state until then); the audio device opens lazily on first playback.
+  While nothing plays the preview repaints at ~6 fps instead of 30.
 - Audio/DSP/render run off the UI thread with bounded queues and context
   cancellation; backpressure protects playback latency.
 - Keyboard transport (Space/←/→) and fullscreen (F11/Esc) are window

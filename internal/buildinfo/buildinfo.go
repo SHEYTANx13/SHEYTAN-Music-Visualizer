@@ -8,6 +8,7 @@
 package buildinfo
 
 import (
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"strings"
@@ -67,4 +68,40 @@ func Line() string {
 	i := Normalized()
 	return fmt.Sprintf("%s (commit %s, built %s by %s, %s)",
 		i.Version, i.Commit, i.Date, i.BuiltBy, i.GoVersion)
+}
+
+// jsonSnapshot is the stable machine-readable build-info shape. Field
+// names and order are part of the CI contract: the package-status
+// observers parse this JSON with typed decoders (PowerShell
+// ConvertFrom-Json, scripts/ci/observe_commit.py) and never scrape
+// human-formatted console text.
+type jsonSnapshot struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	Date      string `json:"date"`
+	BuiltBy   string `json:"built_by"`
+	GoVersion string `json:"go_version"`
+	OS        string `json:"os"`
+	Arch      string `json:"arch"`
+}
+
+// JSON returns the single-line machine-readable build snapshot
+// (--build-info-json output, without the trailing newline).
+func JSON() []byte {
+	i := Normalized()
+	b, err := json.Marshal(jsonSnapshot{
+		Version:   i.Version,
+		Commit:    i.Commit,
+		Date:      i.Date,
+		BuiltBy:   i.BuiltBy,
+		GoVersion: i.GoVersion,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+	})
+	if err != nil {
+		// json.Marshal of a fixed struct of strings cannot fail; the
+		// guard keeps the contract explicit and the fallback honest.
+		panic(fmt.Sprintf("buildinfo: JSON marshal failed: %v", err))
+	}
+	return b
 }

@@ -10,6 +10,43 @@ SHEYTAN Music Visualizer · SHEYTAN™ · Licensor: Parsaetak
 
 ---
 
+## Session record — 2026-11-13 (run 43090342995 repair, delivered as source ZIP + note.md)
+
+Concise facts for the next agent; full details in `CHANGELOG.md`,
+`docs/REQUIREMENTS-TRACEABILITY.md` (APP-19…APP-30) and the session's
+external `note.md`.
+
+- Playback transport: one epoch triple (`basePos/baseCount/baseBuf`)
+  captured under the transport mutex at every transition is the playhead
+  authority; paused/stopped positions are frozen by state (late device
+  ticks are structurally irrelevant); seeks are frame-aligned; the
+  silent pacer is one goroutine per play session. Deterministic tests
+  drive consumption synchronously — no sleeps, no tolerance windows.
+- Close lifecycle: `internal/appclose` is the ONLY close path. The UI
+  wires `SetCloseIntercept` + File→Quit into it; teardown stages run off
+  the event loop with per-stage bounded deadlines; `fyne.Do(win.Close)`
+  is the single finalization.
+- Responsive root: `ui/fyne/responsive.go` recomposes shared regions at
+  breakpoints (480/1024/1680). Fyne facts learned the hard way: wrap+
+  truncation on one RichText panics; `Container.Add` does NOT re-parent
+  (drop the old composition from the paint tree instead); a container
+  with a nil layout never sizes children (MaxLayout wraps the swap
+  target); BaseWidget routes container layouts to the RENDERER, and
+  SimpleRenderer only Resizes — re-parented children keep stale
+  positions without an explicit Move in a custom renderer.
+- Startup: renderer probe + audio-device open are off the first-frame
+  path; measured medians unchanged on the measurement host because
+  ~950 ms of Go/library load + ~90 ms of GLFW/GL creation dominate — the
+  evidence table is in `docs/performance-baseline.md`.
+- Commit identity: `--build-info-json` (typed JSON) is the only machine
+  authority; the pwsh and bash observers share one contract proven by
+  P9/P10 fixture matrices; commit-identity failure is UNAVAILABLE.
+- Resolver: R8 asserts the real 4-call-site `-RequireRepoRoot` contract;
+  the preamble diagnostic must interpolate `$repoRoot` (R9 pins it).
+- Workflow: SC2129 fixed by grouping appends; trigger branches verified
+  byte-exact as `[main]`; zizmor online mode requires the hosted token.
+
+
 ## Session identity
 
 - **Mission:** Phase 1 — foundation, product documentation, agent handoff,

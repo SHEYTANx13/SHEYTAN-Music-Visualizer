@@ -18,8 +18,13 @@
 #       b) SHEYTAN_REPO_ROOT -> helper imports, package output touched
 #       c) GITHUB_WORKSPACE  -> fallback, helper imports via canonical path
 #   R8  static contract: build-windows.ps1 declares -RequireRepoRoot for the
-#       three helper-importing gates and no gate body uses
-#       $env:SHEYTAN_REPO_ROOT directly.
+#       four helper-importing gates (verify-build-metadata,
+#       create-portable-zip, verify-extracted-package,
+#       verify-extracted-path-with-spaces) with their exact helpers, keeps a
+#       single documented parent-side $env:SHEYTAN_REPO_ROOT assignment, and no
+#       gate body consumes workspace env directly.
+#   R9  generated gate preamble interpolates the diagnostic: prints the
+#       actual resolved root directory, never the literal variable name.
 #
 # Exit 0 = all fixtures PASS; nonzero = at least one FAIL.
 
@@ -225,16 +230,66 @@ Verdict "R7c" ($r7c -eq 0 -and (Test-Path $marker) -and $r7cOut -match "repo roo
 
 # --- R8: static contract on build-windows.ps1 --------------------------------
 $bw = Get-Content (Join-Path $RepoRoot "scripts/build/build-windows.ps1") -Raw
-# Count only EXECUTABLE Capture-Step invocations, never comment prose.
+# Every helper-importing gate declares -RequireRepoRoot (one executable
+# invocation per gate) and dotsources its exact helper through the
+# resolver-owned $repoRoot. Count only EXECUTABLE invocations, never
+# comment prose. The four canonical call sites are: verify-build-metadata,
+# create-portable-zip, verify-extracted-package and
+# verify-extracted-path-with-spaces.
 $declared = ([regex]::Matches($bw, '(?m)^\s*\$rc = Capture-Step .*-RequireRepoRoot')).Count
 # Exactly ONE executable $env:SHEYTAN_REPO_ROOT occurrence is allowed: the
 # documented parent-side assignment. Gate bodies must use $repoRoot.
 $directUses = ([regex]::Matches($bw, '(?m)^\s*\$env:SHEYTAN_REPO_ROOT = ')).Count
 $assignment = [bool]($bw -match [regex]::Escape('$env:SHEYTAN_REPO_ROOT = $repoRoot'))
-$threeHelpers = ($bw -match [regex]::Escape('-RepoRootHelpers @("scripts/ci/Invoke-CapturedProcess.ps1")')) -and
-                ($bw -match [regex]::Escape('-RepoRootHelpers @("scripts/ci/New-PortableZip.ps1")'))
-Verdict "R8" ($declared -eq 3 -and $directUses -eq 1 -and $assignment -and $threeHelpers) `
-    "build-windows.ps1: 3 declared RequireRepoRoot gate invocations, single documented env assignment, no direct gate-body use"
+# Exact gate -> helper call-site coverage (per gate, helper-exact).
+$callSites = @(
+    @{ gate = 'verify-build-metadata';             helper = 'scripts/ci/Invoke-CapturedProcess.ps1' },
+    @{ gate = 'create-portable-zip';               helper = 'scripts/ci/New-PortableZip.ps1' },
+    @{ gate = 'verify-extracted-package';          helper = 'scripts/ci/Invoke-CapturedProcess.ps1' },
+    @{ gate = 'verify-extracted-path-with-spaces'; helper = 'scripts/ci/Invoke-CapturedProcess.ps1' }
+)
+$callSitesOk = $true
+foreach ($cs in $callSites) {
+    $pattern = '-Step "{0}" .*-RequireRepoRoot .*-RepoRootHelpers @\("{1}"\)' -f `
+        [regex]::Escape($cs.gate), [regex]::Escape($cs.helper)
+    if (-not ($bw -match $pattern)) {
+        Write-Output ("        call site missing or wrong helper: gate='{0}' helper='{1}'" -f $cs.gate, $cs.helper)
+        $callSitesOk = $false
+    }
+}
+# No gate may bypass the resolver by consuming workspace env directly.
+$bypass = [bool]($bw -match 'Join-Path \$env:')
+Verdict "R8" ($declared -eq $callSites.Count -and $directUses -eq 1 -and $assignment -and $callSitesOk -and -not $bypass) `
+    "build-windows.ps1: $($callSites.Count) declared RequireRepoRoot gate invocations with exact helper call sites, single documented env assignment, no gate-body env use"
+
+# --- R9: resolver diagnostic prints the actual resolved path -----------------
+# The generated preamble must interpolate $repoRoot (never print the
+# literal variable name) and must not leak environment contents.
+$sb = Join-Path $sandboxBase "r9"
+$repo = New-SandboxRepo $sb
+$capLog = Join-Path $sb "capture.log"
+Set-Content -Path $capLog -Value "" -NoNewline
+$env:CI_LOG_FILE = $capLog
+. (Join-Path $RepoRoot "scripts/ci/Capture-Step.ps1")
+Capture-Step -Job "regression" -Step "gate-r9" -ToolContext "gate:r9" `
+    -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Fake-Helper.ps1") -Command {
+    Write-Output "gate body reached"
+    exit 0
+} | Out-Null
+Reset-RootEnv
+$env:SHEYTAN_REPO_ROOT = $repo
+$generatedR9 = Join-Path $sb "step-scripts/gate-gate-r9.ps1"
+if (-not (Test-Path $generatedR9)) { $generatedR9 = (Get-ChildItem (Join-Path $sb "step-scripts") -Filter "gate-gate-r9*.ps1" | Select-Object -First 1).FullName }
+Push-Location $repo
+& $pwsh -NoProfile -NonInteractive -File $generatedR9 > (Join-Path $sb "r9.out") 2>&1
+$r9rc = $LASTEXITCODE
+Pop-Location
+$r9Out = Get-Content (Join-Path $sb "r9.out") -Raw
+$printsResolved = $r9Out.Contains("repo root resolved: $repo")
+$literalLeak = $r9Out.Contains('repo root resolved: $repoRoot')
+$noSecrets = -not ($r9Out -match 'ghp_|GITHUB_TOKEN=')
+Verdict "R9" ($r9rc -eq 0 -and $printsResolved -and -not $literalLeak -and $noSecrets) `
+    "gate diagnostic prints the actual resolved root directory (not the literal variable name), no secrets"
 
 # --- cleanup -----------------------------------------------------------------
 Reset-RootEnv

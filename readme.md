@@ -29,7 +29,7 @@ machine. No account, no telemetry, no bundled codec binaries.
 > application package plus the plain-text diagnostics report — no
 > recovery/duplicate builds. See [roadmap.md](roadmap.md) for the honest
 > status of every capability and [ai-notes.md](ai-notes.md) for the
-> evidence trail.
+> evidence trail. The 2026-11-13 session (run 43090342995) repaired the playback clock contract, delivered one authoritative shutdown path with a close confirmation, a responsive breakpoint shell (320×568 phone → 3840×2160 ultrawide), first-frame deferral of the renderer probe and audio-device open, and machine-readable build identity (`--build-info-json`) as the package commit authority.
 
 ---
 
@@ -145,7 +145,9 @@ scripts/ci/tests/Test-ResolveRepoRoot.ps1            # repository-root resolutio
 go test ./internal/cilog/                            # collector correctness fixtures
 ```
 
-## Documentation map
+## Documentation
+
+Start from [docs/INDEX.md](docs/INDEX.md) — the canonical index of every maintained document. map
 
 - [docs/architecture.md](docs/architecture.md) — package map, startup
   sequence, threading and single-window contracts.

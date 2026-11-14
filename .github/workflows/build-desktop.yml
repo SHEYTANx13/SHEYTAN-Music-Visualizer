@@ -194,7 +194,14 @@ jobs:
       # uv is installed through astral-sh/setup-uv pinned to its verified
       # upstream v8.2.0 commit (full 40-char SHA; reviewed release). uvx
       # then runs zizmor==1.32.0 in ONE isolated cached environment that
-      # is used for BOTH the version check and the audit (§3.1).
+      # is used for BOTH the version check and the audit (§3.1). The
+      # audit runs ONLINE (zizmor's documented GITHUB_TOKEN source; this
+      # job inherits the workflow's contents: read — no broad
+      # permission), so online-only audit units execute against this
+      # public repository's action references. If the hosted environment
+      # blocks an online check, zizmor's output records exactly which one
+      # was unavailable and the mode is reported as partially complete,
+      # never as fully green.
       - name: Install pinned uv (for the isolated zizmor environment)
         if: ${{ always() && !cancelled() }}
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
@@ -239,7 +246,7 @@ jobs:
             > ci-logs/actionlint.log 2>&1 || rc=$?
           cat ci-logs/actionlint.log
           if [ "$rc" -ne 0 ]; then
-            echo "ERROR: actionlint findings (outside the two documented false positives above)"
+            echo "ERROR: actionlint findings (outside the three documented compatibility ignores above)"
           fi
 
           # NEGATIVE FIXTURE (§3.2): a deliberately invalid workflow must
@@ -260,9 +267,14 @@ jobs:
           fi
           rm -rf .actionlint-fixture
 
-          # zizmor audit through the SAME isolated environment (§3.1)
+          # zizmor audit through the SAME isolated environment (§3.1).
+          # ONLINE MODE: GITHUB_TOKEN (the job's own runtime-limited
+          # token; this workflow grants contents: read only) enables the
+          # online audit suite against this public repository's action
+          # references. The token is never printed and is only consumed
+          # by zizmor's documented token source.
           zrc=0
-          uvx --from 'zizmor==1.32.0' zizmor --no-online-audits --min-severity low --min-confidence low \
+          GITHUB_TOKEN="${{ github.token }}" uvx --from 'zizmor==1.32.0' zizmor --min-severity low --min-confidence low \
             --format plain .github/workflows/ > ci-logs/zizmor.log 2>&1 || zrc=$?
           cat ci-logs/zizmor.log
           if [ "$zrc" -ne 0 ]; then
@@ -275,7 +287,7 @@ jobs:
             'gate':'static-workflow-validation','run_id':run_id,'attempt':attempt,'commit':commit,\
             'started_utc':start,'ended_utc':end,'actionlint_exit':int(arc),'zizmor_exit':int(zrc),\
             'negative_fixture_failed':bool(int(fix)),\
-            'zizmor':{'version':'1.32.0','invocation':'uvx --from zizmor==1.32.0 zizmor --no-online-audits --min-severity low --min-confidence low --format plain .github/workflows/','online_audits':'disabled (documented limitation)'},\
+            'zizmor':{'version':'1.32.0','invocation':'GITHUB_TOKEN=<github.token> uvx --from zizmor==1.32.0 zizmor --min-severity low --min-confidence low --format plain .github/workflows/','online_audits':'enabled (workflow token, contents: read; any unavailable online check is recorded from zizmor output, never labeled fully complete then)'},\
             'actionlint':{'version':'1.7.12','ignores':['unexpected key \"queue\" for \"concurrency\" section','property \"run_started_at\" is not defined','reusable workflow call \"\$/\.github/workflows/codeql\.yml\" at \"uses\" is not following the format (self-repository syntax GA 2026-07; actionlint issue #711)']},\
             'verdict':'PASS' if (int(arc)==0 and int(zrc)==0 and int(fix)==0) else 'FAIL'};\
             json.dump(rec,open('gate-results/static-workflow-validation.result.json','w'),indent=2); print(json.dumps(rec))" \
@@ -704,15 +716,21 @@ jobs:
           uploaded="${{ steps.linux_package_decision.outputs.package_uploaded }}"
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
             if [ "$uploaded" = "true" ] && [ "$status" = "VERIFIED" ]; then
-              echo "### Linux x64 package" >> "$GITHUB_STEP_SUMMARY"
-              echo "- Artifact: SHEYTAN-Music-Visualizer-linux-x64.tar.gz (VERIFIED — every required gate passed)" >> "$GITHUB_STEP_SUMMARY"
+              {
+                echo "### Linux x64 package"
+                echo "- Artifact: SHEYTAN-Music-Visualizer-linux-x64.tar.gz (VERIFIED — every required gate passed)"
+              } >> "$GITHUB_STEP_SUMMARY"
             elif [ "$uploaded" = "true" ]; then
-              echo "### Linux x64 package" >> "$GITHUB_STEP_SUMMARY"
-              echo "- Artifact: SHEYTAN-Music-Visualizer-linux-x64.tar.gz" >> "$GITHUB_STEP_SUMMARY"
-              echo "- **TEST-ONLY — required gates failed** (see the gate table inside the consolidated report; the job and workflow remain red)" >> "$GITHUB_STEP_SUMMARY"
+              {
+                echo "### Linux x64 package"
+                echo "- Artifact: SHEYTAN-Music-Visualizer-linux-x64.tar.gz"
+                echo "- **TEST-ONLY — required gates failed** (see the gate table inside the consolidated report; the job and workflow remain red)"
+              } >> "$GITHUB_STEP_SUMMARY"
             else
-              echo "### Linux x64 package" >> "$GITHUB_STEP_SUMMARY"
-              echo "- NOT UPLOADED (package_status=$status; an unusable package is never published)" >> "$GITHUB_STEP_SUMMARY"
+              {
+                echo "### Linux x64 package"
+                echo "- NOT UPLOADED (package_status=$status; an unusable package is never published)"
+              } >> "$GITHUB_STEP_SUMMARY"
             fi
           fi
 

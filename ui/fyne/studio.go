@@ -29,6 +29,7 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/appclose"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
@@ -115,26 +116,79 @@ func Run() error {
 	} else {
 		u.policyMode = sysprofile.ModeAuto
 	}
-	pol := sysprofile.ModePolicyFor(u.policyMode, sysprofile.Collect(u.rendererInfo))
-	log.Info("resource policy resolved",
-		"mode", string(u.policyMode),
-		"workers", pol.Workers,
-		"frame_queue", pol.FrameQueueDepth,
-		"export_height_cap", pol.MaxExportHeight,
-		"source", pol.Source)
 	u.rendererReq = make(chan render.Preference, 1)
+	// The persisted preference is READ here (fast file read) but applied
+	// in the background selection inside the render loop, so neither the
+	// GPU probe nor the explicit selection can delay the first frame.
 	if stored, found, perr := u.prefStore.Load(); perr != nil {
 		log.Warn("stored renderer preference unreadable; auto remains active",
 			"err", perr.Error(), "path", prefStorePath(lay))
-	} else if found && stored != render.PrefAuto {
-		u.renderer, u.rendererInfo = render.SelectRendererExplicit(stored)
-		log.Info("persisted renderer preference applied",
-			"preference", string(stored),
-			"backend", string(u.rendererInfo.Backend),
-			"detail", u.rendererInfo.Detail)
+	} else if found {
+		u.storedPref = stored
+		u.storedPrefFound = true
 	}
 	u.fs = fullscreen.New(fsWindow{w: w},
 		fullscreen.NewFileStore(windowStateStorePath(lay)), log)
+
+	// ONE authoritative shutdown path (run 43090342995 lifecycle): the
+	// close intercept, Ctrl+Q and OS termination all enter the same
+	// state machine. Teardown stages run OFF the Fyne event loop with
+	// bounded deadlines; the explicit Window.Close() happens only after
+	// cleanup completed, and the UI stays responsive meanwhile.
+	u.closeCtl = appclose.New(appclose.Hooks{
+		Snapshot: func() appclose.WorkReport {
+			return appclose.WorkReport{
+				Playback: u.svc.Clock().State == playback.StatePlaying,
+				Export:   u.exportJob != nil && u.exportJob.Running(),
+				Startup:  u.svc.Importing(),
+			}
+		},
+		Confirm: func(report appclose.WorkReport, proceed func()) {
+			u.showCloseConfirmation(report, proceed)
+		},
+		CancelWork: func() error {
+			// Stop playback, cancel import/analysis and the queued or
+			// running export. Each is app-owned; none is force-killed.
+			u.svc.CancelImport()
+			_ = u.svc.Stop()
+			u.rendererReqMu.Lock()
+			job := u.exportJob
+			u.rendererReqMu.Unlock()
+			if job != nil {
+				job.Cancel()
+			}
+			return nil
+		},
+		Flush: func() error {
+			// Persist the fullscreen intent and write the final shutdown
+			// record BEFORE the logger closes (log-flush contract).
+			u.fs.SyncObserved("close-intercept")
+			u.logInfo("shutdown", "stage", "flush", "clean", true)
+			return nil
+		},
+		Release: func() error {
+			u.close()
+			u.svc.Close()
+			return nil
+		},
+		Finalize: func() {
+			// The intercept replaced the automatic close, so the window
+			// MUST be closed explicitly once cleanup completed — exactly
+			// once, on the event loop via fyne.Do.
+			fyne.Do(u.win.Close)
+		},
+	}, 8*time.Second, func(msg string, args ...any) { u.logInfo(msg, args...) })
+	w.SetCloseIntercept(func() {
+		u.closeCtl.RequestClose("titlebar")
+	})
+
+	// File menu: the documented Fyne surface for a Quit action. Quit
+	// enters the SAME close state machine as the titlebar intercept.
+	w.SetMainMenu(fyne.NewMainMenu(fyne.NewMenu("File",
+		fyne.NewMenuItem("Quit", func() {
+			u.closeCtl.RequestClose("menu-quit")
+		}),
+	)))
 
 	w.SetContent(u.build())
 	startup.Mark("ui-shell-built")
@@ -167,12 +221,30 @@ func Run() error {
 		"fullscreen_observed", u.fs.Observed())
 	w.ShowAndRun()
 
-	// Graceful shutdown: record, then tear down in dependency order.
+	// The window is closed: the close controller already ran cancel →
+	// flush → release → finalize (exactly once). Only the final evidence
+	// record and the log close remain here; a second teardown would be a
+	// contract violation, so the controller result is authoritative.
+	res := u.closeCtl.Result()
 	u.fs.SyncObserved("shutdown")
-	log.Info("shutdown", "clean", true, "fullscreen_observed", u.fs.Observed())
-	u.close()
-	svc.Close()
+	log.Info("shutdown",
+		"clean", res.FlushErr == nil && res.CancelErr == nil && res.ReleaseErr == nil && !res.TimedOut,
+		"timed_out", res.TimedOut,
+		"cancel_err", errString(res.CancelErr),
+		"flush_err", errString(res.FlushErr),
+		"release_err", errString(res.ReleaseErr),
+		"duration_ms", res.Duration.Milliseconds(),
+		"fullscreen_observed", u.fs.Observed())
+	svc.Close() // idempotent; defensive final release of the transport
 	return nil
+}
+
+// errString renders an error for the shutdown evidence record.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // installTransportKeys wires the keyboard transport shortcuts
@@ -310,23 +382,75 @@ type studioUI struct {
 	// anchored at the true OS process start, marked along the
 	// startup path, logged once after the window is usable.
 	startup *perf.Recorder
+
+	// Close/shutdown authority (run 43090342995 lifecycle contract):
+	// ONE state machine behind the close intercept, Ctrl+Q, and OS
+	// termination. It owns confirm-once, bounded cancel/flush/release
+	// and the explicit Window.Close() finalization.
+	closeCtl  *appclose.Controller
+	closeOnce sync.Once
+
+	// renderer probe deferral state (run 43090342995 startup contract)
+	storedPref      render.Preference
+	storedPrefFound bool
+	selectOnce      sync.Once
+
+	// Responsive regions (run 43090342995 UI/UX contract): ONE set of
+	// shared widget instances, recomposed per breakpoint by the
+	// responsive root. regions maps the active composition's named
+	// regions (header/transport/preview/inspector/library/actions) for
+	// the viewport tests.
+	regions map[string]fyne.CanvasObject
+
+	// shared region objects, built once and re-parented per breakpoint
+	regionHeader     fyne.CanvasObject
+	regionTransportC fyne.CanvasObject
+	regionTransportF fyne.CanvasObject
+	regionPreview    fyne.CanvasObject
+	regionLibraryS   fyne.CanvasObject
+	libraryContent   fyne.CanvasObject
+	inspectorContent fyne.CanvasObject
+	actionButtons    []*widget.Button
+	rootResp         *responsiveRoot
 }
 
 func newStudioUI(w fyne.Window, svc *studio.Studio) *studioUI {
-	// Honest backend selection: GPU when a real hardware adapter can
-	// be proven (adapter + device), CPU otherwise, with the exact
-	// fallback reason kept in rendererInfo for the About/status UI.
-	r, info := render.SelectRenderer()
+	// Renderer probe deferral (run 43090342995 startup contract): the
+	// GPU/adapter enumeration (wgpu instance) runs in the render-loop
+	// goroutine AFTER the window is visible, never before the first
+	// frame. Until then the shell shows the honest "probing" state.
 	return &studioUI{
 		win:          w,
 		svc:          svc,
-		renderer:     r,
-		rendererInfo: info,
+		rendererInfo: probingRendererInfo(),
 	}
 }
 
-// build constructs the whole studio layout.
+// probingRendererInfo is the truthful pre-selection state: no backend
+// has been chosen yet, nothing is claimed.
+func probingRendererInfo() render.BackendInfo {
+	return render.BackendInfo{
+		Detail: "renderer probe deferred off the first-frame path; selecting in the background",
+	}
+}
+
+// build constructs the shared widget set and returns the responsive
+// root that recomposes it per breakpoint (run 43090342995 UI/UX).
 func (u *studioUI) build() fyne.CanvasObject {
+	u.buildRegions()
+	u.rootResp = newResponsiveRoot(u, fyne.NewSize(1440, 860))
+	u.regions = map[string]fyne.CanvasObject{}
+	u.applyRegions(u.rootResp.bp)
+	u.syncInspector()
+	u.subscribe()
+	u.startRenderLoop()
+	return u.rootResp
+}
+
+// buildRegions creates every shared widget once. Compositions re-parent
+// these instances per breakpoint; no widget tree is rebuilt for a
+// breakpoint change, so user state survives resizes.
+func (u *studioUI) buildRegions() {
 	// ---- top bar
 	brandMark := canvas.NewText(brand.BrandTag, hexToColor(brand.ColorInfernalRed))
 	brandMark.TextStyle = fyne.TextStyle{Bold: true}
@@ -343,10 +467,17 @@ func (u *studioUI) build() fyne.CanvasObject {
 	btnSystem := widget.NewButton("System Integration", u.onSystemIntegration)
 	btnHelp := widget.NewButton("Help / Diagnostics", u.onHelp)
 	btnAbout := widget.NewButton("About", u.onAbout)
+	u.actionButtons = []*widget.Button{btnImport, btnOpen, btnSave, btnExport, btnSystem, btnHelp, btnAbout}
 
-	top := container.NewBorder(nil, nil,
+	// Long titles must never push the layout: single-line ellipsis
+	// truncation (wrapping + truncation together is a known Fyne RichText
+	// crash combination, so truncation is used alone here).
+	u.trackLabel.Truncation = fyne.TextTruncateEllipsis
+	u.statusLabel.Truncation = fyne.TextTruncateEllipsis
+
+	u.regionHeader = container.NewBorder(nil, nil,
 		container.NewHBox(brandMark, widget.NewLabel(" "), u.trackLabel),
-		container.NewHBox(btnImport, btnOpen, btnSave, btnExport, btnSystem, btnHelp, btnAbout),
+		nil,
 		u.statusLabel,
 	)
 
@@ -373,13 +504,14 @@ func (u *studioUI) build() fyne.CanvasObject {
 			}
 		}))
 	}
-	left := container.NewVScroll(container.NewVBox(
+	u.libraryContent = container.NewVBox(
 		widget.NewLabelWithStyle("Library", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		formatInfo,
 		widget.NewSeparator(),
 		widget.NewLabelWithStyle("Presets", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		presetsBox,
-	))
+	)
+	u.regionLibraryS = container.NewVScroll(u.libraryContent)
 
 	// ---- center preview (actual renderer output)
 	bg := canvas.NewRectangle(hexToColor(brand.ColorObsidian))
@@ -388,7 +520,7 @@ func (u *studioUI) build() fyne.CanvasObject {
 	u.emptyState = widget.NewLabel("Import a track to see the visualizer.\nThe preview shows the actual renderer output.")
 	u.emptyState.Alignment = fyne.TextAlignCenter
 	u.emptyState.Wrapping = fyne.TextWrapWord
-	previewStack := container.NewStack(bg,
+	u.regionPreview = container.NewStack(bg,
 		container.NewCenter(container.NewVBox(u.emptyState)),
 		container.NewStack(u.preview))
 
@@ -480,7 +612,7 @@ func (u *studioUI) build() fyne.CanvasObject {
 	u.dnaLabel.Wrapping = fyne.TextWrapWord
 	u.dnaLabel.TextStyle = fyne.TextStyle{Italic: true}
 
-	inspector := container.NewVScroll(container.NewVBox(
+	u.inspectorContent = container.NewVBox(
 		widget.NewLabelWithStyle("Inspector", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		widget.NewForm(
 			widget.NewFormItem("Mode", u.modeSelect),
@@ -500,7 +632,7 @@ func (u *studioUI) build() fyne.CanvasObject {
 		u.showTitleCb, u.watermarkCb,
 		widget.NewSeparator(),
 		u.dnaLabel,
-	))
+	)
 
 	// ---- bottom transport
 	u.timeCur = widget.NewLabel("0:00")
@@ -529,23 +661,135 @@ func (u *studioUI) build() fyne.CanvasObject {
 	u.rendererLB.TextStyle = fyne.TextStyle{Italic: true}
 	u.rendererLB.SetText("renderer: " + rendererSummary(u.rendererInfo))
 
-	transport := container.NewBorder(nil, nil,
-		container.NewHBox(u.btnPlay, u.btnStop),
-		container.NewHBox(widget.NewLabel("Vol"), u.volumeSl, u.analysisLB),
-		container.NewHBox(u.timeCur, layout.NewSpacer(), u.scrubber, layout.NewSpacer(), u.timeTot),
-	)
-
-	bottom := container.NewVBox(
+	// Full (desktop/wide) transport: one row, three zones.
+	u.regionTransportF = container.NewVBox(
 		widget.NewSeparator(),
 		container.NewHBox(u.deviceLB, u.rendererLB),
-		transport,
+		container.NewBorder(nil, nil,
+			container.NewHBox(u.btnPlay, u.btnStop),
+			container.NewHBox(widget.NewLabel("Vol"), u.volumeSl, u.analysisLB),
+			container.NewHBox(u.timeCur, layout.NewSpacer(), u.scrubber, layout.NewSpacer(), u.timeTot),
+		),
 	)
 
-	root := container.NewBorder(top, bottom, left, inspector, previewStack)
-	u.syncInspector()
-	u.subscribe()
-	u.startRenderLoop()
-	return root
+	// Compact (phone) transport: stacked rows; status labels truncate so
+	// nothing can push the layout wide.
+	u.deviceLB.Truncation = fyne.TextTruncateEllipsis
+	u.rendererLB.Truncation = fyne.TextTruncateEllipsis
+	u.regionTransportC = container.NewVBox(
+		widget.NewSeparator(),
+		container.NewHBox(u.deviceLB, u.rendererLB),
+		container.NewHBox(u.btnPlay, u.btnStop, widget.NewLabel(" "), u.timeCur, u.timeTot),
+		u.scrubber,
+		container.NewHBox(widget.NewLabel("Vol"), u.volumeSl, u.analysisLB),
+	)
+}
+
+// applyRegions publishes the named regions of an active composition for
+// the viewport tests (bounds/overlap assertions).
+func (u *studioUI) applyRegions(bp breakpoint) {
+	switch bp {
+	case bpPhone, bpCompact:
+		u.regions = map[string]fyne.CanvasObject{
+			"header":    u.regionHeader,
+			"transport": u.regionTransportC,
+			"preview":   u.regionPreview,
+			"inspector": u.inspectorContent,
+			"library":   u.libraryContent,
+		}
+	default:
+		u.regions = map[string]fyne.CanvasObject{
+			"header":    u.regionHeader,
+			"transport": u.regionTransportF,
+			"preview":   u.regionPreview,
+			"inspector": u.inspectorContent,
+			"library":   u.libraryContent,
+		}
+	}
+}
+
+// compose builds the layout for one breakpoint out of the shared
+// regions. All compositions use built-in layout primitives plus the two
+// unit-tested helpers (minSizeWrapper, maxWidthLayout); no absolute
+// placement anywhere.
+func (u *studioUI) compose(bp breakpoint) fyne.CanvasObject {
+	u.applyRegions(bp)
+	switch bp {
+	case bpPhone:
+		return u.composePhone()
+	case bpCompact:
+		return u.composeCompact()
+	case bpDesktop:
+		return u.composeDesktop()
+	default:
+		return u.composeWide()
+	}
+}
+
+// actionGrid lays the seven primary actions as a fixed-cell grid:
+// touch-sized, wrapping rows, impossible to overflow horizontally.
+func (u *studioUI) actionGrid(cell fyne.Size) fyne.CanvasObject {
+	objs := make([]fyne.CanvasObject, 0, len(u.actionButtons))
+	for _, b := range u.actionButtons {
+		objs = append(objs, b)
+	}
+	return container.NewGridWrap(cell, objs...)
+}
+
+// composePhone: one primary column; transport fixed at the bottom; the
+// focal preview keeps a minimum height; actions/library/inspector stack
+// into a single vertical scroll.
+func (u *studioUI) composePhone() fyne.CanvasObject {
+	center := container.NewScroll(container.NewVBox(
+		newMinSizeWrapper(u.regionPreview, 280, 200),
+		widget.NewSeparator(),
+		u.actionGrid(fyne.NewSize(146, 40)),
+		widget.NewSeparator(),
+		u.inspectorContent,
+		widget.NewSeparator(),
+		u.libraryContent,
+	))
+	return container.NewBorder(u.regionHeader, u.regionTransportC, nil, nil, center)
+}
+
+// composeCompact: preview and a scrollable side panel share the width;
+// the split is draggable so the user controls the balance.
+func (u *studioUI) composeCompact() fyne.CanvasObject {
+	side := container.NewScroll(container.NewVBox(
+		u.actionGrid(fyne.NewSize(140, 38)),
+		widget.NewSeparator(),
+		u.libraryContent,
+		widget.NewSeparator(),
+		u.inspectorContent,
+	))
+	split := container.NewHSplit(newMinSizeWrapper(u.regionPreview, 220, 150), side)
+	split.Offset = 0.55
+	return container.NewBorder(u.regionHeader, u.regionTransportC, nil, nil, split)
+}
+
+// composeDesktop: the classic three-region workspace with the full
+// action top bar (seven buttons fit from 1024 up).
+func (u *studioUI) composeDesktop() fyne.CanvasObject {
+	actionObjs := make([]fyne.CanvasObject, 0, len(u.actionButtons))
+	for _, b := range u.actionButtons {
+		actionObjs = append(actionObjs, b)
+	}
+	actionRow := container.NewHBox(actionObjs...)
+	top := container.NewBorder(nil, nil,
+		container.NewHBox(u.regionHeader.(*fyne.Container).Objects[0], widget.NewLabel(" "), u.trackLabel),
+		actionRow,
+		u.statusLabel,
+	)
+	return container.NewBorder(top, u.regionTransportF, u.regionLibraryS,
+		container.NewVScroll(u.inspectorContent), u.regionPreview)
+}
+
+// composeWide: the desktop composition capped at 1680 px and centered
+// over a full-bleed obsidian background (ultrawide contract: no control
+// stretches across the whole monitor).
+func (u *studioUI) composeWide() fyne.CanvasObject {
+	bg := canvas.NewRectangle(hexToColor(brand.ColorObsidian))
+	return newMaxWidthContainer(u.composeDesktop(), bg, wideContentCap)
 }
 
 // newSlider builds a slider with a fine step.
@@ -693,11 +937,17 @@ func (u *studioUI) refreshTransport() {
 	}
 	sec := int(clock.Position.Seconds())
 	u.timeCur.SetText(fmt.Sprintf("%d:%02d", sec/60, sec%60))
-	if u.svc.DeviceReal() {
+	switch {
+	case u.svc.DeviceReal():
 		u.deviceLB.SetText(fmt.Sprintf("audio device: active (Oto) · playhead uncertainty ≤ %d ms",
 			clock.Latency.Milliseconds()))
-	} else {
-		u.deviceLB.SetText("audio device: NOT AVAILABLE — silent preview mode (visualizer still runs)")
+	default:
+		reason := u.svc.OutputReason()
+		if u.svc.OutputStarted() {
+			u.deviceLB.SetText("audio device: NOT AVAILABLE — silent preview mode (visualizer still runs) · " + reason)
+		} else {
+			u.deviceLB.SetText("audio device: " + reason)
+		}
 	}
 }
 
@@ -717,6 +967,9 @@ func parseURL(raw string) *url.URL {
 
 // rendererSummary renders the honest backend identity in one line.
 func rendererSummary(info render.BackendInfo) string {
+	if info.Backend == "" {
+		return "probing… (selection runs off the first-frame path)"
+	}
 	s := string(info.Backend) + " / " + string(info.GpuState)
 	if info.BackendAPI != "" {
 		s += " / " + info.BackendAPI
@@ -762,18 +1015,51 @@ func (u *studioUI) onAbout() {
 		}
 	}
 	d := dialog.NewCustom("About "+brand.ProductName, "Close", content, u.win)
-	d.Resize(fyne.NewSize(640, 420))
+	u.showCappedDialog(d, content)
+}
+
+// close stops the render loop and renderer. Idempotent: safe under the
+// close controller's Release stage and any defensive repeat.
+func (u *studioUI) close() {
+	u.closeOnce.Do(func() {
+		u.renderMu.Lock()
+		u.closing = true
+		u.renderMu.Unlock()
+		u.renderMu.Lock()
+		r := u.renderer
+		u.renderMu.Unlock()
+		if r != nil {
+			r.Close()
+		}
+	})
+}
+
+// showCappedDialog shows a custom dialog sized by dialogSizeFor so it
+// always fits the current window (phone-safe dialogs, no off-screen
+// close controls).
+func (u *studioUI) showCappedDialog(d dialog.Dialog, content fyne.CanvasObject) {
+	_, area := u.win.Canvas().InteractiveArea()
+	d.Resize(dialogSizeFor(content.MinSize(), area))
 	d.Show()
 }
 
-// close stops the render loop and renderer.
-func (u *studioUI) close() {
-	u.renderMu.Lock()
-	u.closing = true
-	u.renderMu.Unlock()
-	if u.renderer != nil {
-		u.renderer.Close()
-	}
+// showCloseConfirmation presents the ONE confirmation surface for an
+// active-work close request. It explains exactly what will be cancelled
+// and offers staying in the app; duplicate requests never stack dialogs
+// (the controller guarantees a single Confirm call).
+func (u *studioUI) showCloseConfirmation(report appclose.WorkReport, proceed func()) {
+	msg := "Work is still active:\n\n- " + report.Describe() +
+		"\n\nClose the app anyway?"
+	d := dialog.NewConfirm("Close SHEYTAN Music Visualizer?", msg, func(ok bool) {
+		if ok {
+			proceed()
+		} else {
+			u.closeCtl.CancelClose("user chose to stay")
+		}
+	}, u.win)
+	d.SetDismissText("Stay in app")
+	d.SetConfirmText("Close anyway")
+	d.Show()
 }
 
 // --- helpers ------------------------------------------------------------

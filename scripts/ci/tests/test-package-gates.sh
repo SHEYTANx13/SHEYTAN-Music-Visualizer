@@ -309,6 +309,44 @@ else
   report "NOT RUN" "P8" "Test-GuiProcessCapture.ps1 not present in this tree"
 fi
 
+# ----------------------------------------------------------------------------
+# P9: package-status commit observer, PowerShell side (run-43090342995
+# item D contract). Cross-platform: runs on any pwsh 7 host.
+# ----------------------------------------------------------------------------
+if [ -f "$REPO_ROOT/scripts/ci/tests/Test-PackageStatusObserver.ps1" ]; then
+  "$PWSH_BIN" -NoProfile -NonInteractive -File "$REPO_ROOT/scripts/ci/tests/Test-PackageStatusObserver.ps1" > "$T/p9.out" 2>&1
+  P9_RC=$?
+  sed 's/^/  /' "$T/p9.out"
+  if [ "$P9_RC" -ne 0 ]; then
+    report FAIL "P9" "PowerShell commit-observer fixtures failed (rc=$P9_RC)"
+  elif grep -q "^SUMMARY: pass=[0-9]* fail=0" "$T/p9.out"; then
+    report PASS "P9" "commit observer (pwsh) verifies the exact matrix: correct/missing/mismatch/whitespace/LF-CRLF/empty/malformed/non-zero-exit"
+  else
+    report FAIL "P9" "fixture summary not recognized"
+  fi
+else
+  report "NOT RUN" "P9" "Test-PackageStatusObserver.ps1 not present in this tree"
+fi
+
+# ----------------------------------------------------------------------------
+# P10: package-status commit observer, bash/python side (run-43090342995
+# item D contract). Same matrix as P9 against scripts/ci/observe_commit.py.
+# ----------------------------------------------------------------------------
+if [ -f "$REPO_ROOT/scripts/ci/tests/test-package-status.sh" ]; then
+  bash "$REPO_ROOT/scripts/ci/tests/test-package-status.sh" > "$T/p10.out" 2>&1
+  P10_RC=$?
+  sed 's/^/  /' "$T/p10.out"
+  if [ "$P10_RC" -ne 0 ]; then
+    report FAIL "P10" "bash commit-observer fixtures failed (rc=$P10_RC)"
+  elif grep -q "^SUMMARY: pass=[0-9]* fail=0" "$T/p10.out"; then
+    report PASS "P10" "commit observer (bash) matches the pwsh contract on the same matrix"
+  else
+    report FAIL "P10" "fixture summary not recognized"
+  fi
+else
+  report "NOT RUN" "P10" "test-package-status.sh not present in this tree"
+fi
+
 echo "SUMMARY: pass=$PASSED fail=$FAILED notrun=$NOT_RUN"
 [ "$FAILED" -eq 0 ] || exit 1
 exit 0

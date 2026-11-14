@@ -803,18 +803,27 @@ $rc = Capture-Step -Job $job -Step "gpu-validation" -ToolContext "gate:gpu-valid
 if ($rc -ne 0) { Fail-Gate "gpu-validation" }
 
 # ---- path-with-spaces runtime check + package-status record ----------------
-# The package-status record (run 42939743766 §6) is machine-readable state
-# for the workflow upload decision: VERIFIED only when every pre-package
-# gate and every package gate passed AND the expected commit (immutable
-# github.sha context) exactly matches the embedded build metadata.
+# The package-status record (run 42939743766 §6, repaired for run
+# 43090342995 item D) is machine-readable state for the workflow upload
+# decision. VERIFIED only when every package-integrity gate passed AND
+# the expected commit (immutable github.sha context) exactly matches the
+# embedded build metadata of the built AND the extracted executable, read
+# from --build-info-json (typed JSON, never console-text regexes).
+# TEST_ONLY keeps the job red but preserves a testable package;
+# UNAVAILABLE is never uploaded.
 $script:packageStatus = "UNAVAILABLE"
 $script:commitExpected = $env:SHEYTAN_BUILD_COMMIT
 $script:commitObserved = "not-observed"
 $script:commitVerified = $false
+$script:commitExtractedObserved = "not-observed"
+$script:commitReason = "package missing or not built"
 $exeExists = Test-Path "bin\sheytan-music-visualizer.exe"
 $zipPath = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
 $zipExists = (Test-Path -LiteralPath $zipPath) -and ((Get-Item -LiteralPath $zipPath).Length -gt 0)
-if ($exeExists -and $zipExists -and $script:failuresBeforePackage -eq 0) {
+# Package-integrity gates run whenever a package exists, INCLUDING runs
+# with earlier unrelated failures: a healthy executable must stay
+# uploadable as TEST_ONLY instead of being withheld as UNAVAILABLE.
+if ($exeExists -and $zipExists) {
     $rc = Capture-Step -Job $job -Step "verify-extracted-path-with-spaces" -ToolContext "gate:package-verify (path with spaces)" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Invoke-CapturedProcess.ps1") -Command {
         . (Join-Path $repoRoot "scripts/ci/Invoke-CapturedProcess.ps1")
         $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
@@ -837,34 +846,77 @@ if ($exeExists -and $zipExists -and $script:failuresBeforePackage -eq 0) {
     }
     if ($rc -ne 0) { Fail-Gate "verify-extracted-path-with-spaces" }
 
-    # A -H=windowsgui executable may not deliver stdout through a plain
-    # `&` invocation on the runner (run-42837709122 root cause); the
-    # robust runner is the only reliable observation path.
+    # COMMIT OBSERVER (run 43090342995 item D repair): the observed commit
+    # comes exclusively from the machine-readable --build-info-json output
+    # of BOTH the built executable and the extracted-package executable,
+    # parsed as typed JSON via scripts/ci/Get-PackageCommitStatus.ps1.
+    # Human --version output stays user-facing only; console-capture quirks
+    # of a GUI-subsystem process can no longer produce a false
+    # not-observed while the embedded metadata is intact.
     . (Join-Path $repoRoot "scripts/ci/Invoke-CapturedProcess.ps1")
-    $verRun = Invoke-CapturedProcess -FilePath "bin\sheytan-music-visualizer.exe" -ArgumentList @("--version") -TimeoutSeconds 120
-    if ($verRun.Kind -eq 'exited' -and $verRun.ExitCode -eq 0 -and $verRun.StdOut.Count -gt 0) {
-        $verLine = ($verRun.StdOut | Select-Object -First 1)
-        if ($verLine -match 'commit ([0-9a-f]{40})') { $script:commitObserved = $Matches[1] }
+    . (Join-Path $repoRoot "scripts/ci/Get-PackageCommitStatus.ps1")
+    $biArgs = @("--build-info-json")
+    $biRun = Invoke-CapturedProcess -FilePath "bin\sheytan-music-visualizer.exe" -ArgumentList $biArgs -TimeoutSeconds 120
+    $biStdOut = if ($biRun.StdOut) { ($biRun.StdOut -join "`n") } else { "" }
+    $builtStatus = Get-SheytanPackageCommitStatus -ExpectedCommit $script:commitExpected `
+        -BuildInfoStdOut $biStdOut -ProcessExitCode $biRun.ExitCode -Source "built-exe"
+    Write-Output ("commit observer (built-exe): observed={0} verified={1} reason={2}" -f $builtStatus.observed, $builtStatus.verified, $builtStatus.reason)
+
+    # The extracted package must carry the identical embedded identity.
+    $extractDir = Join-Path ([System.IO.Path]::GetTempPath()) ("SHEYTAN StatusExtract " + [guid]::NewGuid().ToString("N"))
+    $extractedStatus = Get-SheytanPackageCommitStatus -ExpectedCommit $script:commitExpected `
+        -BuildInfoStdOut "" -ProcessExitCode 1 -Source "extracted-package"
+    try {
+        New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+        Expand-Archive -Path $zipPath -DestinationPath $extractDir
+        $extractedExe = Join-Path $extractDir "SHEYTAN-Music-Visualizer-windows-x64\sheytan-music-visualizer.exe"
+        if (Test-Path -LiteralPath $extractedExe) {
+            $exRun = Invoke-CapturedProcess -FilePath $extractedExe -ArgumentList $biArgs -TimeoutSeconds 120
+            $exStdOut = if ($exRun.StdOut) { ($exRun.StdOut -join "`n") } else { "" }
+            $extractedStatus = Get-SheytanPackageCommitStatus -ExpectedCommit $script:commitExpected `
+                -BuildInfoStdOut $exStdOut -ProcessExitCode $exRun.ExitCode -Source "extracted-package"
+            Write-Output ("commit observer (extracted-package): observed={0} verified={1} reason={2}" -f $extractedStatus.observed, $extractedStatus.verified, $extractedStatus.reason)
+        } else {
+            $extractedStatus = Get-SheytanPackageCommitStatus -ExpectedCommit $script:commitExpected `
+                -BuildInfoStdOut "" -ProcessExitCode 1 -Source "extracted-package"
+            Write-Output "ERROR: extracted package executable missing; commit identity of the shipped package is unproven"
+        }
     }
-    if (-not [string]::IsNullOrWhiteSpace($script:commitExpected) -and $script:commitObserved -eq $script:commitExpected.Trim()) {
-        $script:commitVerified = $true
-    }
+    finally { if (Test-Path -LiteralPath $extractDir) { Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue } }
+
+    $script:commitObserved = $builtStatus.observed
+    $script:commitVerified = [bool]($builtStatus.verified -and $extractedStatus.verified)
+    $script:commitExtractedObserved = $extractedStatus.observed
+    $script:commitReason = if ($builtStatus.verified -and $extractedStatus.verified) { "" } else { $builtStatus.reason + " | extracted: " + $extractedStatus.reason }
+
+    # STATUS SEMANTICS (run 43090342995 item D contract):
+    #   UNAVAILABLE — no valid package, unverified embedded commit, or any
+    #                 failed package-integrity gate; never uploaded.
+    #   TEST_ONLY   — every package-integrity gate AND commit identity
+    #                 passed, but an unrelated quality gate failed; the
+    #                 artifact is uploaded and the job/workflow stay red.
+    #   VERIFIED    — everything green.
     $packageGatesFailed = $script:failures - $script:failuresBeforePackage
-    if ($script:commitVerified -and $packageGatesFailed -eq 0) {
-        $script:packageStatus = "VERIFIED"
-    } else {
+    if (-not $script:commitVerified -or $packageGatesFailed -gt 0) {
+        $script:packageStatus = "UNAVAILABLE"
+    } elseif ($script:failuresBeforePackage -gt 0) {
         $script:packageStatus = "TEST_ONLY"
+    } else {
+        $script:packageStatus = "VERIFIED"
     }
 }
 $pkgRecord = [ordered]@{
-    platform         = "windows-x64"
-    package_status   = $script:packageStatus
-    package_file     = "dist/SHEYTAN-Music-Visualizer-windows-x64.zip"
-    app_dir          = "SHEYTAN-Music-Visualizer-windows-x64"
-    commit_expected  = $(if ([string]::IsNullOrWhiteSpace($script:commitExpected)) { $null } else { $script:commitExpected })
-    commit_observed  = $script:commitObserved
-    commit_verified  = $script:commitVerified
-    note             = "package_status is VERIFIED only with a non-blank expected commit that exactly matches the embedded metadata; TEST_ONLY packages are valid but the required job stays red"
+    platform                    = "windows-x64"
+    package_status              = $script:packageStatus
+    package_file                = "dist/SHEYTAN-Music-Visualizer-windows-x64.zip"
+    app_dir                     = "SHEYTAN-Music-Visualizer-windows-x64"
+    commit_expected             = $(if ([string]::IsNullOrWhiteSpace($script:commitExpected)) { $null } else { $script:commitExpected })
+    commit_observed             = $script:commitObserved
+    commit_verified             = $script:commitVerified
+    commit_extracted_observed   = $script:commitExtractedObserved
+    commit_source               = "--build-info-json (built exe + extracted package, typed JSON parse)"
+    commit_reason               = $script:commitReason
+    note                        = "VERIFIED requires a non-blank expected commit exactly matching the embedded metadata of the built AND the extracted executable plus zero failed package-integrity gates; TEST_ONLY keeps the job red; UNAVAILABLE is never uploaded"
 }
 New-Item -ItemType Directory -Force -Path "ci-logs" | Out-Null
 $pkgRecord | ConvertTo-Json | Set-Content -Path "ci-logs\package-status-windows.json" -Encoding utf8NoBOM

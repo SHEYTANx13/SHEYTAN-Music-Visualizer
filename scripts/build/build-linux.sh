@@ -315,32 +315,60 @@ if [ "$MODE" = "desktop" ]; then
       ' _ "$SPACES_DIR" || fail_gate verify-extracted-path-with-spaces
       rm -rf "$(dirname "$SPACES_DIR")"
 
-      # PACKAGE-STATUS RECORD (run 42939743766 §6): machine-readable
-      # package state for the workflow upload decision. package_status is
-      # VERIFIED only when every package gate above passed AND the
-      # expected commit (from the immutable workflow context) matches the
-      # embedded metadata. It is never inferred from file existence.
+      # PACKAGE-STATUS RECORD (run 42939743766 §6, repaired for run
+      # 43090342995 item D): machine-readable package state for the
+      # workflow upload decision. The observed commit comes EXCLUSIVELY
+      # from --build-info-json (typed JSON via scripts/ci/observe_commit.py;
+      # never a regex over human --version text) of the built AND the
+      # extracted executable. Status contract:
+      #   UNAVAILABLE — no valid package, unverified embedded commit, or
+      #                 any failed package-integrity gate; never uploaded.
+      #   TEST_ONLY   — package integrity and commit identity passed but
+      #                 an unrelated quality gate failed; job stays red.
+      #   VERIFIED    — everything green.
       pkg_status="UNAVAILABLE"
       commit_verified="false"
       commit_expected="${SHEYTAN_BUILD_COMMIT:-}"
       commit_observed="not-observed"
+      commit_extracted_observed="not-observed"
+      commit_reason="package missing or not built"
+      OBSERVER="$REPO_ROOT/scripts/ci/observe_commit.py"
       PACKAGE_GATES_FAILED=$(( FAILURES - FAILURES_BEFORE_PACKAGE ))
-      if [ "$EXE_OK" -eq 1 ] && [ -s "$TARBALL" ] && [ "$FAILURES_BEFORE_PACKAGE" -eq 0 ]; then
-        ver_line="$(./bin/sheytan-music-visualizer --version 2>/dev/null | head -1 || true)"
-        commit_observed="$(printf '%s' "$ver_line" | sed -n 's/.*commit \([0-9a-f]\{40\}\).*/\1/p')"
-        [ -n "$commit_observed" ] || commit_observed="unknown"
-        if [ -n "$commit_expected" ] && [ "$commit_observed" = "$commit_expected" ]; then
-          commit_verified="true"
+      if [ "$EXE_OK" -eq 1 ] && [ -s "$TARBALL" ]; then
+        bi_line="$(./bin/sheytan-music-visualizer --build-info-json 2>/dev/null || true)"
+        built_json="$(printf '%s' "$bi_line" | python3 "$OBSERVER" "$commit_expected" 0 || true)"
+        commit_observed="$(printf '%s' "$built_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("observed","not-observed"))' 2>/dev/null || echo not-observed)"
+        built_verified="$(printf '%s' "$built_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("verified") else "false")' 2>/dev/null || echo false)"
+
+        VERIFY_DIR="$(mktemp -d)"
+        ex_verified="false"
+        if tar -xzf "$TARBALL" -C "$VERIFY_DIR" 2>/dev/null &&
+           [ -x "$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" ]; then
+          ex_line="$("$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" --build-info-json 2>/dev/null || true)"
+          extracted_json="$(printf '%s' "$ex_line" | python3 "$OBSERVER" "$commit_expected" 0 || true)"
+          commit_extracted_observed="$(printf '%s' "$extracted_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("observed","not-observed"))' 2>/dev/null || echo not-observed)"
+          ex_verified="$(printf '%s' "$extracted_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("verified") else "false")' 2>/dev/null || echo false)"
         fi
-        if [ "$commit_verified" = "true" ] && [ "$PACKAGE_GATES_FAILED" -eq 0 ]; then
-          pkg_status="VERIFIED"
+        rm -rf "$VERIFY_DIR"
+
+        if [ "$built_verified" = "true" ] && [ "$ex_verified" = "true" ]; then
+          commit_verified="true"
+          commit_reason=""
         else
+          commit_reason="built_verified=$built_verified extracted_verified=$ex_verified (see observe_commit.py contract)"
+        fi
+
+        if [ "$commit_verified" != "true" ] || [ "$PACKAGE_GATES_FAILED" -gt 0 ]; then
+          pkg_status="UNAVAILABLE"
+        elif [ "$FAILURES_BEFORE_PACKAGE" -gt 0 ]; then
           pkg_status="TEST_ONLY"
+        else
+          pkg_status="VERIFIED"
         fi
       fi
-      python3 - "$REPO_ROOT/ci-logs/package-status-linux.json" "$pkg_status" "$commit_expected" "$commit_observed" "$commit_verified" <<'PYJSON' || true
+      python3 - "$REPO_ROOT/ci-logs/package-status-linux.json" "$pkg_status" "$commit_expected" "$commit_observed" "$commit_verified" "$commit_extracted_observed" "$commit_reason" <<'PYJSON' || true
 import json, sys
-out, status, expected, observed, verified = sys.argv[1:6]
+out, status, expected, observed, verified, extracted_observed, reason = sys.argv[1:8]
 record = {
     "platform": "linux-x64",
     "package_status": status,
@@ -349,7 +377,10 @@ record = {
     "commit_expected": expected if expected else None,
     "commit_observed": observed,
     "commit_verified": verified == "true",
-    "note": "package_status is VERIFIED only with a non-blank expected commit that exactly matches the embedded metadata; TEST_ONLY packages are valid but the required job stays red",
+    "commit_extracted_observed": extracted_observed,
+    "commit_source": "--build-info-json (built exe + extracted package, typed JSON parse)",
+    "commit_reason": reason,
+    "note": "VERIFIED requires a non-blank expected commit exactly matching the embedded metadata of the built AND the extracted executable plus zero failed package-integrity gates; TEST_ONLY keeps the job red; UNAVAILABLE is never uploaded",
 }
 with open(out, "w", encoding="utf-8") as f:
     json.dump(record, f, indent=2)

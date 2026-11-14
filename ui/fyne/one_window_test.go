@@ -20,10 +20,21 @@ import (
 )
 
 func TestExactlyOneTopLevelWindowCreation(t *testing.T) {
+	// Production contract only: test files may create Fyne test windows
+	// for the viewport/driver suites and are not part of the runtime
+	// window inventory.
 	entries, err := filepath.Glob("*.go")
 	if err != nil || len(entries) == 0 {
 		t.Fatalf("cannot read ui/fyne sources: %v", err)
 	}
+	production := make([]string, 0, len(entries))
+	for _, f := range entries {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		production = append(production, f)
+	}
+	entries = production
 	newWindowRe := regexp.MustCompile(`\.NewWindow\(`)
 	showAndRunRe := regexp.MustCompile(`\.ShowAndRun\(\)`)
 	totalNewWindow := 0

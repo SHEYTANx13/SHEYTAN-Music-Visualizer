@@ -163,7 +163,7 @@ if ($null -eq $__repoRootResolved) {
 }
 . (Join-Path $__repoRootResolved 'scripts/ci/Resolve-RepoRoot.ps1')
 $repoRoot = Resolve-SheytanRepoRoot -GateName '__GATE_NAME__' -RequiredRelativePaths __HELPERS__
-Write-Output "repo root resolved: `$repoRoot"
+Write-Output "repo root resolved: $repoRoot"
 '@
         $repoRootPreamble = $repoRootPreamble.Replace("__GATE_NAME__", $gateNameLiteral).Replace("__HELPERS__", $helpersLiteral)
     }
