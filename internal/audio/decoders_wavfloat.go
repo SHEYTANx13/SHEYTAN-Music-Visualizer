@@ -62,6 +62,13 @@ func (w *wavFloatDecoder) parseHeader() error {
 		sz := int64(binary.LittleEndian.Uint32(ch8[4:8]))
 		switch id {
 		case "fmt ":
+			// Bounded fmt-chunk read (run 43541087097 repair):
+			// the header controls sz (uint32, up to 4 GiB); a
+			// 60-byte malformed file claiming a huge fmt chunk
+			// must fail fast instead of allocating gigabytes.
+			if sz > 4096 {
+				return fmt.Errorf("audio: wav(f32): implausible fmt chunk size %d", sz)
+			}
 			b := make([]byte, sz)
 			if _, err := io.ReadFull(w.f, b); err != nil {
 				return fmt.Errorf("audio: wav(f32): truncated fmt: %w", err)

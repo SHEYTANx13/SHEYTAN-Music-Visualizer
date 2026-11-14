@@ -59,24 +59,49 @@ var (
 	cachedEnv *Environment
 )
 
+// clone deep-copies an Environment so callers can never race the
+// process cache (run 43541087097 repair: the cached pointer was handed
+// out shared, and ProofHardwareEncoders mutated its slices/maps
+// unsynchronized).
+func (e *Environment) clone() *Environment {
+	if e == nil {
+		return nil
+	}
+	c := &Environment{
+		FFmpegPath: e.FFmpegPath, FFprobePath: e.FFprobePath,
+		Source: e.Source, Version: e.Version,
+		Encoders:         make(map[string]bool, len(e.Encoders)),
+		HardwareEncoders: append([]string(nil), e.HardwareEncoders...),
+		Notes:            append([]string(nil), e.Notes...),
+	}
+	for k, v := range e.Encoders {
+		c.Encoders[k] = v
+	}
+	return c
+}
+
 // DetectEnv probes the local ffmpeg/ffprobe through the single
 // fflocate resolution order: explicit user configuration (including
 // the SHEYTAN_FFMPEG directory), the app-local tools directory
-// (<app root>/tools/ffmpeg/bin), then the system PATH. Results are
-// cached per process; force=true re-probes (after the user changes
-// the path). The error when nothing is found names every searched
-// location and the actionable next step.
+// (<app root>/tools/ffmpeg/bin), then the system PATH. Successful
+// results are cached per process (a deep copy is returned; force=true
+// re-probes after the user changes the path). FAILURES ARE NEVER
+// CACHED (run 43541087097 repair: a cached failed detection used to
+// surface as an empty environment with a NIL error on the next call,
+// silently skipping the "Export requires FFmpeg" dialog) — the next
+// call re-probes, so a transient timeout or an FFmpeg installed while
+// the app runs recovers without a restart. The error when nothing is
+// found names every searched location and the actionable next step.
 func DetectEnv(force bool) (*Environment, error) {
 	envMu.Lock()
 	defer envMu.Unlock()
 	if cachedEnv != nil && !force {
-		return cachedEnv, nil
+		return cachedEnv.clone(), nil
 	}
 	env := &Environment{Encoders: map[string]bool{}}
 	lay := apppaths.Resolve(apppaths.OSEnv())
 	loc, lerr := fflocate.Locate(fflocate.OPOpts(lay.ToolsFFmpegBin()))
 	if lerr != nil {
-		cachedEnv = env
 		return env, fmt.Errorf("ffmpeg/ffprobe not available: %w (export needs both; place them in %s or on PATH)",
 			lerr, toolsHint(lay))
 	}
@@ -91,7 +116,6 @@ func DetectEnv(force bool) (*Environment, error) {
 	procattr.Configure(vcmd) // never a visible child console on Windows
 	out, err := vcmd.Output()
 	if err != nil {
-		cachedEnv = env
 		return env, fmt.Errorf("ffmpeg -version failed for %q: %w", loc.Source, err)
 	}
 	env.Version = firstLine(string(out))
@@ -110,7 +134,7 @@ func DetectEnv(force bool) (*Environment, error) {
 		env.Notes = append(env.Notes, "encoder listing failed: "+err.Error())
 	}
 	cachedEnv = env
-	return env, nil
+	return env.clone(), nil
 }
 
 // toolsHint renders the app-local tools directory for user messages.
@@ -170,19 +194,48 @@ func ProbeHardwareEncoder(env *Environment, name string) error {
 }
 
 // ProofHardwareEncoders validates each listed hardware encoder with a
-// small encode and records the ones that pass.
+// small encode and records the ones that pass on the caller's copy AND
+// (under the cache mutex, keyed by the same binary) in the process
+// cache, so proofs accumulate across dialogs without re-encoding.
 func ProofHardwareEncoders(env *Environment) {
 	if env == nil {
 		return
 	}
+	var proved []string
 	for _, name := range []string{"h264_nvenc", "h264_qsv", "h264_amf"} {
 		if !env.Encoders[name] {
 			continue
 		}
 		if err := ProbeHardwareEncoder(env, name); err == nil {
-			env.HardwareEncoders = append(env.HardwareEncoders, name)
+			proved = append(proved, name)
 		}
 	}
+	if len(proved) == 0 {
+		return
+	}
+	envMu.Lock()
+	env.HardwareEncoders = appendUnique(env.HardwareEncoders, proved)
+	if cachedEnv != nil && cachedEnv.FFmpegPath == env.FFmpegPath {
+		cachedEnv.HardwareEncoders = appendUnique(cachedEnv.HardwareEncoders, proved)
+	}
+	envMu.Unlock()
+}
+
+// appendUnique appends names that are not already present.
+func appendUnique(dst, names []string) []string {
+	for _, n := range names {
+		found := false
+		for _, d := range dst {
+			if d == n {
+				found = true
+				break
+			}
+		}
+		if !found {
+			dst = append(dst, n)
+		}
+	}
+	return dst
 }
 
 // EncoderChoice is the resolved encoder + args for a job.

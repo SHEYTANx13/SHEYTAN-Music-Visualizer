@@ -30,9 +30,15 @@ const (
 	MidMaxHz  = 4000.0
 	// AnalysisVersion bumps when analysis semantics change; it keys
 	// the per-track sidecar cache.
-	AnalysisVersion = 1
-	// WaveformPointsPerSecond fixes the envelope resolution.
-	WaveformPointsPerSecond = 2
+	// v2 (run 43541087097): WaveformPointsPerSecond raised 2 → 60 so the
+	// Waveform visualizer mode draws a real envelope trace (the ±2 s
+	// window previously carried only 8 points); consumers of Result
+	// JSON can distinguish generations via this field.
+	AnalysisVersion = 2
+	// WaveformPointsPerSecond fixes the envelope resolution. 60 pts/s
+	// gives the 4-second waveform window 240 points (a visible trace)
+	// while staying bounded (a 2 h track ≈ 1.7 MB of envelope).
+	WaveformPointsPerSecond = 60
 	// maxFrames caps stored frames (≈2 hours of audio).
 	maxFrames = 720000
 )

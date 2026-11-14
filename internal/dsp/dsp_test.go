@@ -113,9 +113,11 @@ func TestWaveformEnvelope(t *testing.T) {
 	a := NewAnalyzer()
 	feedSine(a, 2, 220)
 	res := a.Finish()
-	// 2 s at 2 points/s ≈ 4 points (allow off-by-one from buffering)
-	if len(res.Waveform) < 3 || len(res.Waveform) > 6 {
-		t.Fatalf("waveform points %d, want ~4", len(res.Waveform))
+	// 2 s at 60 points/s ≈ 120 points (run 43541087097 resolution
+	// repair: the waveform mode needs a real trace, not 2 pts/s; allow
+	// off-by-one from buffering).
+	if len(res.Waveform) < 118 || len(res.Waveform) > 122 {
+		t.Fatalf("waveform points %d, want ~120", len(res.Waveform))
 	}
 	if res.WaveformMax <= 0 || res.WaveformMax > 1 {
 		t.Fatalf("waveform max %.2f out of range", res.WaveformMax)

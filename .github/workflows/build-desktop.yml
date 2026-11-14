@@ -1132,7 +1132,7 @@ jobs:
             echo "ERROR: temporary-artifact cleanup incomplete; the final gate will fail closed."
           fi
 
-      - name: Fail closed after the report upload attempt
+      - name: Record collection health (upstream verdicts move to the final-verdict job)
         if: always()
         run: |
           rc="$(cat collector.rc 2>/dev/null || echo 2)"
@@ -1145,14 +1145,57 @@ jobs:
             echo "Temporary artifact cleanup failed after the report upload; the single-artifact guarantee is not met."
             rc=1
           fi
-          echo "collector exit code: $rc"
+          echo "collector exit code: $rc (0=green, 1=incomplete coverage, 3=required job failed, 2=hard error)"
+          # Run-43541087097 verdict separation: the collector job's OWN
+          # conclusion reports COLLECTION health only. rc=3 means the
+          # report was produced and uploaded while an UPSTREAM required
+          # job failed — the upstream failure is reported to the user by
+          # the dedicated final-verdict job below (and by the build-*
+          # jobs' own red X), so failing HERE too only made the
+          # evidence-collection work look broken. rc=1/2 still fail this
+          # job: the consolidated report itself is incomplete.
+          if [ "$rc" = "3" ]; then
+            echo "Consolidated report uploaded; upstream required-job failure is reported by the final-verdict job."
+            exit 0
+          fi
           if [ "$rc" != "0" ]; then
-            if [ "$rc" = "3" ]; then
-              echo "One or more required jobs did not succeed (see the job status table inside the consolidated report)."
-            elif [ "$rc" = "1" ]; then
+            if [ "$rc" = "1" ]; then
               echo "Consolidated log coverage is INCOMPLETE; failing this job after the report upload."
             else
               echo "Collector failed; the run must stay red."
             fi
           fi
           exit "$rc"
+
+  # Run-43541087097 verdict separation: ONE dedicated user-facing gate
+  # that fails closed when any required evidence-producing job did not
+  # succeed. collect-logs stays green exactly when the consolidated
+  # report was produced and uploaded, so a red collector always means a
+  # COLLECTION problem (actionable), never an upstream test/build
+  # failure (reported by the failing job itself and here).
+  final-verdict:
+    name: final-verdict (all required gates must be green)
+    needs: [preflight, build-windows, build-linux, codeql, collect-logs]
+    if: ${{ always() && !cancelled() }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Fail closed unless every required gate succeeded
+        run: |
+          set -Eeuo pipefail
+          failed=0
+          for job in preflight build-windows build-linux codeql collect-logs; do
+            result="${{ needs[job].result }}"
+            echo "${job}: ${result}"
+            if [ "$result" != "success" ]; then
+              echo "::error title=Required gate ${job} did not succeed::result=${result} — see the ${job} job log and the consolidated report artifact SHEYTAN-Music-Visualizer-all-logs.txt"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "FINAL VERDICT: RED — one or more required gates failed; the consolidated report was still collected and uploaded (see collect-logs)."
+            exit 1
+          fi
+          echo "FINAL VERDICT: GREEN — preflight, Windows, Linux, CodeQL and the consolidated report are all green."

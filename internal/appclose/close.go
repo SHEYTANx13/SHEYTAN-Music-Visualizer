@@ -5,14 +5,23 @@
 // runs exactly once in dependency order: cancel active work, flush
 // state, release resources, finalize (explicit Window.Close).
 //
-// Contract (run 43090342995 shutdown-lifecycle requirements):
+// Contract (run 43090342995 shutdown-lifecycle requirements, hardened
+// in run 43541087097):
 //
 //   - States are explicit and transitions idempotent:
 //     running → closeRequested → (confirming) → cancelling → flushing
-//     → closing → closed.
+//     → closing → closed. A cancelled confirmation returns to running.
 //   - A second RequestClose while a confirmation is open never creates a
 //     second dialog; requests during cancelling/flushing/closing/closed
 //     are recorded and ignored (duplicate close events are normal).
+//   - Confirmation callbacks are generation-validated and once-only: a
+//     stale proceed() from a superseded or cancelled confirmation can
+//     never start teardown, and double-invoking proceed() runs the
+//     teardown exactly once.
+//   - Close-request admission, the work snapshot and the transition into
+//     confirming/cancelling happen under one lock hold, so a concurrent
+//     no-work close can never start teardown while another caller's
+//     confirmation dialog is opening.
 //   - The caller stays responsive: teardown work runs on provided
 //     goroutines; nothing here sleeps unboundedly — every stage is
 //     bounded by the configured deadline and its outcome is reported.
@@ -23,6 +32,14 @@
 //     completed or the deadline elapsed — never forgotten, never twice.
 //   - Flush errors are preserved as evidence (ShutdownResult) and never
 //     prevent the window from closing.
+//   - Duration portability (run 43541087097 Windows regression): the
+//     monotonic clock on some platforms (notably Windows VMs) can
+//     measure a sub-resolution teardown as zero. The public contract
+//     promises Duration > 0 and a non-zero CompletedAt for every
+//     COMPLETED sequence, so a non-positive measured span is normalized
+//     to MinCompletedDuration without sleeping. The complete immutable
+//     result is published BEFORE Done is closed, so Result() after
+//     <-Done() always observes the final values.
 //
 // The controller is framework-agnostic: the UI layer injects hooks, so
 // the state machine itself is unit-testable without a window.
@@ -33,6 +50,16 @@ import (
 	"sync"
 	"time"
 )
+
+// MinCompletedDuration is the documented floor for the Duration of a
+// completed shutdown sequence. Some platforms observe a sub-resolution
+// teardown as a zero elapsed span (the Windows run-43541087097
+// regression: TestSingleConfirmationSurfaceForDuplicates failed with
+// "duration not recorded" because the whole teardown completed inside
+// one monotonic clock tick). A completed sequence always reports at
+// least MinCompletedDuration; the value is a contract token, not a
+// measured delay — no sleeping is ever involved.
+const MinCompletedDuration = 1 * time.Nanosecond
 
 // State names the shutdown machine's explicit states.
 type State string
@@ -49,7 +76,8 @@ const (
 
 // WorkReport is the honest snapshot of active work that must be either
 // cancelled or preserved before teardown. Snapshot must be cheap and
-// non-blocking.
+// non-blocking; it is taken while the controller lock is held, so it
+// must never call back into the controller.
 type WorkReport struct {
 	Playback       bool // audio transport is playing
 	Export         bool // an export job is running
@@ -92,7 +120,9 @@ func (w WorkReport) Describe() string {
 // Hooks are the app-owned teardown stages. Each runs at most once per
 // close sequence.
 type Hooks struct {
-	// Snapshot reports the active-work state (non-blocking).
+	// Snapshot reports the active-work state (non-blocking; called
+	// with the controller lock held — never call the controller
+	// back from here).
 	Snapshot func() WorkReport
 	// Confirm shows ONE confirmation surface for the report. It must
 	// eventually call exactly one of proceed/stay (the machine guards
@@ -113,25 +143,27 @@ type Hooks struct {
 
 // ShutdownResult is the evidence record of one shutdown sequence.
 type ShutdownResult struct {
-	States      []State   // the transition trail (ordered, deduplicated)
-	CancelErr   error     // non-nil when cancelling work failed
-	FlushErr    error     // non-nil when flushing failed (evidence, kept)
-	ReleaseErr  error     // non-nil when releasing resources failed
-	TimedOut    bool      // a stage exceeded its deadline slice
-	CompletedAt time.Time // when the window was finalized
-	Duration    time.Duration
+	States      []State       // the transition trail (ordered, deduplicated)
+	CancelErr   error         // non-nil when cancelling work failed
+	FlushErr    error         // non-nil when flushing failed (evidence, kept)
+	ReleaseErr  error         // non-nil when releasing resources failed
+	TimedOut    bool          // a stage exceeded its deadline slice
+	CompletedAt time.Time     // when the window was finalized (never the zero time)
+	Duration    time.Duration // > 0 for every completed sequence (see MinCompletedDuration)
 }
 
 // Controller is the authoritative close state machine. It is safe for
 // concurrent use; RequestClose is expected from UI threads.
 type Controller struct {
-	mu       sync.Mutex
-	state    State
-	confirmD bool // a confirmation surface is currently open
-	states   []State
-	log      func(msg string, args ...any)
-	hooks    Hooks
-	deadline time.Duration
+	mu         sync.Mutex
+	state      State
+	confirmD   bool   // a confirmation surface is currently open
+	confirmGen uint64 // generation token invalidating stale proceed callbacks
+	states     []State
+	clock      func() time.Time
+	log        func(msg string, args ...any)
+	hooks      Hooks
+	deadline   time.Duration
 
 	doneOnce sync.Once
 	done     chan struct{}
@@ -142,15 +174,26 @@ type Controller struct {
 // EACH bounded stage (cancel/flush/release slice); a non-positive
 // deadline defaults to 10s.
 func New(hooks Hooks, deadline time.Duration, log func(msg string, args ...any)) *Controller {
+	return newController(hooks, deadline, log, time.Now)
+}
+
+// newController is the injectable-clock constructor used by New and by
+// the deterministic duration tests (run 43541087097: a fixed clock
+// reproduces the Windows sub-resolution teardown without any sleeping).
+func newController(hooks Hooks, deadline time.Duration, log func(msg string, args ...any), clock func() time.Time) *Controller {
 	if deadline <= 0 {
 		deadline = 10 * time.Second
 	}
 	if log == nil {
 		log = func(string, ...any) {}
 	}
+	if clock == nil {
+		clock = time.Now
+	}
 	c := &Controller{
 		state:    StateRunning,
 		states:   []State{StateRunning},
+		clock:    clock,
 		log:      log,
 		hooks:    hooks,
 		deadline: deadline,
@@ -199,48 +242,77 @@ func (c *Controller) RequestClose(from string) {
 		c.mu.Unlock()
 		return
 	case StateConfirming:
-		if c.confirmD {
-			// A confirmation is already open: never stack dialogs.
-			c.log("close request while confirm open; dialog kept single", "from", from)
-			c.mu.Unlock()
-			return
-		}
+		// A confirmation is open (or its callback is still in
+		// flight): never stack dialogs and never start a parallel
+		// teardown — the pending confirmation owns the decision.
+		c.log("close request while confirm open; dialog kept single", "from", from)
+		c.mu.Unlock()
+		return
 	}
-	c.mu.Unlock()
-
+	// Running or CloseRequested: record the request atomically with
+	// the work snapshot, so a racing pair of requests can never
+	// interleave into "one opens a dialog while the other starts
+	// teardown".
+	if c.state == StateRunning {
+		c.state = StateCloseRequested
+		c.states = append(c.states, StateCloseRequested)
+	}
 	report := WorkReport{}
 	if c.hooks.Snapshot != nil {
 		report = c.hooks.Snapshot()
 	}
 	if report.Any() {
-		c.transition(StateConfirming)
-		c.mu.Lock()
-		if c.confirmD {
-			c.mu.Unlock()
-			return
-		}
+		c.state = StateConfirming
+		c.states = append(c.states, StateConfirming)
 		c.confirmD = true
+		c.confirmGen++
+		gen := c.confirmGen
 		c.mu.Unlock()
+		c.log("shutdown state", "state", string(StateConfirming))
+		proceed := c.newProceed(from, gen)
 		if c.hooks.Confirm != nil {
-			c.hooks.Confirm(report, func() {
-				c.mu.Lock()
-				c.confirmD = false
-				c.mu.Unlock()
-				go c.runTeardown(from)
-			})
+			c.hooks.Confirm(report, proceed)
 		} else {
-			c.mu.Lock()
-			c.confirmD = false
-			c.mu.Unlock()
-			go c.runTeardown(from)
+			proceed()
 		}
 		return
 	}
+	c.mu.Unlock()
 	go c.runTeardown(from)
 }
 
+// newProceed builds the once-only, generation-validated proceed
+// callback handed to the Confirm hook. The callback is honoured only
+// while it is still the CURRENT open confirmation; a stale callback
+// (the user chose Stay, or a newer confirmation superseded it) is
+// logged and ignored. When honoured, the Confirming→Cancelling
+// transition happens under the same lock hold that validated the
+// generation, so a concurrent CancelClose either wins (the callback
+// then sees the bumped generation and stays harmless) or loses (it
+// finds a state that is no longer confirming and becomes a no-op).
+func (c *Controller) newProceed(from string, gen uint64) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			if c.confirmGen != gen || c.state != StateConfirming || !c.confirmD {
+				c.mu.Unlock()
+				c.log("stale proceed callback ignored", "from", from, "state", string(c.state))
+				return
+			}
+			c.confirmD = false
+			c.state = StateCancelling
+			c.states = append(c.states, StateCancelling)
+			c.mu.Unlock()
+			c.log("shutdown state", "state", string(StateCancelling))
+			go c.teardown(from)
+		})
+	}
+}
+
 // CancelClose returns from an open confirmation to running (the user
-// chose to stay). Idempotent.
+// chose to stay). Idempotent. Bumping confirmGen invalidates any
+// proceed callback the closing dialog may still invoke afterwards.
 func (c *Controller) CancelClose(reason string) {
 	c.mu.Lock()
 	if c.state != StateConfirming {
@@ -248,27 +320,38 @@ func (c *Controller) CancelClose(reason string) {
 		return
 	}
 	c.confirmD = false
+	c.confirmGen++
 	c.state = StateRunning
 	c.states = append(c.states, StateRunning)
 	c.mu.Unlock()
 	c.log("close cancelled by user", "reason", reason)
 }
 
+// runTeardown is the direct (confirmation-free) teardown admission:
+// exactly one caller atomically moves the machine into cancelling and
+// runs the stages. Entry from confirming is impossible here — that
+// path is reserved to the generation-validated proceed callback.
 func (c *Controller) runTeardown(from string) {
-	// Atomic entry: the guard and the first transition happen under one
-	// lock hold, so duplicate teardowns (double close, late duplicates)
-	// can never interleave.
 	c.mu.Lock()
-	if c.state == StateClosed || c.state == StateCancelling || c.state == StateFlushing || c.state == StateClosing {
+	switch c.state {
+	case StateRunning, StateCloseRequested:
+		c.state = StateCancelling
+		c.states = append(c.states, StateCancelling)
 		c.mu.Unlock()
-		return
+		c.log("shutdown state", "state", string(StateCancelling))
+		c.teardown(from)
+	default:
+		c.log("duplicate teardown request ignored", "from", from, "state", string(c.state))
+		c.mu.Unlock()
 	}
-	c.state = StateCancelling
-	c.states = append(c.states, StateCancelling)
-	c.mu.Unlock()
-	c.log("shutdown state", "state", string(StateCancelling))
+}
 
-	start := time.Now()
+// teardown runs the bounded cancel → flush → release stages and the
+// single Finalize, then publishes the immutable result BEFORE closing
+// Done. Only reachable through an admitted (exactly-once) transition
+// into cancelling.
+func (c *Controller) teardown(from string) {
+	start := c.clock()
 	res := ShutdownResult{}
 	var timedOut bool
 
@@ -297,14 +380,26 @@ func (c *Controller) runTeardown(from string) {
 	if c.hooks.Finalize != nil {
 		c.hooks.Finalize()
 	}
-	res.Duration = time.Since(start)
+
+	end := c.clock()
+	res.Duration = end.Sub(start)
+	if res.Duration <= 0 {
+		// Sub-resolution teardown on a coarse monotonic clock (the
+		// Windows run-43541087097 regression): a completed sequence
+		// still owes the contract a positive duration. Normalized,
+		// never slept into existence.
+		res.Duration = MinCompletedDuration
+	}
+	res.CompletedAt = end
+
 	c.mu.Lock()
-	res.CompletedAt = time.Now()
 	c.states = append(c.states, StateClosed)
 	res.States = append([]State(nil), c.states...)
 	c.result = res
 	c.state = StateClosed
 	c.mu.Unlock()
+	// Publish-before-signal: Result() after <-Done() observes the
+	// complete final record (happens-before via the channel close).
 	c.doneOnce.Do(func() { close(c.done) })
 	c.log("shutdown complete",
 		"from", from,

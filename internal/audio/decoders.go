@@ -53,6 +53,21 @@ func NewWAVDecoder(path string) (Decoder, error) {
 		f.Close()
 		return nil, fmt.Errorf("audio: not a valid RIFF/WAVE file: %s", path)
 	}
+	// Format-tag validation (run 43541087097 repair): only
+	// uncompressed PCM (tag 1) and PCM-in-WAVE_FORMAT_EXTENSIBLE
+	// (0xFFFE, plain PCM data layout) decode correctly through the
+	// integer path. Compressed tags (ADPCM, µ-law, a-law, GSM, ...)
+	// and float tags that the first-party float reader rejected
+	// would otherwise decode as pure integer noise while the UI
+	// claimed "RIFF WAVE PCM" — reject them honestly instead.
+	switch d.WavAudioFormat {
+	case 0, 1, 0xFFFE:
+		// ok (0: header parse left the tag unset)
+	default:
+		f.Close()
+		return nil, fmt.Errorf("%w: WAVE format tag %d (0x%04X) is not uncompressed PCM",
+			ErrUnsupported, d.WavAudioFormat, d.WavAudioFormat)
+	}
 	return &wavDecoder{f: f, d: d}, nil
 }
 
@@ -157,9 +172,18 @@ func (r *wavReader) fill() error {
 	if bd == 0 {
 		bd = 16
 	}
+	// 8-bit WAV is UNSIGNED (0..255, silence at 128) — go-audio/wav
+	// v1.1.0 returns the raw values. Without the offset, digital
+	// silence decoded as a constant +1.0 full-scale DC signal (the
+	// run-43541087097 reproduced defect); every 8-bit file was
+	// DC-shifted and clipped.
+	unsigned8 := bd == 8
 	scale := float32(1.0) / float32(int64(1)<<(bd-1))
 	r.buf = r.buf[:0]
 	for _, v := range intbuf.Data[:n] {
+		if unsigned8 {
+			v -= 128
+		}
 		r.buf = append(r.buf, float32(v)*scale)
 	}
 	r.pos = 0
@@ -241,7 +265,13 @@ type flacDecoder struct {
 	bd int
 }
 
-// NewFLACDecoder opens path as a FLAC stream.
+// NewFLACDecoder opens path as a FLAC stream. The pcm decoder is
+// configured to CONVERT every bit depth to 24-bit output (run
+// 43541087097 repair): the previous mapping guessed byte widths from
+// the source depth and was wrong for every depth outside {16,24,32}
+// (8-bit FLAC emitted 1 byte/sample but was read as int16 → pure
+// noise; 20-bit read at the wrong scale → −18 dB). With a fixed
+// 24-bit wire the source depth only affects metadata.
 func NewFLACDecoder(path string) (Decoder, error) {
 	if err := checkSourceSize(path); err != nil {
 		return nil, err
@@ -250,7 +280,7 @@ func NewFLACDecoder(path string) (Decoder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("audio: open flac: %w", err)
 	}
-	d, err := flacpcm.NewDecoder(f)
+	d, err := flacpcm.NewDecoder(f, flacpcm.WithConvertTo(24))
 	if err != nil {
 		f.Close()
 		return nil, fmt.Errorf("audio: flac decode init: %w", err)
@@ -261,7 +291,11 @@ func NewFLACDecoder(path string) (Decoder, error) {
 func (x *flacDecoder) Probe() (Metadata, error) {
 	if x.md.FileSize == 0 {
 		info := x.d.Info()
-		x.bd = x.d.OutputBitDepth()
+		x.bd = info.BitDepth // native source depth for honest metadata
+		if x.bd <= 0 {
+			x.bd = x.d.OutputBitDepth()
+		}
+		outBits := x.d.OutputBitDepth()
 		x.md = Metadata{
 			Container:  "flac",
 			Codec:      "FLAC",
@@ -270,7 +304,7 @@ func (x *flacDecoder) Probe() (Metadata, error) {
 			BitDepth:   x.bd,
 			Duration:   float64(info.TotalSamples) / float64(info.SampleRate),
 			FileSize:   fileSize(nameOfFile(x.f)),
-			Classifier: fmt.Sprintf("FLAC %d-bit lossless", x.bd),
+			Classifier: fmt.Sprintf("FLAC %d-bit lossless (decoded as %d-bit)", x.bd, outBits),
 		}
 		if x.md.SampleRate <= 0 || x.md.Channels <= 0 || x.md.Channels > MaxChannels {
 			return x.md, fmt.Errorf("audio: flac has invalid format %dHz %dch", x.md.SampleRate, x.md.Channels)
@@ -284,17 +318,12 @@ func (x *flacDecoder) Probe() (Metadata, error) {
 
 func (x *flacDecoder) PCMReader() (io.Reader, error) { return x.d, nil }
 
+// SourceFormat reports the FIXED 24-bit wire (WithConvertTo(24)) —
+// independent of the native source depth, so the conversion layer
+// always applies the correct byte width and scale.
 func (x *flacDecoder) SourceFormat() (int, int, SampleEncoding) {
 	info := x.d.Info()
-	bd := x.d.OutputBitDepth()
-	switch bd {
-	case 8, 16:
-		return info.SampleRate, info.Channels, EncInt16LE
-	case 32:
-		return info.SampleRate, info.Channels, EncInt32LE
-	default:
-		return info.SampleRate, info.Channels, EncInt24LE
-	}
+	return info.SampleRate, info.Channels, EncInt24LE
 }
 
 func (x *flacDecoder) Close() error { return x.f.Close() }

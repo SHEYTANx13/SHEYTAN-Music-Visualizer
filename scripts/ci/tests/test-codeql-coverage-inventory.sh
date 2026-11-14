@@ -102,10 +102,14 @@ else
   echo "INVENTORY MISMATCH AT THE RUN COMMIT — re-derive the coverage claim."
   status=1
 fi
-if [ "$cur_prod_count" -eq $((run2_prod_count + 7)) ]; then
-  echo "CURRENT TREE: production file count is run2 + 7 (internal/perf x4, sysprofile export_display + policy_modes, ui policy_store) — expected for this session."
+# run2 + 9 production files: internal/perf x4, sysprofile export_display
+# + policy_modes, ui/fyne policy_store + responsive (run 43090342995),
+# internal/appclose/close.go (run 43090342995 shutdown state machine).
+# Run 43541087097 added test files only — production count unchanged.
+if [ "$cur_prod_count" -eq $((run2_prod_count + 9)) ]; then
+  echo "CURRENT TREE: production file count is run2 + 9 (internal/perf x4, sysprofile export_display + policy_modes, ui policy_store + responsive, internal/appclose) — expected for the current session."
 else
-  echo "CURRENT TREE: production file count $cur_prod_count != expected $((run2_prod_count + 7)) — update the CodeQL coverage note."
+  echo "CURRENT TREE: production file count $cur_prod_count != expected $((run2_prod_count + 9)) — update the CodeQL coverage note."
   status=1
 fi
 if [ "$run2_all_count" -eq 92 ] && [ "$run2_prod_count" -eq 56 ] && [ "$run2_test_count" -eq 36 ]; then

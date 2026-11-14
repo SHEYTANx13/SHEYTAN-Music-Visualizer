@@ -56,6 +56,24 @@ the decoder. Human `--version` output remains user-facing only.
   capture discipline, plus race tests, FFmpeg export proofs and the Xvfb
   GUI smoke.
 
+### Gate ownership (do not duplicate work)
+
+| Gate | Command (Linux form) | Owner |
+|---|---|---|
+| gofmt / mod tidy -diff / mod verify | `gofmt -l .` / `go mod tidy -diff` / `go mod verify` | both platform jobs + preflight |
+| default unit suite | `go test -tags goffi_static -skip '^TestPaletteReachesGPUShader$' ./...` | both platform jobs |
+| vet / package build | `go vet -tags goffi_static ./...` / `go build -tags goffi_static ./...` | both platform jobs |
+| desktop EXE + `--version` / `--self-check` | built with injected metadata; commit must match `github.sha` | both platform jobs |
+| package staging / license / archive / extract verification | see scripts | both platform jobs (exactly once) |
+| **dedicated GPU gate** | `go test -tags goffi_static -v -run '^TestPaletteReachesGPUShader$' -count=1 ./internal/render/` | **only** `gpu-validation`, once per platform |
+| race suite | `go test -race ... -skip '^TestPaletteReachesGPUShader$'` | platform jobs |
+| export / audio / studio validation | real FFmpeg fixtures | Linux job (Windows: FFmpeg unavailable on hosted runners — recorded honestly) |
+
+`TestPaletteReachesGPUShader` is excluded from the default and race suites
+ONLY by its exact name because the dedicated GPU gate owns it — not because
+it is unreliable. Do not remove the dedicated gate; do not reintroduce
+duplicate runs.
+
 Every executed command produces:
 
 1. a structured text record in `ci-logs/phase2-build.log`
@@ -119,17 +137,29 @@ that fails its own checks is never uploaded. Per-job log-part artifacts
 are internal collector inputs, deleted only after the consolidated report
 upload is verified.
 
-| Artifact | Name | Condition | Meaning |
-| --- | --- | --- | --- |
-| Windows package | `SHEYTAN-Music-Visualizer-windows-x64.zip` | package-status driven (`always()`; only when the package passed its own gates) | The single canonical Windows package: one app-directory root, license byte-identical, PE GUI 2, extracted EXE re-run. `TEST-ONLY — required gates failed` label when other gates are red; the job stays red. |
-| Linux package | `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` | same status-driven rule | The single canonical Linux package: one app-directory root, license byte-identical, exec bit preserved. |
-| Consolidated report | `SHEYTAN-Music-Visualizer-all-logs.txt` | `always()` after evidence jobs | One plain-text file uploaded unzipped (`archive: false`); validated (non-empty, no ZIP signature) before upload. |
-
 There is no raw EXE, no staged-folder archive and no "recovery" variant
 anywhere in the artifact list (the run-42921967187 recovery path was
 retired in the run-42939743766 repair). Package upload decisions come from
 `ci-logs/package-status-windows.json` / `package-status-linux.json`, never
 from file existence alone.
+
+## Job verdicts and the final gate (run 43541087097)
+
+The workflow separates EVIDENCE COLLECTION from the OVERALL VERDICT:
+
+- `collect-logs` concludes on COLLECTION health only: green when the
+  consolidated report was produced, validated and uploaded (collector
+  exit 0, or exit 3 — report uploaded while an upstream required job
+  failed); red when the collection itself is incomplete (exit 1) or the
+  collector hard-failed (exit 2) or the emergency fallback/cleanup
+  guarantees were not met.
+- `final-verdict` (needs preflight, build-windows, build-linux, codeql,
+  collect-logs; `always() && !cancelled()`) is the ONE user-facing gate
+  that fails closed when any required job did not succeed, naming each
+  failed job and pointing at the consolidated report. An upstream test
+  failure therefore shows as: the failing build job red, collect-logs
+green (the evidence was collected), final-verdict red — never as a
+seemingly broken collector.
 
 ## Workflow security posture
 

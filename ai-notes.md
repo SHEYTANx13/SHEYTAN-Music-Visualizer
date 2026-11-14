@@ -1082,3 +1082,60 @@ Linux x64 sandbox, go1.27.3. All non-GUI packages verified; `ui/fyne` and
 install GL/wayland dev headers) and are owned by hosted CI. No physical
 GPU/audio/display hardware exists here: every hardware claim stays
 software-adapter evidence.
+
+## Run 43541087097 session record (2026-11-14)
+
+Scope: full repair, performance, visualizer-quality and UX pass per the
+113-minute implementation contract. Environment: Linux x64 sandbox,
+go1.27.4, locally provisioned GL/EGL/wayland dev libraries (user-prefix
+pkg-config), FFmpeg 7.1.5 present, Xvfb available; 2 vCPU, no physical
+GPU/audio/display.
+
+Key engineering facts established this session (full detail in
+`CHANGELOG.md` and the delivered `note.md`):
+
+- The Windows `TestSingleConfirmationSurfaceForDuplicates` failure is a
+  timing-contract portability defect: a sub-resolution monotonic
+  teardown measured as a zero span. Fixed by the documented
+  `appclose.MinCompletedDuration` floor + an injectable clock; the
+  fixed-clock test reproduces the Windows condition deterministically on
+  Linux. The BASELINE binary also logged `duration_ms=0` on a Linux
+  shutdown — the defect was not Windows-only.
+- appclose now uses generation-validated, once-only proceed callbacks
+  and single-lock-hold admission (RequestClose → snapshot → confirming/
+  cancelling), eliminating the stale-proceed-after-Stay and
+  no-work-vs-confirming teardown races.
+- Three critical audio decode defects fixed and regression-proven:
+  chunk-boundary sample drops (frameAlignReader), the FLAC bit-depth
+  mapping (fixed 24-bit conversion wire; FLAC 8-bit is SIGNED, unlike
+  unsigned WAV 8-bit), and the 8-bit WAV DC offset. Plus WAV format-tag
+  validation, a bounded fmt-chunk read, NaN/Inf wire sanitization, the
+  duration limit enforced during the decode, an FFmpeg decode-cancel
+  watcher, and the oto async-error honesty fix.
+- studio.Close() is now a complete dependency-ordered teardown (import
+  → analysis → export → transport, idempotent); analysis gained the
+  cancellation path it never had.
+- Render parity: SpectrumTilt applied on the normal path; the GPU
+  radial path consumes scene-smoothed bins and composites overlays (GPU
+  exports previously lost the title/watermark); export GPU selection
+  requires a hardware adapter class; identical-timestamp re-render is
+  bit-stable on both backends; an unclamped config can no longer zero
+  audio reactivity.
+- Hot-path A/B (this host, 5 runs, medians): 1080p overlay frame 41 → 6
+  allocs/op and 35,784 → 169 B/op (−99.5% churn); the preview loop
+  rotates three frame buffers instead of allocating ~2 MiB per frame.
+  Startup first-window-usable medians: baseline 887/881 ms (cold/warm)
+  vs 883/875 ms after — parity within noise on this host.
+- AnalysisVersion bumped to 2 (waveform envelope 2 → 60 pts/s).
+- CI: collect-logs concludes on collection health only; a new
+  final-verdict job fails closed on any required gate; the Linux
+  --build-info-json observer receives the real exit code; the stale
+  CodeQL-inventory production count corrected (run2 + 9).
+- startup-bench.sh accepts absolute bin paths (an absolute path
+  previously passed the -x check but launched a nonexistent file, so
+  every sample FAILed).
+- Docs: BUILDING.md merged into ci.md; diagnostics.md merged into
+  TROUBLESHOOTING.md; the docs-consistency gate is green.
+- The tracked `.env` and `download/README.md` are initial-commit
+  sandbox artifacts, not product files; they are excluded from the
+  delivered source ZIP and left untouched in the tree.

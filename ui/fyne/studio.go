@@ -137,9 +137,14 @@ func Run() error {
 	// cleanup completed, and the UI stays responsive meanwhile.
 	u.closeCtl = appclose.New(appclose.Hooks{
 		Snapshot: func() appclose.WorkReport {
+			// The studio service is the single synchronized owner of
+			// the export job; reading it there (instead of the
+			// dialog-scoped UI field) keeps shutdown correct even
+			// when the export dialog was closed mid-run.
+			job := u.svc.ExportJob()
 			return appclose.WorkReport{
 				Playback: u.svc.Clock().State == playback.StatePlaying,
-				Export:   u.exportJob != nil && u.exportJob.Running(),
+				Export:   job != nil && job.Running(),
 				Startup:  u.svc.Importing(),
 			}
 		},
@@ -151,10 +156,7 @@ func Run() error {
 			// running export. Each is app-owned; none is force-killed.
 			u.svc.CancelImport()
 			_ = u.svc.Stop()
-			u.rendererReqMu.Lock()
-			job := u.exportJob
-			u.rendererReqMu.Unlock()
-			if job != nil {
+			if job := u.svc.ExportJob(); job != nil && job.Running() {
 				job.Cancel()
 			}
 			return nil
@@ -233,6 +235,10 @@ func Run() error {
 		"cancel_err", errString(res.CancelErr),
 		"flush_err", errString(res.FlushErr),
 		"release_err", errString(res.ReleaseErr),
+		// duration_ms truncates sub-millisecond teardowns to 0
+		// (the run-43541087097 Windows regression); duration
+		// carries the precise value (>= MinCompletedDuration).
+		"duration", res.Duration.String(),
 		"duration_ms", res.Duration.Milliseconds(),
 		"fullscreen_observed", u.fs.Observed())
 	svc.Close() // idempotent; defensive final release of the transport
@@ -870,6 +876,7 @@ func (u *studioUI) onEvent(ev studio.Event) {
 	case studio.EventExportDone:
 		u.status("Export complete: " + ev.Message)
 		u.logInfo("export finished", "result", "success", "detail", ev.Message)
+		u.exportJob = nil
 		if u.exportDialog != nil {
 			u.exportDialog.Hide()
 			u.exportDialog = nil
@@ -878,6 +885,7 @@ func (u *studioUI) onEvent(ev studio.Event) {
 	case studio.EventExportFailed:
 		u.status("Export failed: " + ev.Message)
 		u.logErr("export failed", "detail", ev.Message)
+		u.exportJob = nil
 		if u.exportDialog != nil {
 			u.exportDialog.Hide()
 			u.exportDialog = nil

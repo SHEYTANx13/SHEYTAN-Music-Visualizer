@@ -335,8 +335,16 @@ if [ "$MODE" = "desktop" ]; then
       OBSERVER="$REPO_ROOT/scripts/ci/observe_commit.py"
       PACKAGE_GATES_FAILED=$(( FAILURES - FAILURES_BEFORE_PACKAGE ))
       if [ "$EXE_OK" -eq 1 ] && [ -s "$TARBALL" ]; then
-        bi_line="$(./bin/sheytan-music-visualizer --build-info-json 2>/dev/null || true)"
-        built_json="$(printf '%s' "$bi_line" | python3 "$OBSERVER" "$commit_expected" 0 || true)"
+        bi_line=""
+        bi_rc="1"
+        # Run-43541087097 repair: pass the REAL --build-info-json exit
+        # code into the observer (Windows already did; Linux hardcoded
+        # 0, so observer rule "non-zero exit never verified" was not
+        # enforced on this platform).
+        if bi_line="$(./bin/sheytan-music-visualizer --build-info-json 2>/dev/null)"; then
+          bi_rc="0"
+        fi
+        built_json="$(printf '%s' "$bi_line" | python3 "$OBSERVER" "$commit_expected" "$bi_rc" || true)"
         commit_observed="$(printf '%s' "$built_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("observed","not-observed"))' 2>/dev/null || echo not-observed)"
         built_verified="$(printf '%s' "$built_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("verified") else "false")' 2>/dev/null || echo false)"
 
@@ -344,8 +352,12 @@ if [ "$MODE" = "desktop" ]; then
         ex_verified="false"
         if tar -xzf "$TARBALL" -C "$VERIFY_DIR" 2>/dev/null &&
            [ -x "$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" ]; then
-          ex_line="$("$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" --build-info-json 2>/dev/null || true)"
-          extracted_json="$(printf '%s' "$ex_line" | python3 "$OBSERVER" "$commit_expected" 0 || true)"
+          ex_line=""
+          ex_rc="1"
+          if ex_line="$("$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" --build-info-json 2>/dev/null)"; then
+            ex_rc="0"
+          fi
+          extracted_json="$(printf '%s' "$ex_line" | python3 "$OBSERVER" "$commit_expected" "$ex_rc" || true)"
           commit_extracted_observed="$(printf '%s' "$extracted_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("observed","not-observed"))' 2>/dev/null || echo not-observed)"
           ex_verified="$(printf '%s' "$extracted_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("verified") else "false")' 2>/dev/null || echo false)"
         fi

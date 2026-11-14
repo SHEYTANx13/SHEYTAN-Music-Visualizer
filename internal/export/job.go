@@ -356,12 +356,19 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 }
 
 // selectRenderer picks the export renderer and reports it honestly.
+// The hardware-adapter requirement mirrors the UI selection exactly
+// (run 43541087097 parity repair): a software/WARP-class adapter is
+// never used as the export "GPU" — before this, export only checked
+// the backend API name while the UI refused software adapters, so an
+// export could render on WARP while the preview honestly said CPU.
 func (j *Job) selectRenderer() (render.Renderer, render.BackendInfo) {
 	if j.req.PreferGPU {
 		g := render.NewGPURenderer()
 		if g != nil {
 			info := g.Info()
-			if info.GpuState == render.GpuAvailable && info.BackendAPI != "software" && info.BackendAPI != "noop" {
+			if info.GpuState == render.GpuAvailable &&
+				render.DeviceClassHardware == info.DeviceClass &&
+				info.BackendAPI != "software" && info.BackendAPI != "noop" {
 				return g, info
 			}
 			g.Close()

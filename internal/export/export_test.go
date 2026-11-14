@@ -93,9 +93,6 @@ func syntheticFixture(t *testing.T, dir string, seconds float64) (wavPath string
 		if _, err := f.Write(b[:]); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.Write(b[:]); err != nil {
-			t.Fatal(err)
-		}
 	}
 	bins := make([]float64, visualizer.NumVizBins)
 	for i := range bins {

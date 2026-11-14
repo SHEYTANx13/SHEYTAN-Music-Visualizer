@@ -302,6 +302,9 @@ type GPURenderer struct {
 	renderGPUFn func(in visualizer.FrameInput) error
 	lastImage   *image.RGBA
 	uniformData []byte // reused uniform staging buffer
+	// sceneBins is the scratch the scene-smoothed bin values are packed
+	// from (run 43541087097 GPU/CPU parity repair — see renderGPU).
+	sceneBins [visualizer.NumVizBins]float64
 }
 
 func f32bits(v float64) uint32 { return mathFloat32bits(float32(v)) }
@@ -576,7 +579,10 @@ func paletteColors(p visualizer.Palette) [uniformColorCount][3]float64 {
 // single packer for the whole renderer: no other call site may write
 // uniform bytes or restate offsets. dst is fully cleared first, so a
 // reused staging buffer can never leak a previous palette's bytes.
-func packUniforms(dst []byte, in visualizer.FrameInput, cfg visualizer.Config, pal visualizer.Palette) {
+// bins are the GAIN-ADJUSTED display values to pack (scene-smoothed in
+// production — matching the CPU renderer — or raw inputs in tests);
+// the packer does not multiply them again.
+func packUniforms(dst []byte, in visualizer.FrameInput, cfg visualizer.Config, pal visualizer.Palette, bins []float64) {
 	if len(dst) != uniformSize {
 		panic(fmt.Sprintf("render: uniform staging buffer is %d bytes, want %d", len(dst), uniformSize))
 	}
@@ -600,7 +606,6 @@ func packUniforms(dst []byte, in visualizer.FrameInput, cfg visualizer.Config, p
 	putF32(uniformRotSpeedAt, 0.15+0.1*float64(cfg.MotionStyle%3))
 	// bins: 64 floats; the array starts at 48 because vec4f alignment
 	// (16) rounds the vec2f pad (28..35) up to the next multiple of 16.
-	bins := in.Audio.Bins
 	if len(bins) < visualizer.NumVizBins {
 		bins = visualizer.InterpolateBins(bins, cfg.SpectrumTilt)
 	}
@@ -608,7 +613,7 @@ func packUniforms(dst []byte, in visualizer.FrameInput, cfg visualizer.Config, p
 		if i >= 64 {
 			break
 		}
-		putF32(uniformBinsAt+i*4, v*cfg.Sensitivity)
+		putF32(uniformBinsAt+i*4, v)
 	}
 	// five 16-byte color lanes, R,G,B,A with alpha 1.0
 	cols := paletteColors(pal)
@@ -725,10 +730,37 @@ func (g *GPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 // reads the pixels back.
 func (g *GPURenderer) renderGPU(in visualizer.FrameInput) error {
 	w, h := in.Width, in.Height
+	// Normalize in place (see CPURenderer.RenderFrame): the scene update
+	// and the packer must see the same clamped values.
+	in.Config.Clamp()
 	cfg := in.Config
-	cfg.Clamp()
 	pal := paletteFor(cfg.Palette)
 	g.info.GpuState = GpuSelected
+
+	// Scene-smoothing parity (run 43541087097): the CPU radial
+	// renderer consumes attack/release-smoothed bins from the shared
+	// scene state; the shader previously received RAW bins, so the GPU
+	// output jittered where the CPU output flowed (and switching
+	// backend visibly changed the visuals). The GPU renderer advances
+	// its own SceneState — the same deterministic media-time evolution —
+	// and packs the smoothed, gain-adjusted values. The advance is
+	// GATED on media time: a repeated render of the SAME timestamp
+	// (paused preview, repeated export frame, tests) is bit-stable, a
+	// backward seek resets the deterministic evolution, and only a
+	// forward timeline advances the smoothers. The scene lives on the
+	// embedded CPU renderer, which is otherwise unused in this mode;
+	// single-goroutine ownership is unchanged.
+	st := &g.cpu.scene
+	switch {
+	case !st.hasLast || in.Time > st.lastTime:
+		st.Update(&in)
+	case in.Time < st.lastTime:
+		st.Reset()
+		st.Update(&in)
+	}
+	for i := range g.sceneBins {
+		g.sceneBins[i] = st.Bin(i)
+	}
 
 	// build uniform data via the single packer (see the layout table
 	// above packUniforms). The staging buffer is reused across frames;
@@ -736,7 +768,7 @@ func (g *GPURenderer) renderGPU(in visualizer.FrameInput) error {
 	if len(g.uniformData) != uniformSize {
 		g.uniformData = make([]byte, uniformSize)
 	}
-	packUniforms(g.uniformData, in, cfg, pal)
+	packUniforms(g.uniformData, in, cfg, pal, g.sceneBins[:])
 	if err := g.queue.WriteBuffer(g.uniform, 0, g.uniformData); err != nil {
 		return fmt.Errorf("uniform upload: %w", err)
 	}
@@ -850,6 +882,13 @@ func (g *GPURenderer) renderGPU(in visualizer.FrameInput) error {
 	if err := g.readback.Unmap(); err != nil {
 		return fmt.Errorf("unmap: %w", err)
 	}
+	// Overlay parity (run 43541087097): the CPU renderer composites the
+	// title/subtitle/watermark onto every mode; the GPU path previously
+	// returned the bare shader image, so a GPU machine exported videos
+	// WITHOUT the configured overlays. The same overlay pass now runs
+	// on the readback image — identical text, identical placement.
+	ov := newCanvasWith(img, &g.cpu.powScratch)
+	g.cpu.drawOverlays(ov, in)
 	g.lastImage = img
 	g.info.GpuState = GpuVerified
 	return nil

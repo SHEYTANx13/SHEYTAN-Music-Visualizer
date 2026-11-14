@@ -12,21 +12,19 @@ not exist. Links are verified by `scripts/ci/tests/test-docs-consistency.sh`.
 | [license.md](../license.md) | Canonical licensing document (byte-identical inside every distributed package). |
 | [CHANGELOG.md](../CHANGELOG.md) | Notable application and engineering changes per session. |
 | [roadmap.md](../roadmap.md) | Full product direction; active/upcoming work only (stale completed tasks are removed). |
-| [ai-notes.md](../ai-notes.md) | Current engineering facts, constraints and session history. |
+| [ai-notes.md](../ai-notes.md) | Historical engineering archive: durable facts, constraints and per-run session records (append-only). |
 
 ## Engineering reference (`docs/`)
 
 | Document | Scope |
 | --- | --- |
 | [docs/architecture.md](architecture.md) | Module map, data flow, threading rules (Fyne event loop, `fyne.Do`), the close/shutdown state machine (`internal/appclose`) and the responsive root (`ui/fyne/responsive.go`). |
-| [docs/ci.md](ci.md) | Canonical build/CI reference: toolchain per platform, `goffi_static` tag policy, every build script gate, the `--build-info-json` identity authority and the package-status contract (VERIFIED / TEST_ONLY / UNAVAILABLE). |
+| [docs/ci.md](ci.md) | Canonical build/CI reference: toolchain per platform, `goffi_static` tag policy, hands-on build instructions, gate ownership, the `--build-info-json` identity authority, the package-status contract (VERIFIED / TEST_ONLY / UNAVAILABLE) and the final-verdict gate. |
 | [docs/CI-DIAGNOSTICS.md](CI-DIAGNOSTICS.md) | The consolidated `SHEYTAN-Music-Visualizer-all-logs.txt` diagnostics artifact, log-part lifecycle and collector contract. |
 | [docs/GPU-RENDERING.md](GPU-RENDERING.md) | Renderer selection, honest device classes, the Go↔WGSL uniform contract and the dedicated GPU palette gate. |
 | [docs/PERFORMANCE.md](PERFORMANCE.md) | Performance methodology, current measured baselines and the honesty rules for claims. |
 | [docs/performance-baseline.md](performance-baseline.md) | Full measured baseline history with exact commands, host identity and caveats. |
-| [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Runtime log locations, data folders, common failures with actionable fixes. |
-| [docs/diagnostics.md](diagnostics.md) | What the app reports about itself (runtime log, self-check, capability states) and how to read it. |
-| [docs/BUILDING.md](BUILDING.md) | Hands-on build instructions for Windows (UCRT64) and Linux. |
+| [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Canonical user-facing diagnostics + troubleshooting: runtime log, capability states, startup metrics, common failures with actionable fixes. |
 | [docs/REQUIREMENTS-TRACEABILITY.md](REQUIREMENTS-TRACEABILITY.md) | Every requirement mapped to implementation, tests, gates, user entry point and verification status. |
 
 ## Repository guides (`.github/`, `packaging/`)

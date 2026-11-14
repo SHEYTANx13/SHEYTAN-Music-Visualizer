@@ -71,6 +71,15 @@ func NewOtoOutput() (*OtoOutput, error) {
 		return nil, fmt.Errorf("playback: oto context: %w", err)
 	}
 	<-ready
+	// oto v3 reports asynchronous device setup failures through
+	// ctx.Err() after the ready channel closes (e.g. both PulseAudio
+	// and ALSA unavailable). Without this check a device-less
+	// machine got a "real" output that silently played nothing while
+	// the UI reported DeviceReal=true — the documented silent
+	// fallback was defeated (run 43541087097 repair).
+	if aerr := ctx.Err(); aerr != nil {
+		return nil, fmt.Errorf("playback: no audio device: %w", aerr)
+	}
 	return &OtoOutput{ctx: ctx}, nil
 }
 
@@ -125,16 +134,29 @@ func (o *SilentOutput) Close() error {
 
 func (p *silentPlayer) Play() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	if p.playing || p.session {
+		p.mu.Unlock()
 		return
 	}
+	prev := p.done // previous session's done channel (closed when its pacer exited)
 	p.playing = true
 	p.session = true
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	p.stop = stop
 	p.done = done
+	p.mu.Unlock()
+	if prev != nil {
+		// Join the previous pacer before starting the new one: Pause
+		// closes stop, but the old goroutine may still be inside
+		// p.r.Read — two pacers on the same SectionReader would race
+		// and miscount the offset (run 43541087097 repair). The join is
+		// bounded: a SectionReader file read returns promptly.
+		select {
+		case <-prev:
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 	go p.pace(stop, done)
 }
 

@@ -185,8 +185,26 @@ type ffmpegDecoder struct {
 // (the Decoder interface is context-free; this optional extension is
 // detected via interface assertion and is a no-op for native
 // decoders).
+//
+// Run-43541087097 repair: a context check BEFORE pr.Read cannot unblock
+// a Read that is already parked on an empty pipe (a hung ffmpeg on
+// malformed input blocked imports forever, because only the blocked
+// worker itself ever called Close). The watcher goroutine below kills
+// the child exactly when the import context is cancelled, which closes
+// the pipe and unblocks the reader; on normal completion the parent
+// cancels the context too, and the watcher's Close is a no-op on the
+// already-reaped child.
 func (d *ffmpegDecoder) SetDecodeContext(ctx context.Context) {
+	d.mu.Lock()
 	d.ctx = ctx
+	d.mu.Unlock()
+	if ctx == nil {
+		return
+	}
+	go func() {
+		<-ctx.Done()
+		d.Close()
+	}()
 }
 
 // NewFFmpegAdapterDecoder is exported for direct tests/diagnostics.

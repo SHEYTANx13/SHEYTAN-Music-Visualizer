@@ -101,7 +101,7 @@ func TestPackUniformsContract(t *testing.T) {
 		Audio:  visualizer.AudioState{Bass: 0.7, Mid: 0.3, Treble: 0.1, Bins: testBins()},
 	}
 	buf := make([]byte, uniformSize)
-	packUniforms(buf, in, in.Config, palA)
+	packUniforms(buf, in, in.Config, palA, in.Audio.Bins)
 
 	// res little-endian f32 at 0/4
 	if got := f32le(buf[uniformResAt:]); got != 128 {
@@ -131,9 +131,9 @@ func TestPackUniformsContract(t *testing.T) {
 	}
 	// reuse the same buffer for palette B: every lane byte that differs
 	// between the palettes must be overwritten (no stale bytes).
-	packUniforms(buf, in, in.Config, palB)
+	packUniforms(buf, in, in.Config, palB, in.Audio.Bins)
 	bufA := make([]byte, uniformSize)
-	packUniforms(bufA, in, in.Config, palA)
+	packUniforms(bufA, in, in.Config, palA, in.Audio.Bins)
 	for i := uniformColorsAt; i < uniformSize; i++ {
 		if buf[i] != bufA[i] && buf[i] == 0 && bufA[i] != 0 {
 			t.Fatalf("stale byte at %d: reused buffer kept 0 where palette A has %#x (palette bytes leaked between frames)", i, bufA[i])

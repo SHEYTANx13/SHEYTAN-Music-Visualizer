@@ -225,11 +225,27 @@ func (u *studioUI) showExportDialog(env *export.Environment) {
 		u.exportDialog = nil
 		u.exportBar = nil
 		u.exportLabel = nil
+		// Keep the job reference while an export is running so the
+		// Cancel control stays reachable when the dialog is
+		// reopened, and so progress keeps flowing to a reopened
+		// dialog. The terminal events clear it. Closing the dialog
+		// never abandons a running export silently.
+		if u.exportJob != nil && u.exportJob.Running() {
+			u.status("Export continues in background — reopen Export MP4 to watch or cancel it")
+			return
+		}
 		u.exportJob = nil
 	})
 	u.exportDialog = d
 	d.Show()
 }
+
+// previewBufCount is the frame-copy ring depth for the preview loop.
+// The canvas retains the currently displayed image; two extra slots
+// guarantee a buffer is only overwritten after multiple newer frames
+// have been presented, so neither the canvas nor an in-flight paint
+// can observe a torn frame.
+const previewBufCount = 3
 
 // startRenderLoop repaints the preview at ~30 fps from the audio
 // clock. The loop owns the renderer; the image is converted and
@@ -239,6 +255,17 @@ func (u *studioUI) startRenderLoop() {
 		idleSkip := 0
 		ticker := time.NewTicker(time.Second / 30)
 		defer ticker.Stop()
+		var previewBufs [previewBufCount]*image.RGBA
+		var previewIdx int
+		nextPreviewBuffer := func(b image.Rectangle) *image.RGBA {
+			previewIdx = (previewIdx + 1) % previewBufCount
+			buf := previewBufs[previewIdx]
+			if buf == nil || buf.Bounds() != b {
+				buf = image.NewRGBA(b)
+				previewBufs[previewIdx] = buf
+			}
+			return buf
+		}
 	forRunning:
 		for {
 			// FIRST-FRAME DEFERRAL (run 43090342995): the initial
@@ -321,9 +348,12 @@ func (u *studioUI) startRenderLoop() {
 				continue
 			}
 			img := fr.Image
-			// keep a copy for the canvas because the renderer reuses
-			// the buffer for the next frame
-			cp := image.NewRGBA(img.Bounds())
+			// Copy into the ring instead of allocating ~2 MiB per frame
+			// (run 43541087097 hot-path repair: ~60 MiB/s of allocation
+			// churn at 30 fps previously; the renderer reuses its own
+			// buffer, so a private copy is still required — but a rotating
+			// one, not a fresh heap object per frame).
+			cp := nextPreviewBuffer(img.Bounds())
 			copy(cp.Pix, img.Pix)
 			info := fr.Info
 			clock := fr.Clock

@@ -64,7 +64,7 @@ explicit Refresh action in the System Integration dialog, never polled.
 All reads stay local; absent APIs yield explicit `unknown`/`unavailable`
 values. The capability state model (DETECTED → SUPPORTED → SELECTED →
 EXECUTING → VERIFIED) and its evidence rules are documented in
-`docs/diagnostics.md`.
+`docs/TROUBLESHOOTING.md`.
 
 ## CPU/GPU/audio/export data flow
 

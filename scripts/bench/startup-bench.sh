@@ -28,8 +28,16 @@ trap 'pkill -f "Xvfb :77" 2>/dev/null; rm -rf "$WORK"' EXIT
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 3
 REPO="$PWD"
-if [ ! -x "$BIN" ]; then
-  echo "ERROR: executable not found: $REPO/$BIN (build it first: go build -tags goffi_static -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer)" >&2
+# Run-43541087097 repair: an ABSOLUTE bin path is used as-is; a relative
+# path is resolved against the repository root (the old code checked
+# -x "$BIN" but always launched "$REPO/$BIN", so an absolute path passed
+# the check and then launched a nonexistent file — every sample FAILed).
+case "$BIN" in
+  /*) LAUNCH_BIN="$BIN" ;;
+  *)  LAUNCH_BIN="$REPO/$BIN" ;;
+esac
+if [ ! -x "$LAUNCH_BIN" ]; then
+  echo "ERROR: executable not found: $LAUNCH_BIN (build it first: go build -tags goffi_static -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer)" >&2
   exit 2
 fi
 command -v Xvfb >/dev/null 2>&1 || { echo "ERROR: Xvfb not available (cannot measure a GUI launch on this host)" >&2; exit 2; }
@@ -46,7 +54,7 @@ extract_ms() { # extract_ms <logfile> [from-line] -> ms or empty
 run_cold() { # run_cold <data-root> -> prints elapsed ms or FAIL
   local root="$1" logfile ms pid waited=0 start_size
   rm -rf "$root"; mkdir -p "$root"
-  DISPLAY=:77 SHEYTAN_DATA_DIR="$root" "$REPO/$BIN" >/dev/null 2>&1 &
+  DISPLAY=:77 SHEYTAN_DATA_DIR="$root" "$LAUNCH_BIN" >/dev/null 2>&1 &
   pid=$!
   logfile="$root/logs/app.log"
   while [ $waited -lt 300 ]; do
@@ -64,7 +72,7 @@ run_warm() { # run_warm <shared-data-root> -> prints elapsed ms or FAIL
   local root="$1" logfile ms pid waited=0 start_size
   logfile="$root/logs/app.log"
   start_size=$(wc -l < "$logfile" 2>/dev/null || echo 0)
-  DISPLAY=:77 SHEYTAN_DATA_DIR="$root" "$REPO/$BIN" >/dev/null 2>&1 &
+  DISPLAY=:77 SHEYTAN_DATA_DIR="$root" "$LAUNCH_BIN" >/dev/null 2>&1 &
   pid=$!
   while [ $waited -lt 300 ]; do
     if [ -f "$logfile" ] && tail -n +"$((start_size+1))" "$logfile" 2>/dev/null | grep -q "startup stages complete"; then break; fi

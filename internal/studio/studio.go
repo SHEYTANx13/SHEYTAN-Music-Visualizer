@@ -334,7 +334,9 @@ func (s *Studio) ImportFile(path string) error {
 		defer func() {
 			s.mu.Lock()
 			s.importing = false
+			s.importCancel = nil
 			s.mu.Unlock()
+			cancel() // release the context (and the ffmpeg watcher) promptly
 		}()
 		start := time.Now()
 		track, err := audio.Import(ctx, path, s.cache, func(done, total uint64) {
@@ -376,14 +378,31 @@ func (s *Studio) CancelImport() {
 	s.mu.Unlock()
 }
 
-// startAnalysis runs DSP analysis in a background goroutine.
+// startAnalysis runs DSP analysis in a background goroutine with a
+// cancellation path (run 43541087097 lifecycle contract: every worker
+// has an owner and a cancel signal; Close cancels a running analysis
+// instead of orphaning it).
 func (s *Studio) startAnalysis(track *audio.ImportedTrack) {
 	s.emit(Event{Kind: EventAnalysisStarted, Message: "analyzing"})
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	// A previous analysis (superseded by a new import) is cancelled
+	// first so at most one analysis worker is ever live.
+	if s.analysisCancel != nil {
+		s.analysisCancel()
+	}
+	s.analysisCancel = cancel
+	s.mu.Unlock()
 	go func() {
+		defer cancel()
 		start := time.Now()
-		res, err := s.analyzeTrack(track)
+		res, err := s.analyzeTrack(ctx, track)
 		if err != nil {
-			s.emit(Event{Kind: EventAnalysisFailed, Message: err.Error()})
+			if errors.Is(err, context.Canceled) {
+				s.emit(Event{Kind: EventAnalysisFailed, Message: "analysis cancelled"})
+			} else {
+				s.emit(Event{Kind: EventAnalysisFailed, Message: err.Error()})
+			}
 			return
 		}
 		s.mu.Lock()
@@ -421,8 +440,9 @@ func (s *Studio) dnaSeedFor() uint64 {
 }
 
 // analyzeTrack streams the canonical PCM through the analyzer with
-// bounded buffers.
-func (s *Studio) analyzeTrack(track *audio.ImportedTrack) (*dsp.Result, error) {
+// bounded buffers. It honours ctx between chunks so a cancelled or
+// superseded analysis stops promptly without corrupting state.
+func (s *Studio) analyzeTrack(ctx context.Context, track *audio.ImportedTrack) (*dsp.Result, error) {
 	f, err := s.cache.Reader(track.Fingerprint)
 	if err != nil {
 		return nil, fmt.Errorf("studio: open canonical pcm: %w", err)
@@ -434,6 +454,9 @@ func (s *Studio) analyzeTrack(track *audio.ImportedTrack) (*dsp.Result, error) {
 	targetBytes := int64(track.Frames) * 8
 	var read int64
 	for read < targetBytes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		want := int64(len(byteBuf))
 		if rem := targetBytes - read; rem < want {
 			want = rem
@@ -884,12 +907,32 @@ func (s *Studio) Importing() bool {
 	return s.importing
 }
 
-// Close releases playback resources. Idempotent.
+// Close releases every owned worker and resource in dependency-safe
+// order (run 43541087097 shutdown contract): cancel the running
+// import, cancel a running analysis, cancel and stop the export job
+// (reaping the FFmpeg child), then stop and close the transport.
+// Idempotent: every stage is guarded, so the appclose Release hook and
+// the defensive post-window close can both call it.
 func (s *Studio) Close() {
 	s.mu.Lock()
+	importCancel := s.importCancel
+	analysisCancel := s.analysisCancel
+	job := s.exportJob
 	tr := s.transport
+	s.importCancel = nil
+	s.analysisCancel = nil
+	s.exportJob = nil
 	s.transport = nil
 	s.mu.Unlock()
+	if importCancel != nil {
+		importCancel()
+	}
+	if analysisCancel != nil {
+		analysisCancel()
+	}
+	if job != nil && job.Running() {
+		job.Cancel()
+	}
 	if tr != nil {
 		_ = tr.Close()
 	}

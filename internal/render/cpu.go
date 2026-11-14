@@ -25,6 +25,10 @@ type CPURenderer struct {
 	// Owned by the render-loop goroutine that owns RenderFrame; never
 	// shared across goroutines.
 	powScratch []float64
+	// faces caches overlay text faces per pixel size (run 43541087097
+	// hot-path repair: three opentype.NewFace+Close pairs per frame at
+	// preview rate). Same single-goroutine ownership as powScratch.
+	faces faceCache
 }
 
 // NewCPURenderer creates the CPU renderer (always available).
@@ -43,7 +47,7 @@ func NewCPURenderer() *CPURenderer {
 func (r *CPURenderer) Info() BackendInfo { return r.info }
 
 // Close releases buffers.
-func (r *CPURenderer) Close() { r.buf = nil; r.powScratch = nil }
+func (r *CPURenderer) Close() { r.buf = nil; r.powScratch = nil; r.faces.close() }
 
 // RenderFrame renders one frame. The output buffer is reused between
 // calls — callers must copy if they retain the image.
@@ -51,14 +55,29 @@ func (r *CPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 	if in.Width <= 0 || in.Height <= 0 || in.Width > 7680 || in.Height > 4320 {
 		return nil, fmt.Errorf("render: invalid frame size %dx%d", in.Width, in.Height)
 	}
+	// Normalize ONCE, in place (run 43541087097 repair): the scene
+	// update and every draw path must see the SAME clamped config. A
+	// caller passing a raw zero-value config previously drove the
+	// scene with Sensitivity 0 — every audio-reactive target collapsed
+	// to zero and the mode rendered its static furniture only.
+	in.Config.Clamp()
 	cfg := in.Config
-	cfg.Clamp()
 	pal := paletteFor(cfg.Palette)
 	if r.buf == nil || r.buf.Bounds().Dx() != in.Width || r.buf.Bounds().Dy() != in.Height {
 		r.buf = image.NewRGBA(image.Rect(0, 0, in.Width, in.Height))
 		r.scene.Reset()
 	}
-	r.scene.Update(&in)
+	// The scene advances only when media time moves (mirrors the GPU
+	// renderer): re-rendering an identical timestamp is bit-stable (a
+	// paused preview must not animate or decay by itself), and a
+	// backward seek restarts the deterministic evolution.
+	switch {
+	case !r.scene.hasLast || in.Time > r.scene.lastTime:
+		r.scene.Update(&in)
+	case in.Time < r.scene.lastTime:
+		r.scene.Reset()
+		r.scene.Update(&in)
+	}
 	if !r.scene.particleInit {
 		seed := cfg.VariationSeed
 		if seed == 0 && in.DNA != nil {
@@ -468,27 +487,27 @@ func (r *CPURenderer) drawParticles(c *canvas, in visualizer.FrameInput, pal vis
 		pal.Low[0], pal.Low[1], pal.Low[2])
 }
 
-// drawOverlays renders title/subtitle and the watermark.
+// drawOverlays renders title/subtitle and the watermark. Text faces
+// come from the renderer's per-size cache (run 43541087097 hot-path
+// repair: three opentype.NewFace+Close pairs per frame previously).
 func (r *CPURenderer) drawOverlays(c *canvas, in visualizer.FrameInput) {
 	cfg := in.Config
 	if cfg.ShowTitle {
 		size := math.Max(16, float64(in.Height)*0.045)
-		if f, err := newTextFace(size); err == nil {
-			defer f.face.Close()
+		if f, err := r.faces.face(size); err == nil {
 			x := int(float64(in.Width) * 0.045)
 			y := int(float64(in.Height) * 0.90)
 			f.drawString(c.img, cfg.TitleText, x, y, color.NRGBA{R: 242, G: 238, B: 238, A: 235}, true)
 			if cfg.SubtitleText != "" {
-				if f2, e2 := newTextFace(size * 0.6); e2 == nil {
+				if f2, e2 := r.faces.face(size * 0.6); e2 == nil {
 					f2.drawString(c.img, cfg.SubtitleText, x, y+int(size*0.9),
 						color.NRGBA{R: 201, G: 184, B: 184, A: 200}, true)
-					f2.face.Close()
 				}
 			}
 		}
 	}
 	if cfg.ShowWatermark {
-		drawWatermark(c.img, in.Width, in.Height)
+		drawWatermarkWith(c.img, in.Width, in.Height, &r.faces)
 	}
 }
 

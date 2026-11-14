@@ -3,7 +3,7 @@ package render
 // cpu_bench_test.go — CPU renderer frame-cost benchmarks (roadmap
 // Phase 2 #10). Run with:
 //
-//	go test -tags goffi_static -bench BenchmarkCPURender -run ^$ ./internal/render/
+//      go test -tags goffi_static -bench BenchmarkCPURender -run ^$ ./internal/render/
 //
 // Resolution tiers mirror the export presets: 1080p30 is the default
 // export target; 4K is the ceiling.
@@ -69,6 +69,31 @@ func BenchmarkCPURender1080pBarsWithLayer(b *testing.B) {
 	in := benchInput(1920, 1080, visualizer.ModeBars)
 	in.Config.BackgroundLayer = visualizer.ModeWaveform
 	in.Config.BackgroundIntensity = 0.35
+	if _, err := r.RenderFrame(in); err != nil {
+		b.Fatalf("render: %v", err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		in.FrameIndex++
+		in.Time += 1.0 / 30.0
+		if _, err := r.RenderFrame(in); err != nil {
+			b.Fatalf("render: %v", err)
+		}
+	}
+}
+
+// BenchmarkCPURender1080pBarsWithOverlays measures the frame cost with
+// the full overlay text path active (title + subtitle + watermark) —
+// the preview default. Run-43541087097 A/B evidence for the face cache:
+// the baseline created and closed three opentype faces per frame.
+func BenchmarkCPURender1080pBarsWithOverlays(b *testing.B) {
+	r := NewCPURenderer()
+	defer r.Close()
+	in := benchInput(1920, 1080, visualizer.ModeBars)
+	in.Config.ShowTitle = true
+	in.Config.TitleText = "SHEYTAN overlay benchmark title"
+	in.Config.SubtitleText = "subtitle line"
+	in.Config.ShowWatermark = true
 	if _, err := r.RenderFrame(in); err != nil {
 		b.Fatalf("render: %v", err)
 	}

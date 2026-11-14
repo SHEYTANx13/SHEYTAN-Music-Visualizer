@@ -52,6 +52,40 @@ func newTextFace(sizePx float64) (*textFace, error) {
 	return &textFace{face: face}, nil
 }
 
+// faceCache reuses parsed faces keyed by their exact pixel size (run
+// 43541087097 hot-path repair: drawOverlays created and closed up to
+// THREE faces per frame at preview rate — opentype.NewFace is the
+// expensive part of overlay text). One cache belongs to ONE renderer
+// goroutine: font.Face is not safe for concurrent use, and the
+// Renderer contract guarantees sequential use.
+type faceCache struct {
+	faces map[float64]*textFace
+}
+
+// face returns the cached face for sizePx, creating it on first use.
+func (c *faceCache) face(sizePx float64) (*textFace, error) {
+	if f, ok := c.faces[sizePx]; ok {
+		return f, nil
+	}
+	f, err := newTextFace(sizePx)
+	if err != nil {
+		return nil, err
+	}
+	if c.faces == nil {
+		c.faces = make(map[float64]*textFace, 4)
+	}
+	c.faces[sizePx] = f
+	return f, nil
+}
+
+// close releases every cached face (renderer Close path).
+func (c *faceCache) close() {
+	for _, f := range c.faces {
+		f.face.Close()
+	}
+	c.faces = nil
+}
+
 // drawString renders s at (x, y) baseline with a soft shadow for
 // contrast on bright visual content.
 func (t *textFace) drawString(dst *image.RGBA, s string, x, y int, c color.Color, shadow bool) {
@@ -80,11 +114,24 @@ func (t *textFace) Measure(s string) int {
 
 // drawWatermark draws the SHEYTAN™ mark bottom-right, subtle.
 func drawWatermark(dst *image.RGBA, w, h int) {
-	face, err := newTextFace(float64(h) / 38.0)
+	drawWatermarkWith(dst, w, h, nil)
+}
+
+// drawWatermarkWith is the cache-aware variant used by the renderer.
+func drawWatermarkWith(dst *image.RGBA, w, h int, cache *faceCache) {
+	var face *textFace
+	var err error
+	if cache != nil {
+		face, err = cache.face(float64(h) / 38.0)
+	} else {
+		face, err = newTextFace(float64(h) / 38.0)
+	}
 	if err != nil {
 		return
 	}
-	defer face.face.Close()
+	if cache == nil {
+		defer face.face.Close()
+	}
 	s := "SHEYTAN™"
 	width := face.Measure(s)
 	x := w - width - int(float64(w)*0.03)

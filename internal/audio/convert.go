@@ -6,8 +6,8 @@ import "math"
 // channel downmix/upmix. All conversions are clipping-safe and
 // deterministic. Full-scale int → ±1.0 mapping:
 //
-//	int16: v / 32768     int24: v / 8388608
-//	int32: v / 2147483648 (shift-based, keeps symmetry)
+//      int16: v / 32768     int24: v / 8388608
+//      int32: v / 2147483648 (shift-based, keeps symmetry)
 
 // int16ToFloat32 converts a slice of interleaved int16 LE samples.
 func int16ToFloat32(in []byte, out []float32) int {
@@ -54,14 +54,16 @@ func int32ToFloat32(in []byte, out []float32) int {
 // downmix converts `from`-channel interleaved float32 into `to`-channel
 // interleaved float32, accumulating with equal power (mean) for the
 // mono→stereo case and plain mean for the stereo→mono case. Returns
-// the number of interleaved output samples written.
+// the number of interleaved output samples written. Input that is not
+// a whole number of frames is truncated (defensive; the import path
+// guarantees alignment via frameAlignReader).
 func downmix(in []float32, from, to int, out []float32) int {
 	if from == to {
 		n := copy(out, in)
 		return n
 	}
 	written := 0
-	for f := 0; f*from < len(in) && written+to <= len(out); f++ {
+	for f := 0; (f+1)*from <= len(in) && written+to <= len(out); f++ {
 		base := f * from
 		switch {
 		case from == 1 && to == 2:
@@ -104,7 +106,11 @@ func floatToBytesLE(in []float32, out []byte) int {
 	return n * 4
 }
 
-// bytesLEToFloat decodes interleaved float32 LE bytes.
+// bytesLEToFloat decodes interleaved float32 LE bytes. Non-finite
+// values (NaN/±Inf — craftable inside a float32 WAV or ffmpeg f32le
+// output) are mapped to 0: audio samples must be finite, and NaN
+// would otherwise propagate through the resampler (its ±1 clamps are
+// false for NaN), the DSP and the visualizer (run 43541087097 repair).
 func bytesLEToFloat(in []byte, out []float32) int {
 	n := len(in) / 4
 	if n > len(out) {
@@ -112,7 +118,16 @@ func bytesLEToFloat(in []byte, out []float32) int {
 	}
 	for i := 0; i < n; i++ {
 		bits := uint32(in[4*i]) | uint32(in[4*i+1])<<8 | uint32(in[4*i+2])<<16 | uint32(in[4*i+3])<<24
-		out[i] = math.Float32frombits(bits)
+		v := math.Float32frombits(bits)
+		switch {
+		case math.IsNaN(float64(v)) || math.IsInf(float64(v), 0):
+			v = 0
+		case v > 1:
+			v = 1
+		case v < -1:
+			v = -1
+		}
+		out[i] = v
 	}
 	return n
 }

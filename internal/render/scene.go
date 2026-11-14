@@ -56,6 +56,7 @@ func (s *SceneState) Reset() {
 	s.particles = s.particles[:0]
 	s.pCount = 0
 	s.particleInit = false
+	s.phasePrev = 0 // stale phase after a resize must not fake a beat
 }
 
 // Update advances the scene to in.Time and returns derived values the
@@ -73,11 +74,18 @@ func (s *SceneState) Update(in *visualizer.FrameInput) {
 	s.lastTime = in.Time
 	s.hasLast = true
 
-	// perceptual tilt applied on smoothed input bins
+	// Perceptual tilt (run 43541087097 repair): the studio supplies
+	// NumVizBins inputs (already resampled from the full spectrum), so
+	// the old code only applied the tilt when the input was SHORTER —
+	// the configured SpectrumTilt (presets, DNA defaults, projects)
+	// silently never affected the render. The tilt ramp is the same
+	// formula InterpolateBins applies, so preview and export stay
+	// consistent and tilt=0 remains a no-op.
 	srcBins := in.Audio.Bins
 	if len(srcBins) < visualizer.NumVizBins {
 		srcBins = visualizer.InterpolateBins(srcBins, cfg.SpectrumTilt)
 	}
+	tilt := cfg.SpectrumTilt
 	sm := clamp01(cfg.Smoothing)
 	attack := 1 - math.Pow(1-0.85, dt*30)         // fast attack
 	release := 1 - math.Pow(1-sm*0.9+0.02, dt*30) // configured release
@@ -86,7 +94,12 @@ func (s *SceneState) Update(in *visualizer.FrameInput) {
 	}
 	sens := cfg.Sensitivity
 	for i := 0; i < visualizer.NumVizBins; i++ {
-		target := clamp01(srcBins[i] * sens)
+		v := srcBins[i]
+		if tilt != 0 {
+			tnorm := float64(i) / (visualizer.NumVizBins - 1)
+			v *= 1 + tilt*(tnorm*2-1)
+		}
+		target := clamp01(v * sens)
 		var k float64
 		if target > s.bins[i] {
 			k = attack

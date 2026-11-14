@@ -155,7 +155,7 @@ Start from [docs/INDEX.md](docs/INDEX.md) — the canonical index of every maint
   the repository-root resolution contract, one-canonical-package-per-OS
   artifacts,
   and how to reproduce a failed gate locally.
-- [docs/diagnostics.md](docs/diagnostics.md) — log layout and rotation,
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — log layout and rotation,
   startup metrics, benchmark/profiling commands, and how to read the
   DETECTED/SUPPORTED/SELECTED/EXECUTING/VERIFIED capability states.
 - [docs/performance-baseline.md](docs/performance-baseline.md) —

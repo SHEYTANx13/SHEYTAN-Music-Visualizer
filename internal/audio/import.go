@@ -84,7 +84,70 @@ func Import(ctx context.Context, path string, cache *Cache, prog Progress) (*Imp
 	if err != nil {
 		return nil, err
 	}
-	return decodeToCache(ctx, cache, fp, filepath.Base(path), md, srcRate, srcCh, enc, pcmr, prog)
+	// Frame alignment (run 43541087097 critical repair): every
+	// decoder chunk boundary may split a sample frame (e.g. FFmpeg
+	// f32le with 3/5/6/7 channels: 64 KiB is not a multiple of the
+	// frame size). The alignment reader carries the partial tail
+	// bytes into the next read so no sample is ever dropped and the
+	// stream can never silently misalign into garbage.
+	bpf := srcCh * bytesPerSample(enc)
+	if bpf <= 0 {
+		return nil, fmt.Errorf("audio: %s reports invalid frame size (%d ch)", sf.Container, srcCh)
+	}
+	return decodeToCache(ctx, cache, fp, filepath.Base(path), md, srcRate, srcCh, enc, &frameAlignReader{r: pcmr, frame: bpf}, prog)
+}
+
+// bytesPerSample is the wire width of one sample in an encoding.
+func bytesPerSample(enc SampleEncoding) int {
+	switch enc {
+	case EncInt16LE:
+		return 2
+	case EncInt24LE:
+		return 3
+	case EncInt32LE, EncFloat32LE:
+		return 4
+	default:
+		return 0
+	}
+}
+
+// frameAlignReader guarantees every Read returns a byte count that is
+// a multiple of the frame size, carrying partial frames between calls.
+// It exists because decodeChunk floors to whole samples; without it,
+// len(b) % frame bytes were silently discarded at every chunk
+// boundary, permanently misaligning the stream (reproduced with a
+// 24-bit stereo stream split at 64 KiB: divergence at sample 21845).
+type frameAlignReader struct {
+	r     io.Reader
+	frame int
+	carry []byte // pending partial-frame bytes (< frame)
+}
+
+func (a *frameAlignReader) Read(p []byte) (int, error) {
+	if len(p) < a.frame {
+		return 0, fmt.Errorf("audio: frameAlignReader buffer (%d bytes) smaller than one frame (%d bytes)", len(p), a.frame)
+	}
+	var n int
+	// 1. Flush carried bytes first (always fewer than one frame).
+	if len(a.carry) > 0 {
+		n = copy(p, a.carry)
+		a.carry = a.carry[n:]
+		if len(a.carry) > 0 {
+			return n, nil // p is full before the carry drained
+		}
+	}
+	// 2. Read from the source into the remainder of p.
+	m, err := a.r.Read(p[n:])
+	total := n + m
+	// 3. Trim any partial frame into carry so the returned count is
+	// always a whole number of frames. A partial frame at EOF is
+	// dropped (an incomplete final frame is not audio).
+	if rem := total % a.frame; rem != 0 {
+		cut := total - rem
+		a.carry = append(a.carry[:0], p[cut:total]...)
+		return cut, err
+	}
+	return total, err
 }
 
 // Scratch buffer sizes (bounded; ~1 MiB total).
@@ -182,6 +245,15 @@ func decodeToCache(
 			return nil
 		}
 		srcFrames += uint64(n / srcCh)
+		// Early duration bound (run 43541087097 repair): the
+		// limit is enforced DURING the decode, not after the
+		// whole (possibly huge) cache write, so a small
+		// low-bitrate file claiming hours of audio cannot fill
+		// the disk before being rejected.
+		if srcFrames > MaxDurationSeconds*uint64(srcRate) {
+			err := fmt.Errorf("%w: %s", ErrUnsupported, truncateWarning("decoded duration", MaxDurationSeconds*CanonicalSampleRate))
+			return err
+		}
 		st := downmix(conv[:n], srcCh, CanonicalChannels, stereo)
 		if st == 0 {
 			return nil
