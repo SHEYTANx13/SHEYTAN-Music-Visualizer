@@ -101,7 +101,7 @@ func NewJob(req Request) (*Job, error) {
 		}
 	}
 	if !validFPS {
-		return nil, fmt.Errorf("export: unsupported frame rate %d (use 24/30/60)", req.FPS)
+		return nil, fmt.Errorf("export: unsupported frame rate %d (use 24/30/60/120)", req.FPS)
 	}
 	out, err := SanitizeOutputPath(req.OutputPath)
 	if err != nil {
@@ -223,7 +223,10 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 	}
 	args = append(args, j.enc.Args...)
 	if j.enc.Name == "libx264" {
-		args = append(args, "-crf", q)
+		args = append(args,
+			"-crf", q,
+			"-preset", x264PresetFor(j.req.Width, j.req.Height, j.req.FPS),
+		)
 	}
 	args = append(args,
 		"-pix_fmt", "yuv420p",

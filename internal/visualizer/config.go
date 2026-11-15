@@ -12,15 +12,59 @@ package visualizer
 type Mode string
 
 // The available modes. IDs are stable and used in projects/presets.
+// Run 43612608237 added four genuinely distinct renderers (spectrogram
+// waterfall, geometric pulse tunnel, stereo wave ribbons, frequency
+// bloom); the original four remain stable and unchanged in behaviour.
 const (
-	ModeBars      Mode = "bars"      // Spectrum Bars
-	ModeRadial    Mode = "radial"    // Radial Spectrum
-	ModeWaveform  Mode = "waveform"  // Waveform / Oscilloscope
-	ModeParticles Mode = "particles" // Particle Field
+	ModeBars        Mode = "bars"        // Spectrum Bars
+	ModeRadial      Mode = "radial"      // Radial Spectrum
+	ModeWaveform    Mode = "waveform"    // Waveform / Oscilloscope
+	ModeParticles   Mode = "particles"   // Particle Field
+	ModeSpectrogram Mode = "spectrogram" // Spectrogram Waterfall
+	ModeTunnel      Mode = "tunnel"      // Geometric Pulse Tunnel
+	ModeRibbons     Mode = "ribbons"     // Stereo Wave Ribbons
+	ModeBloom       Mode = "bloom"       // Frequency Bloom
 )
 
 // AllModes lists the modes in UI order.
-var AllModes = []Mode{ModeBars, ModeRadial, ModeWaveform, ModeParticles}
+var AllModes = []Mode{
+	ModeBars, ModeRadial, ModeWaveform, ModeParticles,
+	ModeSpectrogram, ModeTunnel, ModeRibbons, ModeBloom,
+}
+
+// ModeCategory groups modes for the collection UI. Every mode belongs
+// to exactly one category; the collection integrity tests assert the
+// mapping is total and stable.
+type ModeCategory string
+
+// Collection categories (run 43612608237 visualizer library UX).
+const (
+	CategorySpectrum    ModeCategory = "Spectrum"
+	CategoryWaveform    ModeCategory = "Waveform"
+	CategoryRadial      ModeCategory = "Radial"
+	CategorySpatial     ModeCategory = "Spatial"
+	CategorySpectrogram ModeCategory = "Spectrogram"
+	CategoryPerformance ModeCategory = "Minimal/Performance"
+)
+
+// ModeCategoryOf returns the collection category for a mode ("" when
+// the mode is unknown; tests treat an empty category as an integrity
+// failure).
+func ModeCategoryOf(m Mode) ModeCategory {
+	switch m {
+	case ModeBars:
+		return CategorySpectrum
+	case ModeSpectrogram:
+		return CategorySpectrogram
+	case ModeWaveform, ModeRibbons:
+		return CategoryWaveform
+	case ModeRadial, ModeBloom:
+		return CategoryRadial
+	case ModeParticles, ModeTunnel:
+		return CategorySpatial
+	}
+	return ""
+}
 
 // ModeNone disables the background composition layer.
 const ModeNone Mode = "none"
@@ -41,6 +85,14 @@ func (m Mode) DisplayName() string {
 		return "Waveform"
 	case ModeParticles:
 		return "Particle Field"
+	case ModeSpectrogram:
+		return "Spectrogram Waterfall"
+	case ModeTunnel:
+		return "Pulse Tunnel"
+	case ModeRibbons:
+		return "Stereo Wave Ribbons"
+	case ModeBloom:
+		return "Frequency Bloom"
 	default:
 		return string(m)
 	}
@@ -173,6 +225,43 @@ func Presets() []Preset {
 				Mode: ModeParticles, Sensitivity: 1.15, Smoothing: 0.25, Glow: 1.0,
 				Palette: 3, ParticleDensity: 0.85, SpectrumTilt: 0,
 				PulseResponse: 1.5, MotionStyle: 3, ShowTitle: true, ShowWatermark: true,
+			},
+		},
+		// Run 43612608237: one preset per new mode keeps the
+		// collection discoverable (the registry test pins that
+		// every shipped mode is demonstrated by at least one
+		// preset) and gives each new renderer a tuned entry
+		// point instead of raw defaults.
+		{
+			Name: "Ashfall Waterfall",
+			Config: Config{
+				Mode: ModeSpectrogram, Sensitivity: 1.2, Smoothing: 0.2, Glow: 0.6,
+				Palette: 2, ParticleDensity: 0.3, SpectrumTilt: -0.1,
+				PulseResponse: 0.8, MotionStyle: 0, ShowTitle: true, ShowWatermark: true,
+			},
+		},
+		{
+			Name: "Obsidian Descent",
+			Config: Config{
+				Mode: ModeTunnel, Sensitivity: 1.25, Smoothing: 0.28, Glow: 1.1,
+				Palette: 0, ParticleDensity: 0.5, SpectrumTilt: 0,
+				PulseResponse: 1.6, MotionStyle: 1, ShowTitle: true, ShowWatermark: true,
+			},
+		},
+		{
+			Name: "Twin Ribbons",
+			Config: Config{
+				Mode: ModeRibbons, Sensitivity: 1.0, Smoothing: 0.35, Glow: 0.7,
+				Palette: 1, ParticleDensity: 0.25, SpectrumTilt: 0.1,
+				PulseResponse: 1.0, MotionStyle: 2, ShowTitle: true, ShowWatermark: false,
+			},
+		},
+		{
+			Name: "Aurora Bloom",
+			Config: Config{
+				Mode: ModeBloom, Sensitivity: 1.1, Smoothing: 0.4, Glow: 1.2,
+				Palette: 3, ParticleDensity: 0.4, SpectrumTilt: 0,
+				PulseResponse: 1.2, MotionStyle: 0, ShowTitle: true, ShowWatermark: true,
 			},
 		},
 	}

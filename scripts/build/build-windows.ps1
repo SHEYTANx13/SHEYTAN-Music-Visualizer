@@ -519,6 +519,86 @@ if ($exeOk) {
     }
     if ($rc -ne 0) { Fail-Gate "stage-portable" }
 
+    # ---- app-local FFmpeg/FFprobe staging (run 43612608237 P0) ------------
+    # Pinned BtbN FFmpeg 9.0.2 win64 GPL build (packaging/FFMPEG-TOOLS-PROVENANCE.md
+    # is the authoritative provenance record). SHA-256 verified download,
+    # then functional re-verification of the extracted pair: pinned version
+    # string, buildconf without --enable-nonfree (and with --enable-gpl),
+    # and the libx264 encoder. Failure leaves tools empty and the package
+    # status logic below refuses VERIFIED.
+    $script:ffmpegStaged = $false
+    $script:ffmpegStagedVersion = "not-staged"
+    $script:ffmpegStageReason = ""
+    $rc = Capture-Step -Job $job -Step "stage-ffmpeg-tools" -ToolContext "gate:stage-ffmpeg-tools (pinned 9.0.2 download + buildconf/encoder verification)" -Command {
+        $ffUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip"
+        $ffSha256 = "40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae"
+        $expectedPrefix = "ffmpeg version n9.0.2"
+        $appDir = Join-Path (Get-Location).Path "dist\windows-x64-stage\SHEYTAN-Music-Visualizer-windows-x64"
+        $binDir = Join-Path $appDir "tools\ffmpeg\bin"
+        $tmpZip = Join-Path ([System.IO.Path]::GetTempPath()) ("ffmpeg-pinned-" + [guid]::NewGuid().ToString("N") + ".zip")
+        try {
+            Invoke-WebRequest -Uri $ffUrl -OutFile $tmpZip -UseBasicParsing
+            $hash = (Get-FileHash -Algorithm SHA256 $tmpZip).Hash.ToLowerInvariant()
+            if ($hash -ne $ffSha256) {
+                Write-Output ("ERROR: SHA-256 mismatch: got {0}, want {1}" -f $hash, $ffSha256)
+                $script:ffmpegStageReason = "pinned FFmpeg download SHA-256 mismatch"
+                exit 1
+            }
+            $tmpEx = Join-Path ([System.IO.Path]::GetTempPath()) ("ffmpeg-x-" + [guid]::NewGuid().ToString("N"))
+            Expand-Archive -Path $tmpZip -DestinationPath $tmpEx
+            $srcDir = Get-ChildItem -Directory $tmpEx | Where-Object { Test-Path (Join-Path $_.FullName "bin\ffmpeg.exe") } | Select-Object -First 1
+            if ($null -eq $srcDir) {
+                Write-Output "ERROR: extracted archive has no bin/ffmpeg.exe"
+                $script:ffmpegStageReason = "archive layout unexpected"
+                exit 1
+            }
+            $ffExe = Join-Path $srcDir.FullName "bin\ffmpeg.exe"
+            $fpExe = Join-Path $srcDir.FullName "bin\ffprobe.exe"
+            $vline = (& $ffExe -version | Select-Object -First 1)
+            if (-not "$vline".StartsWith($expectedPrefix)) {
+                Write-Output ("ERROR: version mismatch: {0}" -f $vline)
+                $script:ffmpegStageReason = "version mismatch: $vline"
+                exit 1
+            }
+            $bconf = (& $ffExe -hide_banner -buildconf) -join "`n"
+            if ("$bconf" -match "--enable-nonfree") {
+                Write-Output "ERROR: staged build declares --enable-nonfree (non-distributable)"
+                $script:ffmpegStageReason = "build is nonfree"
+                exit 1
+            }
+            if ("$bconf" -notmatch "--enable-gpl") {
+                Write-Output "ERROR: staged build lacks --enable-gpl (no libx264 expected)"
+                $script:ffmpegStageReason = "build lacks --enable-gpl"
+                exit 1
+            }
+            $encoders = (& $ffExe -hide_banner -encoders) -join "`n"
+            if ("$encoders" -notmatch "\slibx264\s") {
+                Write-Output "ERROR: staged build has no libx264 encoder"
+                $script:ffmpegStageReason = "no libx264 encoder"
+                exit 1
+            }
+            New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+            Copy-Item $ffExe $binDir -Force
+            Copy-Item $fpExe $binDir -Force
+            Copy-Item "packaging\ffmpeg-licenses\COPYING.GPLv2" (Join-Path $appDir "tools\ffmpeg\COPYING.GPLv2") -Force
+            Copy-Item "packaging\ffmpeg-licenses\COPYING.GPLv3" (Join-Path $appDir "tools\ffmpeg\COPYING.GPLv3") -Force
+            Copy-Item "packaging\FFMPEG-TOOLS-PROVENANCE.md" (Join-Path $appDir "tools\ffmpeg\FFMPEG-TOOLS-PROVENANCE.md") -Force
+            $prov = @("staged_utc=$(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')", "asset_url=$ffUrl", "asset_sha256=$ffSha256", "version=$vline", "libx264_encoder=present", "source_offer=https://ffmpeg.org/download.html (FFmpeg git d4070a14ce); build scripts: https://github.com/BtbN/FFmpeg-Builds", "licenses=COPYING.GPLv2, COPYING.GPLv3")
+            $prov -join "`n" | Set-Content -Path (Join-Path $appDir "tools\ffmpeg\FFMPEG-TOOLS-PROVENANCE.txt") -Encoding utf8NoBOM
+            $script:ffmpegStaged = $true
+            $script:ffmpegStagedVersion = "$vline"
+            Write-Output ("FFmpeg staging OK: {0}" -f $vline)
+            exit 0
+        }
+        finally {
+            if (Test-Path -LiteralPath $tmpZip) { Remove-Item -Force $tmpZip -ErrorAction SilentlyContinue }
+        }
+    }
+    if ($rc -ne 0) {
+        Fail-Gate "stage-ffmpeg-tools"
+        Write-Output ("ffmpeg tools NOT staged: {0} — package status cannot reach VERIFIED" -f $script:ffmpegStageReason)
+    }
+
     # BYTE-FOR-BYTE license identity gate (run 42481815519 contract):
     # the staged license.md must equal the canonical tracked file
     # exactly, before archive creation. SHA-256 equality on raw bytes;
@@ -840,6 +920,37 @@ if ($exeExists -and $zipExists) {
                 exit 1
             }
             Write-Output "spaces-path runtime check PASSED"
+            # Run 43612608237 packaged-export proof: when tools are packaged,
+            # run the REAL headless export from the extracted package with a
+            # PATH scrubbed of any system FFmpeg — the app must resolve its
+            # own tools\ffmpeg\bin pair and produce an ffprobe-validated MP4.
+            $pkgFF = Join-Path $base "SHEYTAN-Music-Visualizer-windows-x64\tools\ffmpeg\bin\ffmpeg.exe"
+            if (Test-Path -LiteralPath $pkgFF) {{
+                $outMp4 = Join-Path $base "packaged-export-proof.mp4"
+                $exArgs = @("--export-cli", "--export-out", $outMp4, "--export-w", "640", "--export-h", "360", "--export-fps", "30", "--export-seconds", "0.5")
+                $scrubBin = Join-Path $base "scrubbed-path-bin"
+                New-Item -ItemType Directory -Force -Path $scrubBin | Out-Null
+                $oldPath = $env:PATH
+                try {{
+                    $env:PATH = $scrubBin
+                    $exRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList $exArgs -TimeoutSeconds 600
+                }} finally {{ $env:PATH = $oldPath }}
+                if ($exRun.Kind -ne 'exited' -or $exRun.ExitCode -ne 0) {{
+                    Write-Output ("ERROR: packaged --export-cli failed with scrubbed PATH (kind={{0}} code={{1}})" -f $exRun.Kind, $exRun.ExitCode)
+                    if ($exRun.StdErr) {{ $exRun.StdErr | Select-Object -First 5 | ForEach-Object {{ Write-Output ("  stderr: {{0}}" -f $_) }} }}
+                    exit 1
+                }}
+                if (-not (Test-Path -LiteralPath $outMp4) -or (Get-Item -LiteralPath $outMp4).Length -le 0) {{
+                    Write-Output "ERROR: packaged export produced no output"
+                    exit 1
+                }}
+                $pkgFP = Join-Path $base "SHEYTAN-Music-Visualizer-windows-x64\tools\ffmpeg\bin\ffprobe.exe"
+                $probeRun = Invoke-CapturedProcess -FilePath $pkgFP -ArgumentList @("-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,width,height", "-of", "csv", $outMp4) -TimeoutSeconds 120
+                if ($probeRun.StdOut) {{ $probeRun.StdOut | ForEach-Object {{ Write-Output ("  ffprobe: {{0}}" -f $_) }} }}
+                Write-Output "PACKAGED-EXPORT PROOF PASSED (app-local tools, scrubbed PATH, ffprobe-validated)"
+            }} else {{
+                Write-Output "tools\ffmpeg\bin empty in extracted package — packaged-export proof NOT RUN (status stays TEST_ONLY)"
+            }}
             exit 0
         }
         finally { & $cleanup }
@@ -897,10 +1008,16 @@ if ($exeExists -and $zipExists) {
     #                 artifact is uploaded and the job/workflow stay red.
     #   VERIFIED    — everything green.
     $packageGatesFailed = $script:failures - $script:failuresBeforePackage
+    # Run 43612608237 status contract: VERIFIED additionally requires the
+    # packaged app-local FFmpeg/FFprobe pair (staged, verified, proven by
+    # the packaged-export gate). Empty tools/ffmpeg/bin is TEST_ONLY at best.
     if (-not $script:commitVerified -or $packageGatesFailed -gt 0) {
         $script:packageStatus = "UNAVAILABLE"
-    } elseif ($script:failuresBeforePackage -gt 0) {
+    } elseif ($script:failuresBeforePackage -gt 0 -or -not $script:ffmpegStaged) {
         $script:packageStatus = "TEST_ONLY"
+        if (-not $script:ffmpegStaged) {
+            $script:commitReason = "$($script:commitReason); ffmpeg_tools_not_staged: $($script:ffmpegStageReason)"
+        }
     } else {
         $script:packageStatus = "VERIFIED"
     }
@@ -916,6 +1033,8 @@ $pkgRecord = [ordered]@{
     commit_extracted_observed   = $script:commitExtractedObserved
     commit_source               = "--build-info-json (built exe + extracted package, typed JSON parse)"
     commit_reason               = $script:commitReason
+    ffmpeg_tools_staged         = [bool]$script:ffmpegStaged
+    ffmpeg_tools_version        = $script:ffmpegStagedVersion
     note                        = "VERIFIED requires a non-blank expected commit exactly matching the embedded metadata of the built AND the extracted executable plus zero failed package-integrity gates; TEST_ONLY keeps the job red; UNAVAILABLE is never uploaded"
 }
 New-Item -ItemType Directory -Force -Path "ci-logs" | Out-Null

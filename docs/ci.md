@@ -153,7 +153,8 @@ The workflow separates EVIDENCE COLLECTION from the OVERALL VERDICT:
   failed); red when the collection itself is incomplete (exit 1) or the
   collector hard-failed (exit 2) or the emergency fallback/cleanup
   guarantees were not met.
-- `final-verdict` (needs preflight, build-windows, build-linux, codeql,
+- `final-verdict` (needs preflight, build-windows, build-linux,
+  collect-logs — run 43612608237 moved CodeQL to an independent workflow,
   collect-logs; `always() && !cancelled()`) is the ONE user-facing gate
   that fails closed when any required job did not succeed, naming each
   failed job and pointing at the consolidated report. An upstream test

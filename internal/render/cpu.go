@@ -119,6 +119,14 @@ func (r *CPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 			r.drawWaveform(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
 		case visualizer.ModeParticles:
 			r.drawParticles(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
+		case visualizer.ModeSpectrogram:
+			r.drawSpectrogram(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
+		case visualizer.ModeTunnel:
+			r.drawTunnel(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
+		case visualizer.ModeRibbons:
+			r.drawRibbons(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
+		case visualizer.ModeBloom:
+			r.drawBloom(c, layerIn, dimPalette(pal, cfg.BackgroundIntensity))
 		}
 	}
 	switch cfg.Mode {
@@ -128,6 +136,14 @@ func (r *CPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 		r.drawWaveform(c, in, pal)
 	case visualizer.ModeParticles:
 		r.drawParticles(c, in, pal)
+	case visualizer.ModeSpectrogram:
+		r.drawSpectrogram(c, in, pal)
+	case visualizer.ModeTunnel:
+		r.drawTunnel(c, in, pal)
+	case visualizer.ModeRibbons:
+		r.drawRibbons(c, in, pal)
+	case visualizer.ModeBloom:
+		r.drawBloom(c, in, pal)
 	default:
 		r.drawBars(c, in, pal)
 	}

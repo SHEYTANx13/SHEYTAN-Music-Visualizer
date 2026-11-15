@@ -1,0 +1,17 @@
+# github.com/go-gl/gl/v2.1/gl
+# [pkg-config --cflags  -- gl gl]
+Package gl was not found in the pkg-config search path.
+Perhaps you should add the directory containing `gl.pc'
+to the PKG_CONFIG_PATH environment variable
+Package 'gl', required by 'virtual:world', not found
+Package 'gl', required by 'virtual:world', not found
+# github.com/go-gl/glfw/v3.4/glfw
+In file included from ./glfw/src/platform.h:71,
+                 from ./glfw/src/internal.h:325,
+                 from ./glfw/src/platform.c:28,
+                 from /home/z/go/pkg/mod/github.com/go-gl/glfw/v3.4/glfw@v0.1.0-pre.2/c_glfw.go:4:
+./glfw/src/wl_platform.h:27:10: fatal error: wayland-client-core.h: No such file or directory
+   27 | #include <wayland-client-core.h>
+      |          ^~~~~~~~~~~~~~~~~~~~~~~
+compilation terminated.
+EXIT: 1

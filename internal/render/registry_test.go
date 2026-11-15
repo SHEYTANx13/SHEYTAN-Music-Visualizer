@@ -11,6 +11,7 @@ package render
 import (
 	"fmt"
 	"image"
+	"math"
 	"testing"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
@@ -32,7 +33,14 @@ var layoutMatrix = []struct {
 // IDs are non-empty, unique, and exactly the documented set in the
 // canonical UI order (projects and presets persist these strings).
 func TestRegistryModesHaveStableUniqueIDs(t *testing.T) {
-	want := []visualizer.Mode{visualizer.ModeBars, visualizer.ModeRadial, visualizer.ModeWaveform, visualizer.ModeParticles}
+	// Run 43612608237 grew the collection from four to eight genuinely
+	// distinct renderers; the existing four keep their IDs and canonical
+	// positions (projects/presets persist these strings), and the new
+	// IDs are appended in the documented UI order.
+	want := []visualizer.Mode{
+		visualizer.ModeBars, visualizer.ModeRadial, visualizer.ModeWaveform, visualizer.ModeParticles,
+		visualizer.ModeSpectrogram, visualizer.ModeTunnel, visualizer.ModeRibbons, visualizer.ModeBloom,
+	}
 	if len(visualizer.AllModes) != len(want) {
 		t.Fatalf("AllModes has %d entries, want %d — the shipped collection changed", len(visualizer.AllModes), len(want))
 	}
@@ -196,15 +204,39 @@ func TestModesAreVisuallyDistinct(t *testing.T) {
 	var frames []frame
 	for _, m := range visualizer.AllModes {
 		r := NewCPURenderer()
-		img, err := r.RenderFrame(visualizer.FrameInput{
-			Time: 0.5, Width: 320, Height: 240,
-			Config: visualizer.Config{Mode: m},
-			Audio:  visualizer.AudioState{Bass: 0.6, Mid: 0.4, Treble: 0.2, Bins: testBins(), WaveWindow: testWaveWindow()},
-		})
-		r.Close()
-		if err != nil {
-			t.Fatalf("mode %q: %v", m, err)
+		var img *image.RGBA
+		var err error
+		// Temporal walk (run 43612608237): render a short deterministic
+		// sequence on ONE renderer per mode and compare the LAST frame.
+		// Temporal modes (spectrogram waterfall, particle field, tunnel
+		// depth cycling) are defined by their evolution — a single-frame
+		// snapshot at t=0.5 undersold exactly the modes whose first-frame
+		// state is legitimately minimal (an empty waterfall history).
+		// Same 10% threshold, strictly more representative evidence.
+		// The audio features also evolve across the walk (rotated bins,
+		// pulsing bass) so the walk resembles real music rather than a
+		// frozen spectrum.
+		baseBins := testBins()
+		for i := 1; i <= 48; i++ {
+			stepBins := make([]float64, len(baseBins))
+			for b := range baseBins {
+				stepBins[b] = baseBins[(b+i*5)%len(baseBins)]
+			}
+			bass := 0.35 + 0.45*(0.5+0.5*math.Sin(float64(i)*0.9))
+			img, err = r.RenderFrame(visualizer.FrameInput{
+				Time: float64(i) * 0.2, Width: 320, Height: 240,
+				Config: visualizer.Config{Mode: m},
+				Audio: visualizer.AudioState{
+					Bass: bass, Mid: 0.4, Treble: 0.2,
+					Bins: stepBins, WaveWindow: testWaveWindow(),
+				},
+			})
+			if err != nil {
+				r.Close()
+				t.Fatalf("mode %q: %v", m, err)
+			}
 		}
+		r.Close()
 		frames = append(frames, frame{m, img})
 	}
 	for i := 0; i < len(frames); i++ {

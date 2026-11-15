@@ -47,14 +47,11 @@ REQUIRED_CALLER_RESULTS = (
     "RESULT_PREFLIGHT",
     "RESULT_WINDOWS",
     "RESULT_LINUX",
-    "RESULT_CODEQL",
 )
 REQUIRED_CALLER_DOWNLOADS = (
     "DOWNLOAD_PREFLIGHT",
     "DOWNLOAD_WINDOWS",
     "DOWNLOAD_LINUX",
-    "DOWNLOAD_CODEQL_GO",
-    "DOWNLOAD_CODEQL_ACTIONS",
 )
 
 
@@ -114,8 +111,6 @@ def build_caller_manifest() -> dict:
         "preflight": f"preflight-logs-part-attempt{attempt}",
         "windows": f"windows-logs-part-attempt{attempt}",
         "linux": f"linux-logs-part-attempt{attempt}",
-        "codeql_go": f"codeql-logs-part-go-attempt{attempt}",
-        "codeql_actions": f"codeql-logs-part-actions-attempt{attempt}",
     }
 
     return {
@@ -129,22 +124,23 @@ def build_caller_manifest() -> dict:
         "event": env("EVENT"),
         "runner_os": env("RUNNER_OS_LABEL"),
         "start_time_utc": env("STARTED_AT", required=False),
+        # CodeQL is an independent workflow (run 43612608237); the caller
+        # manifest records ONLY this workflow's own jobs and evidence.
         "codeql": {
             "workflow": "codeql.yml",
-            # "analyze" identifies the nested reusable-workflow jobs as a
-            # pair; the caller only observes their AGGREGATE result.
-            "job": "analyze",
-            "result": results["RESULT_CODEQL"],
+            "job": "independent-workflow",
+            "result": "NOT_APPLICABLE",
+            "note": (
+                "CodeQL is no longer invoked by build-desktop.yml; it is "
+                "a standalone workflow (push/pull_request/schedule/dispatch) "
+                "whose results are consolidated in that workflow's own "
+                "log.txt and never gate this build."
+            ),
         },
         "downloads": [
             {"artifact": artifacts["preflight"], "outcome": downloads["DOWNLOAD_PREFLIGHT"]},
             {"artifact": artifacts["windows"], "outcome": downloads["DOWNLOAD_WINDOWS"]},
             {"artifact": artifacts["linux"], "outcome": downloads["DOWNLOAD_LINUX"]},
-            {"artifact": artifacts["codeql_go"], "outcome": downloads["DOWNLOAD_CODEQL_GO"]},
-            {
-                "artifact": artifacts["codeql_actions"],
-                "outcome": downloads["DOWNLOAD_CODEQL_ACTIONS"],
-            },
         ],
         "jobs": [
             {
@@ -169,28 +165,6 @@ def build_caller_manifest() -> dict:
                 "result": results["RESULT_LINUX"],
                 "result_basis": "needs.build-linux.result (workflow conclusion)",
                 "artifact": artifacts["linux"],
-                "required": True,
-            },
-            {
-                "name": "analyze (go)",
-                "kind": "nested-reusable-workflow-job",
-                "result": results["RESULT_CODEQL"],
-                "result_basis": (
-                    "caller aggregate needs.codeql.result; per-language conclusion "
-                    "from this row's own artifact/API observation"
-                ),
-                "artifact": artifacts["codeql_go"],
-                "required": True,
-            },
-            {
-                "name": "analyze (actions)",
-                "kind": "nested-reusable-workflow-job",
-                "result": results["RESULT_CODEQL"],
-                "result_basis": (
-                    "caller aggregate needs.codeql.result; per-language conclusion "
-                    "from this row's own artifact/API observation"
-                ),
-                "artifact": artifacts["codeql_actions"],
                 "required": True,
             },
         ],

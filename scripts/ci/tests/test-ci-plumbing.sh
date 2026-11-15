@@ -196,8 +196,11 @@ check("B7-no-needs-preflight-linux",
       not re.search(r"build-linux:\n(?:.*\n)*?\s+needs: preflight", bd))
 
 # B11: collector depends on all evidence jobs with always() && !cancelled()
+# (run 43612608237: CodeQL is an independent workflow — the collector's
+# needs list covers exactly this workflow's own evidence jobs)
 check("B11-collector-needs-all",
-      "needs: [preflight, build-windows, build-linux, codeql]" in bd)
+      "needs: [preflight, build-windows, build-linux]" in bd
+      and "needs: [preflight, build-windows, build-linux, codeql]" not in bd)
 check("B11-collector-always", "if: ${{ always() && !cancelled() }}" in bd)
 
 # B10: CodeQL legs independent. The reusable workflow declares the two
@@ -235,8 +238,10 @@ check("upload-dir-not-glob", "          path: ci-logs\n" in bd and "          pa
 check("fallback-report-step", "emergency-report.sh" in bd and "emergency-report.sh" in cq)
 check("fallback-script-exists", open("scripts/ci/emergency-report.sh").read().startswith("#!/usr/bin/env bash"))
 
-# fail-closed after upload
-check("fail-closed", "Fail closed after the report upload attempt" in bd)
+# fail-closed after upload (build-desktop: the dedicated final-verdict
+# gate fails closed; codeql.yml keeps its own "Fail closed after the
+# report upload attempt" step for the standalone collect job)
+check("fail-closed", "Fail closed unless every required gate succeeded" in bd)
 
 # manifest ↔ artifact name agreement (build-desktop): the jq manifest
 # builds each artifact name via --arg from RUN_ATTEMPT, and the download
@@ -250,15 +255,15 @@ check("manifest-agreement",
 check("manifest-writer-source-agreement",
       "preflight-logs-part-attempt{attempt}" in open("scripts/ci/write-manifest.py").read())
 
-# least privilege: the CALLER must grant actions: write because the called
-# workflow's standalone collect job (skipped when called) declares
-# actions: write for artifact cleanup — a reusable-workflow call cannot
-# elevate permissions inside, so GitHub requires the caller to cover it.
-# The security property that must hold: the NESTED analysis jobs stay
-# narrowed to actions: read.
-sec = re.search(r"  codeql:\n(?:    .*\n|      .*\n)*?    permissions:\n      actions: (\S+)", bd)
-check("caller-covers-reusable-permissions", sec is not None and sec.group(1) == "write",
-      "" if sec is None else "grants actions: " + sec.group(1))
+# least privilege (run 43612608237 architecture): build-desktop must NOT
+# call the codeql workflow at all (no reusable call, no broadened
+# permissions for it anywhere in the build DAG), and the standalone
+# codeql.yml must keep its workflow-level default at contents: read with
+# the analysis jobs narrowed to actions: read.
+check("no-reusable-codeql-call", "uses: $/.github/workflows/codeql.yml" not in bd
+      and "workflow_call:" not in cq)
+sec = re.search(r"^permissions:\n  contents: (\S+)", cq, re.M)
+check("codeql-workflow-least-privilege", sec is not None and sec.group(1) == "read")
 check("least-privilege-nested-analyze",
       re.search(r"analyze_go:\n(?:.*\n)*?      actions: read", cq) is not None
       and re.search(r"analyze_actions:\n(?:.*\n)*?      actions: read", cq) is not None,
@@ -460,9 +465,8 @@ fi
   export REF='refs/heads/release/v1.0"weird\κυρία}'   # quotes, backslash, Unicode, slashes
   export EVENT=workflow_dispatch REPO='SHEYTANx13/SHEYTAN-Music-Visualizer' RUNNER_OS_LABEL=Linux
   export STARTED_AT=""   # optional value may be empty
-  export RESULT_PREFLIGHT=success RESULT_WINDOWS=skipped RESULT_LINUX=failure RESULT_CODEQL=cancelled
-  export DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=skipped DOWNLOAD_LINUX=success \
-         DOWNLOAD_CODEQL_GO=skipped DOWNLOAD_CODEQL_ACTIONS=success
+  export RESULT_PREFLIGHT=success RESULT_WINDOWS=skipped RESULT_LINUX=failure
+  export DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=skipped DOWNLOAD_LINUX=success
   python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m1/manifest.json >writer.out 2>&1
   echo $? > writer.rc
 )
@@ -475,17 +479,21 @@ assert doc["ref"] == 'refs/heads/release/v1.0"weird\\κυρία}', doc["ref"]
 assert doc["event"] == "workflow_dispatch"
 assert doc["start_time_utc"] == ""
 results = {j["name"]: j["result"] for j in doc["jobs"]}
-assert results == {"preflight": "success", "build-windows": "skipped", "build-linux": "failure",
-                   "analyze (go)": "cancelled", "analyze (actions)": "cancelled"}, results
+assert results == {"preflight": "success", "build-windows": "skipped", "build-linux": "failure"}, results
+# run 43612608237: CodeQL is an independent workflow — the caller manifest
+# records that fact without declaring CodeQL evidence rows.
+assert doc.get("codeql", {}).get("job") == "independent-workflow", doc.get("codeql")
+assert doc["codeql"]["result"] == "NOT_APPLICABLE"
 outs = {d["artifact"]: d["outcome"] for d in doc["downloads"]}
-assert len(outs) == 5 and all(v in ("success", "skipped") for v in outs.values())
+assert len(outs) == 3 and all(v in ("success", "skipped") for v in outs.values())
+assert not any("codeql" in a for a in outs)
 assert os.path.getsize(os.path.join(t, "m1/manifest.json")) > 0
 assert not [f for f in os.listdir(os.path.join(t, "m1")) if f.startswith(".manifest-")], "temp file left behind"
 assert os.path.exists(os.path.join(t, "m1/manifest-diagnostics.txt"))
 print("H31-OK")
 PYCHK
 then
-  report PASS "H30" "manifest writer: hostile ref (quotes/backslash/Unicode/slashes), empty optional, all four job conclusions, atomic rename, no temp leftovers, diagnostics written"
+  report PASS "H30" "manifest writer: hostile ref (quotes/backslash/Unicode/slashes), empty optional, all three desktop job conclusions, independent-CodeQL marker, atomic rename, no temp leftovers, diagnostics written"
 else
   report FAIL "H30" "manifest writer fixture failed"
 fi

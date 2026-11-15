@@ -24,6 +24,14 @@ type SceneState struct {
 	hasLast    bool
 	onsetFlash float64
 
+	// Spectrogram history (run 43612608237 waterfall mode): a bounded
+	// ring of captured spectrum rows, oldest first. Bounded memory: one
+	// row per captured frame, capped at SpecHistoryFrames entries.
+	specHist  [][]float64
+	specHead  int
+	specCount int
+	specRow   [visualizer.NumVizBins]float64 // per-frame capture scratch
+
 	// particles (bounded count, stable seed)
 	particles    []particle
 	pCount       int
@@ -31,6 +39,12 @@ type SceneState struct {
 	particleInit bool
 	phasePrev    float64
 }
+
+// SpecHistoryFrames bounds the spectrogram waterfall history. At 30 fps
+// preview cadence the ring covers ~3.2 s; at export frame cadence every
+// captured frame advances it (the render only pushes when media time
+// advances, so a paused preview never grows the history).
+const SpecHistoryFrames = 96
 
 // MaxParticles bounds the particle system.
 const MaxParticles = 512
@@ -53,6 +67,9 @@ func (s *SceneState) Reset() {
 	s.beatPulse = 0
 	s.hasLast = false
 	s.onsetFlash = 0
+	s.specHist = s.specHist[:0]
+	s.specHead = 0
+	s.specCount = 0
 	s.particles = s.particles[:0]
 	s.pCount = 0
 	s.particleInit = false
@@ -100,6 +117,7 @@ func (s *SceneState) Update(in *visualizer.FrameInput) {
 			v *= 1 + tilt*(tnorm*2-1)
 		}
 		target := clamp01(v * sens)
+		s.specRow[i] = target // instantaneous spectrum for the waterfall column
 		var k float64
 		if target > s.bins[i] {
 			k = attack
@@ -138,6 +156,44 @@ func (s *SceneState) Update(in *visualizer.FrameInput) {
 		s.onsetFlash = 1
 	}
 	s.onsetFlash *= math.Pow(0.01, dt)
+
+	// Spectrogram capture: one bounded row per advanced media-time
+	// step. The row is a COPY of the smoothed bins (the array above is
+	// mutated by the next frame), so the waterfall history is stable.
+	s.captureSpectrogram()
+}
+
+// captureSpectrogram pushes the current instantaneous spectrum (the
+// tilt-adjusted pre-smoothing targets captured during the bins loop)
+// into the bounded history ring. The waterfall column therefore shows
+// the spectrum AT its timestamp — not the attack/release envelope the
+// geometry modes smooth. Allocation-free in steady state: rows are
+// reused from the ring once it is full.
+func (s *SceneState) captureSpectrogram() {
+	if s.specCount < SpecHistoryFrames {
+		row := make([]float64, visualizer.NumVizBins)
+		copy(row, s.specRow[:])
+		s.specHist = append(s.specHist, row)
+		s.specCount++
+		return
+	}
+	// Ring reuse: head marks the oldest row; overwrite it and advance.
+	copy(s.specHist[s.specHead], s.specRow[:])
+	s.specHead = (s.specHead + 1) % SpecHistoryFrames
+}
+
+// SpectrogramRows returns the history in render order (oldest →
+// newest). The returned slices are the live ring rows — the renderer
+// must not retain them beyond the frame.
+func (s *SceneState) SpectrogramRows() [][]float64 {
+	if s.specCount == 0 {
+		return nil
+	}
+	rows := make([][]float64, 0, s.specCount)
+	for i := 0; i < s.specCount; i++ {
+		rows = append(rows, s.specHist[(s.specHead+i)%len(s.specHist)])
+	}
+	return rows
 }
 
 // Scene holds the shared derived values for one frame render.

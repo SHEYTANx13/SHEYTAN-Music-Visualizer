@@ -241,6 +241,96 @@ if [ "$MODE" = "desktop" ]; then
     install -m 0644 packaging/portable.mode "$STAGE_APP/portable.mode"
     install -m 0644 packaging/DATA-FOLDERS.txt "$STAGE_APP/data/DATA-FOLDERS.txt"
     install -m 0644 packaging/FFMPEG-TOOLS-LICENSING.md "$STAGE_APP/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md"
+    install -m 0644 packaging/FFMPEG-TOOLS-PROVENANCE.md "$STAGE_APP/tools/ffmpeg/FFMPEG-TOOLS-PROVENANCE.md"
+    install -m 0644 packaging/ffmpeg-licenses/COPYING.GPLv2 "$STAGE_APP/tools/ffmpeg/COPYING.GPLv2"
+    install -m 0644 packaging/ffmpeg-licenses/COPYING.GPLv3 "$STAGE_APP/tools/ffmpeg/COPYING.GPLv3"
+  fi
+
+  # ---- app-local FFmpeg/FFprobe staging (run 43612608237 P0) ----
+  # The portable package is SELF-CONTAINED: tools/ffmpeg/bin carries the
+  # pinned FFmpeg 9.0.2 pair (packaging/FFMPEG-TOOLS-PROVENANCE.md is the
+  # authoritative provenance record). Resolution order:
+  #   1. SHEYTAN_FFMPEG_BUNDLE_DIR — a pre-staged pinned bundle (offline
+  #      runners); must contain ffmpeg, ffprobe, COPYING.GPLv2/v3.
+  #   2. Pinned BtbN release asset download with SHA-256 verification.
+  # Every staged build is functionally re-verified: version string,
+  # buildconf WITHOUT --enable-nonfree (and WITH --enable-gpl), and the
+  # libx264 encoder. A failed staging leaves tools empty and the package
+  # status logic below refuses VERIFIED — an empty tools dir can never be
+  # verified (the baseline run's mislabeled-VERIFIED defect).
+  FFMPEG_STAGED=0
+  ffmpeg_staged_version="not-staged"
+  ffmpeg_stage_reason=""
+  FF_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz"
+  FF_SHA256="bf5e935a51afb65ddd14bf67104361508bcc7c77026a66d7e193a05a56ab8d77"
+  FF_EXPECTED_VERSION_PREFIX="ffmpeg version n9.0.2"
+  ffmpeg_verify_and_install() {
+    # $1 = src dir containing ffmpeg/ffprobe
+    local src="$1"
+    [ -x "$src/ffmpeg" ] && [ -x "$src/ffprobe" ] || { ffmpeg_stage_reason="staged dir $src missing executable pair"; return 1; }
+    local vline bconf
+    vline="$("$src/ffmpeg" -version 2>/dev/null | head -1)"
+    case "$vline" in
+      "$FF_EXPECTED_VERSION_PREFIX"*) : ;;
+      *) ffmpeg_stage_reason="ffmpeg version mismatch: '$vline' does not start with '$FF_EXPECTED_VERSION_PREFIX'"; return 1 ;;
+    esac
+    bconf="$("$src/ffmpeg" -hide_banner -buildconf 2>&1)"
+    if printf '%s' "$bconf" | grep -q -- '--enable-nonfree'; then
+      ffmpeg_stage_reason="REJECTED: staged FFmpeg build declares --enable-nonfree (non-distributable)"
+      return 1
+    fi
+    if ! printf '%s' "$bconf" | grep -q -- '--enable-gpl'; then
+      ffmpeg_stage_reason="REJECTED: staged FFmpeg build lacks --enable-gpl (no libx264 software H.264 encoder expected)"
+      return 1
+    fi
+    if ! "$src/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -q ' libx264 '; then
+      ffmpeg_stage_reason="REJECTED: staged FFmpeg build has no libx264 encoder (export capability gate fails)"
+      return 1
+    fi
+    install -m 0755 "$src/ffmpeg" "$STAGE_APP/tools/ffmpeg/bin/ffmpeg"
+    install -m 0755 "$src/ffprobe" "$STAGE_APP/tools/ffmpeg/bin/ffprobe"
+    ffmpeg_staged_version="$vline"
+    {
+      echo "staged_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+      echo "asset_url=$FF_URL"
+      echo "asset_sha256=$FF_SHA256"
+      echo "version=$vline"
+      echo "buildconf_flags=$(printf '%s' "$bconf" | grep -E -- '--enable-(gpl|version3|nonfree)' | tr '\n' ' ')"
+      echo "libx264_encoder=present"
+      echo "source_offer=https://ffmpeg.org/download.html (FFmpeg git d4070a14ce); build scripts: https://github.com/BtbN/FFmpeg-Builds"
+      echo "licenses=COPYING.GPLv2, COPYING.GPLv3 (packaging/ffmpeg-licenses/)"
+    } > "$STAGE_APP/tools/ffmpeg/FFMPEG-TOOLS-PROVENANCE.txt"
+    return 0
+  }
+  if [ "$EXE_OK" -eq 1 ]; then
+    if [ "${SHEYTAN_FFMPEG_BUNDLE_DIR:-}" != "" ] && [ -d "$SHEYTAN_FFMPEG_BUNDLE_DIR" ]; then
+      if ffmpeg_verify_and_install "$SHEYTAN_FFMPEG_BUNDLE_DIR"; then
+        FFMPEG_STAGED=1
+      else
+        echo "ERROR: bundle-dir staging failed: $ffmpeg_stage_reason"
+      fi
+    else
+      FF_DL="$(mktemp -d)/ffmpeg.tar.xz"
+      if curl -fsSL --retry 2 -o "$FF_DL" "$FF_URL" \
+        && echo "$FF_SHA256  $FF_DL" | sha256sum -c - >/dev/null 2>&1; then
+        FF_X="$(mktemp -d)"
+        if tar -xJf "$FF_DL" -C "$FF_X" \
+          && ffmpeg_verify_and_install "$FF_X"/ffmpeg-n9.0.2*/bin; then
+          FFMPEG_STAGED=1
+        else
+          ffmpeg_stage_reason="${ffmpeg_stage_reason:-archive extraction or verification failed}"
+          echo "ERROR: pinned FFmpeg download staging failed: $ffmpeg_stage_reason"
+        fi
+        rm -rf "$FF_X"
+      else
+        ffmpeg_stage_reason="pinned FFmpeg download or SHA-256 verification failed ($FF_URL)"
+        echo "ERROR: $ffmpeg_stage_reason — tools stay empty; package cannot reach VERIFIED"
+      fi
+      rm -f "$FF_DL"
+    fi
+    if [ "$FFMPEG_STAGED" -eq 1 ]; then
+      echo "FFmpeg staging OK: $ffmpeg_staged_version"
+    fi
   fi
 
   if [ "$EXE_OK" -eq 1 ]; then
@@ -258,7 +348,7 @@ if [ "$MODE" = "desktop" ]; then
         set -euo pipefail
         test -s "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable missing"; exit 1; }
         test -x "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable not executable"; exit 1; }
-        for f in license.md readme.md portable.mode data/DATA-FOLDERS.txt tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md; do
+        for f in license.md readme.md portable.mode data/DATA-FOLDERS.txt tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md tools/ffmpeg/FFMPEG-TOOLS-PROVENANCE.md tools/ffmpeg/COPYING.GPLv2 tools/ffmpeg/COPYING.GPLv3; do
           test -s "SHEYTAN-Music-Visualizer-linux-x64/$f" || { echo "ERROR: staged file missing/empty: $f"; exit 1; }
         done
         echo "staged portable tree:"
@@ -294,7 +384,19 @@ if [ "$MODE" = "desktop" ]; then
         test -x "$APP/sheytan-music-visualizer" || { echo "ERROR: executable bit lost in tarball"; exit 1; }
         test -f "$APP/portable.mode" || { echo "ERROR: portable.mode missing in tarball"; exit 1; }
         test -f "$APP/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md" || { echo "ERROR: ffmpeg licensing doc missing in tarball"; exit 1; }
-        echo "extracted package verified: license byte-identical, executable bit preserved, portable.mode present"
+        # Run 43612608237: the extracted package must carry its OWN working
+        # tools pair — the mislabeled-VERIFIED defect of the baseline run.
+        if [ -f "$APP/tools/ffmpeg/bin/ffmpeg" ]; then
+          test -x "$APP/tools/ffmpeg/bin/ffmpeg" || { echo "ERROR: packaged ffmpeg not executable"; exit 1; }
+          test -x "$APP/tools/ffmpeg/bin/ffprobe" || { echo "ERROR: packaged ffprobe not executable"; exit 1; }
+          test -s "$APP/tools/ffmpeg/FFMPEG-TOOLS-PROVENANCE.txt" || { echo "ERROR: staged tools lack their provenance record"; exit 1; }
+          "$APP/tools/ffmpeg/bin/ffmpeg" -version | head -1
+          "$APP/tools/ffmpeg/bin/ffprobe" -version | head -1
+          echo "extracted package verified: license byte-identical, executable bit preserved, portable.mode present, packaged ffmpeg/ffprobe functional"
+        else
+          echo "extracted package verified (NO packaged tools): license byte-identical, executable bit preserved, portable.mode present"
+          echo "WARNING: tools/ffmpeg/bin is EMPTY — the package can reach TEST_ONLY at best (never VERIFIED)"
+        fi
       ' _ "$VERIFY_DIR" || fail_gate verify-extracted-package
       rm -rf "$VERIFY_DIR"
 
@@ -312,6 +414,28 @@ if [ "$MODE" = "desktop" ]; then
         test -x "$APP/sheytan-music-visualizer" || { echo "ERROR: executable bit lost in spaces-path extraction"; exit 1; }
         "$APP/sheytan-music-visualizer" --version || { echo "ERROR: extracted EXE --version failed from a path containing spaces"; exit 1; }
         echo "spaces-path runtime check PASSED"
+        # Run 43612608237 packaged-export proof: when tools are packaged,
+        # run the REAL headless export from the extracted package with a
+        # PATH that contains NO system FFmpeg — the app must resolve its
+        # own tools/ffmpeg/bin pair and produce an ffprobe-validated MP4.
+        if [ -x "$APP/tools/ffmpeg/bin/ffmpeg" ]; then
+          SCRUB="$(mktemp -d)/scrubbed-path-bin"
+          mkdir -p "$SCRUB"
+          OUT="$(mktemp -d)/packaged-export-proof.mp4"
+          if env -i PATH="$SCRUB" HOME="$SPACES_DIR" \
+            "$APP/sheytan-music-visualizer" --export-cli \
+            --export-out "$OUT" --export-w 640 --export-h 360 \
+            --export-fps 30 --export-seconds 0.5; then
+            test -s "$OUT" || { echo "ERROR: packaged export produced no output"; exit 1; }
+            "$APP/tools/ffmpeg/bin/ffprobe" -v error -select_streams v:0 -show_entries "stream=codec_name,width,height" -of csv "$OUT"
+            echo "PACKAGED-EXPORT PROOF PASSED (app-local tools, scrubbed PATH, ffprobe-validated)"
+          else
+            echo "ERROR: packaged --export-cli failed with scrubbed PATH — app-local tool resolution or export broken"
+            exit 1
+          fi
+        else
+          echo "tools/ffmpeg/bin empty in extracted package — packaged-export proof NOT RUN (status stays TEST_ONLY)"
+        fi
       ' _ "$SPACES_DIR" || fail_gate verify-extracted-path-with-spaces
       rm -rf "$(dirname "$SPACES_DIR")"
 
@@ -370,17 +494,24 @@ if [ "$MODE" = "desktop" ]; then
           commit_reason="built_verified=$built_verified extracted_verified=$ex_verified (see observe_commit.py contract)"
         fi
 
+        # Run 43612608237 status contract: VERIFIED additionally requires
+        # the packaged app-local FFmpeg/FFprobe pair (staged, verified,
+        # and proven by the packaged-export gate above). A package with
+        # empty tools/ffmpeg/bin is TEST_ONLY at best — never VERIFIED.
         if [ "$commit_verified" != "true" ] || [ "$PACKAGE_GATES_FAILED" -gt 0 ]; then
           pkg_status="UNAVAILABLE"
-        elif [ "$FAILURES_BEFORE_PACKAGE" -gt 0 ]; then
+        elif [ "$FAILURES_BEFORE_PACKAGE" -gt 0 ] || [ "$FFMPEG_STAGED" -ne 1 ]; then
           pkg_status="TEST_ONLY"
         else
           pkg_status="VERIFIED"
         fi
+        if [ "$FFMPEG_STAGED" -ne 1 ] && [ "$pkg_status" = "TEST_ONLY" ]; then
+          commit_reason="$commit_reason; ffmpeg_tools_not_staged: ${ffmpeg_stage_reason:-no bundle dir and pinned download unavailable}"
+        fi
       fi
-      python3 - "$REPO_ROOT/ci-logs/package-status-linux.json" "$pkg_status" "$commit_expected" "$commit_observed" "$commit_verified" "$commit_extracted_observed" "$commit_reason" <<'PYJSON' || true
+      python3 - "$REPO_ROOT/ci-logs/package-status-linux.json" "$pkg_status" "$commit_expected" "$commit_observed" "$commit_verified" "$commit_extracted_observed" "$commit_reason" "$FFMPEG_STAGED" "$ffmpeg_staged_version" <<'PYJSON' || true
 import json, sys
-out, status, expected, observed, verified, extracted_observed, reason = sys.argv[1:8]
+out, status, expected, observed, verified, extracted_observed, reason, ffmpeg_staged, ffmpeg_version = sys.argv[1:10]
 record = {
     "platform": "linux-x64",
     "package_status": status,
@@ -392,7 +523,9 @@ record = {
     "commit_extracted_observed": extracted_observed,
     "commit_source": "--build-info-json (built exe + extracted package, typed JSON parse)",
     "commit_reason": reason,
-    "note": "VERIFIED requires a non-blank expected commit exactly matching the embedded metadata of the built AND the extracted executable plus zero failed package-integrity gates; TEST_ONLY keeps the job red; UNAVAILABLE is never uploaded",
+    "ffmpeg_tools_staged": ffmpeg_staged == "1",
+    "ffmpeg_tools_version": ffmpeg_version,
+    "note": "VERIFIED requires a non-blank expected commit exactly matching the embedded metadata of the built AND the extracted executable, zero failed package-integrity gates, AND a verified app-local FFmpeg/FFprobe pair proven by the packaged-export gate; TEST_ONLY keeps the job red; UNAVAILABLE is never uploaded",
 }
 with open(out, "w", encoding="utf-8") as f:
     json.dump(record, f, indent=2)
@@ -419,8 +552,13 @@ PYJSON
 CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race $GO_TAGS -skip '^TestPaletteReachesGPUShader$' -timeout 480s ./internal/audio/... ./internal/playback/... ./internal/dsp/... ./internal/export/... ./internal/studio/... ./internal/project/... ./internal/render/... ||
     fail_gate go-test-race
 
-  # export validation (real FFmpeg; skips honestly when unavailable)
-  CI_TOOL_CONTEXT="gate:export-validation" ci_capture "$JOB" export-validation go test $GO_TAGS -timeout 560s -v -run 'TestExport1080p30|TestExport4K24|TestExportCancel|TestExportMissingEncoderFails' ./internal/export/ ||
+  # export validation (real FFmpeg; skips honestly when unavailable).
+  # Run 43612608237: the 4K120 and 4K60 functional exports and the
+  # app-local CLI export diagnostic joined the canonical export gate —
+  # they are integration tests with real ffprobe validation, NOT config
+  # checks, and they skip only when a local FFmpeg/FFprobe pair is
+  # genuinely absent.
+  CI_TOOL_CONTEXT="gate:export-validation" ci_capture "$JOB" export-validation go test $GO_TAGS -timeout 900s -v -run 'TestExport1080p30|TestExport4K24|TestExport4K60|TestExport4K120|TestExportCancel|TestExportMissingEncoderFails|TestRunCLIExportDiagnosticAppLocal' ./internal/export/ ||
     fail_gate export-validation
 
   # audio pipeline validation (decoders, resampler, cache)

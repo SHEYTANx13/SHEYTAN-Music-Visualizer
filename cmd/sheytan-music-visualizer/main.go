@@ -52,6 +52,20 @@ func run(args []string, out, errW io.Writer) int {
 	selfCheckOut := fs.String("self-check-out", "", "additionally write the --self-check result to this UTF-8 file (structured CI evidence for the GUI-subsystem build, whose stdout may not be captured)")
 	buildInfoJSONFlag := fs.Bool("build-info-json", false, "print the build metadata as one stable JSON line (machine-readable CI evidence; the non-GUI authority for commit identity), then exit")
 	debugFlag := fs.Bool("debug", false, "write debug-level records to the runtime log (default log volume unchanged)")
+	// Headless export diagnostic (run 43612608237): drives the REAL
+	// export pipeline (same export.Job, same app-local FFmpeg
+	// resolution, same ffprobe validation) from the CLI with a
+	// deterministic synthetic source. This is how hosted CI and the
+	// portable-package verification prove "the extracted package can
+	// actually export" without a GUI session. It is a diagnostic
+	// export of the built-in demo signal — never a fake success: the
+	// command fails when the export or validation fails.
+	exportCLIFlag := fs.Bool("export-cli", false, "run one headless diagnostic export with the deterministic demo signal, then exit (used by CI package verification; requires local FFmpeg)")
+	exportOut := fs.String("export-out", "", "--export-cli output .mp4 path (required with --export-cli)")
+	exportW := fs.Int("export-w", 1920, "--export-cli frame width")
+	exportH := fs.Int("export-h", 1080, "--export-cli frame height")
+	exportFPS := fs.Int("export-fps", 30, "--export-cli frame rate (24/30/60/120)")
+	exportSeconds := fs.Float64("export-seconds", 1.0, "--export-cli duration in seconds")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -74,6 +88,11 @@ func run(args []string, out, errW io.Writer) int {
 		return 0
 	case *selfCheckFlag:
 		return selfCheckToFile(out, errW, *selfCheckOut)
+	case *exportCLIFlag:
+		return export.RunCLI(export.CLIOptions{
+			Out: *exportOut, Width: *exportW, Height: *exportH,
+			FPS: *exportFPS, Seconds: *exportSeconds,
+		}, out, errW)
 	default:
 		err := runGUI()
 		if err == nil {

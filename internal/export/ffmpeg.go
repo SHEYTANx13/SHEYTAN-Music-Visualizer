@@ -37,8 +37,11 @@ var Resolutions = []struct {
 	{"4K UHD", 3840, 2160},
 }
 
-// Frame rate choices.
-var FrameRates = []int{24, 30, 60}
+// Frame rate choices. 120 fps is a hard functional target (run
+// 43612608237): the encoded output cadence, NOT a live-preview rate —
+// offline export schedules frames deterministically at t=frameIndex/fps
+// and never needs to render 120 frames per wall-clock second.
+var FrameRates = []int{24, 30, 60, 120}
 
 // Quality presets (encoder-dependent knobs resolved at job time).
 var QualityPresets = []string{"high", "balanced", "compat"}
@@ -253,7 +256,10 @@ func ResolveEncoder(env *Environment, requested string) (EncoderChoice, error) {
 	pick := func(name string) (EncoderChoice, error) {
 		switch name {
 		case "libx264":
-			return EncoderChoice{Name: name, Args: []string{"-crf", "18", "-preset", "medium"}}, nil
+			// CRF is applied by the job from the quality preset
+			// (a single -crf occurrence); the preset knob is
+			// resolved per resolution/frame-rate at job time.
+			return EncoderChoice{Name: name, Args: []string{}}, nil
 		case "h264_nvenc", "h264_qsv", "h264_amf":
 			return EncoderChoice{Name: name, Args: []string{"-rc", "vbr", "-cq", "19", "-b:v", "0"}}, nil
 		default:
@@ -288,6 +294,18 @@ func ResolveEncoder(env *Environment, requested string) (EncoderChoice, error) {
 		}
 	}
 	return pick(req)
+}
+
+// x264PresetFor picks the x264 speed/quality preset for a job. 4K and
+// 120 fps exports use "faster": at 3840x2160@120 the "medium" preset
+// cannot reach realistic encode throughput on mid-range CPUs, while the
+// CRF rate-control (not the preset) governs the visual quality level.
+// Lower resolutions at <=60 fps keep the "medium" tuning.
+func x264PresetFor(width, height, fps int) string {
+	if width*height >= 2560*1440 || fps >= 120 {
+		return "faster"
+	}
+	return "medium"
 }
 
 // QualityArgs maps a quality preset to codec args (libx264 CRF).

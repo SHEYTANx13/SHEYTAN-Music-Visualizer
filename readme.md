@@ -56,10 +56,10 @@ brand palettes used by the visualizer (`internal/visualizer`).
 | Playback: Oto v3 single context/player, play/pause/stop/seek/volume, buffering-aware playhead | DELIVERED (device-less hosts fall back to an honest silent mode) |
 | DSP: Hann FFT-2048/hop-512, bass/mid/treble bands, RMS, spectral centroid, flux/onsets, BPM with confidence | DELIVERED (`internal/dsp`) |
 | Song DNA: deterministic per-track identity from measured features + content fingerprint + user seed | DELIVERED (`internal/songdna`) |
-| Visualizer modes: Spectrum Bars, Radial Spectrum, Waveform, Particle Field (bounded, seeded particles) | DELIVERED (`internal/visualizer`, `internal/render`) |
+| Visualizer modes: Spectrum Bars, Radial Spectrum, Waveform, Particle Field, Spectrogram Waterfall, Pulse Tunnel, Stereo Wave Ribbons, Frequency Bloom — eight distinct renderers with stable IDs, categories and one tuned preset per mode | DELIVERED (`internal/visualizer`, `internal/render/modes_extra.go`) |
 | CPU renderer: deterministic software rendering used by preview and export | DELIVERED |
 | GPU renderer: wgpu (Go-controlled WebGPU) radial-mode shader with verified readback; hardware adapters on Vulkan/DX12/Metal hosts | DELIVERED as code + software-adapter proof; **hardware-GPU execution: NOT AVAILABLE on the verification host** |
-| MP4 export: 1280×720 → 3840×2160 at 24/30/60 fps, H.264 + AAC via local FFmpeg, streamed frames, real progress, cancellation, ffprobe validation | DELIVERED (`internal/export`; verified 1080p30 and 4K24 proofs) |
+| MP4 export: 1280×720 → 3840×2160 at 24/30/60/**120** fps, H.264 + AAC via FFmpeg, streamed frames, real progress, cancellation, ffprobe validation; 4K120/4K60 functional export tests with exact-cadence ffprobe checks | DELIVERED (`internal/export`; run 43612608237: 4K120 verified locally — 120 frames, exact 1.000 s, ffprobe-validated) |
 | Projects: versioned JSON, atomic save, validation, relink, presets (Hellfire Pulse, Crimson Orbit, Obsidian Wave, Ember Storm) | DELIVERED (`internal/project`) |
 | Fullscreen: single state controller, persisted intent vs observed platform state, F11 toggle, Esc exit, event-driven reconciliation (never a force loop) | DELIVERED (`internal/fullscreen`, `ui/fyne`; state-transition tests PASS — interactive desktop behavior: NOT RUN on this headless verification host) |
 | Runtime logging in every interactive launch: UTC text log, rotation, stderr fallback, startup/subsystem/error records, panic stacks | DELIVERED (`internal/logging` + startup wiring; real-run probe evidence captured) |
@@ -86,8 +86,12 @@ construction. The cache sidecars record the adapter provenance truthfully
 (`NativeDecoder: false`).
 
 Export: MP4 (H.264 video + AAC audio) through your **locally installed
-FFmpeg/ffprobe**. The application never downloads or bundles an encoder
-binary; export is blocked with a clear message when FFmpeg is missing.
+FFmpeg/ffprobe**. The portable test packages carry their OWN pinned
+FFmpeg 9.0.2 pair under `tools/ffmpeg/bin/` (see
+`packaging/FFMPEG-TOOLS-PROVENANCE.md` for the exact build, hashes,
+license texts and source offer); the app resolves its app-local pair
+BEFORE PATH, and a package with empty tools can never be labelled
+VERIFIED. Without FFmpeg, export is blocked with a clear message.
 
 ## Audio pipeline in one paragraph
 
@@ -109,7 +113,8 @@ decoders are never shared across goroutines.
 - **Windows**: MSYS2 **UCRT64** toolchain (not the deprecated MINGW64):
   `mingw-w64-ucrt-x86_64-gcc` and `mingw-w64-ucrt-x86_64-pkgconf`, with
   `CGO_ENABLED=1 GOOS=windows GOARCH=amd64`.
-- **FFmpeg/ffprobe 6+** on PATH (or a user-configured location) — only
+- **FFmpeg/ffprobe** (app-local `tools/ffmpeg/bin/`, a user-configured
+  location, or PATH; 6+ for the optional AAC/M4A adapter) — only
   needed for MP4 export, not for import/playback/preview.
 - Build tag: `-tags goffi_static` is **required** for binaries that link
   Fyne (CGO) and wgpu (goffi FFI) together; the build scripts and CI apply
@@ -258,7 +263,8 @@ Keyboard: **Space** play/pause, **←/→** seek, **F11** fullscreen toggle,
   record — absence is never a pass. CI uploads one namespaced,
   attempt-suffixed log-part artifact per evidence-producing job
   (`preflight-logs-part-attempt<N>`, `windows-logs-part-attempt<N>`,
-  `linux-logs-part-attempt<N>`, `codeql-logs-part-{go,actions}-attempt<N>`),
+  `linux-logs-part-attempt<N>`; CodeQL runs as the independent `codeql`
+  workflow with its own consolidated `log.txt` artifact),
   then `cmd/ci-log-collector` aggregates them (plus the authoritative GitHub
   job/step conclusions and open code-scanning alerts) into ONE artifact named
   exactly `log.txt`. That final artifact is uploaded with

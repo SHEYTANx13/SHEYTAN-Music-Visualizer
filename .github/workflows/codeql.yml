@@ -2,11 +2,14 @@ name: codeql
 
 # CodeQL security analysis for SHEYTAN Music Visualizer.
 #
-# Invocation model:
-#   - push / pull_request: build-desktop.yml calls this reusable workflow
-#     in the same run and collects its two per-analysis evidence artifacts.
-#   - schedule / workflow_dispatch: this workflow runs independently and
-#     creates exactly one user-facing artifact named log.txt.
+# Invocation model (run 43612608237 repair — INDEPENDENT workflow):
+#   - This workflow is a normal top-level workflow: it self-triggers on
+#     push to main, pull requests to main, the weekly schedule, and
+#     workflow_dispatch. build-desktop.yml no longer calls it as a
+#     reusable workflow, no longer waits for it, and never gates its own
+#     verdict on CodeQL results.
+#   - The `workflow_call` trigger and its `called` input were removed; the
+#     collect job now runs for every invocation of THIS workflow.
 #
 # Go analysis is a manual traced build using the production-relevant
 # CGO_ENABLED=1, CC=gcc and goffi_static build tag. Test-file extraction is
@@ -17,22 +20,24 @@ name: codeql
 #
 # The analyze jobs deliberately have read-only Actions permission. The
 # standalone collector needs actions:write only to delete its temporary
-# evidence artifacts after log.txt has been uploaded. Consequently the
-# reusable-workflow caller (build-desktop.yml) must grant actions:write to
-# the codeql reusable-workflow job; permissions cannot be elevated inside a
-# reusable-workflow call. The analyze jobs retain their narrower permissions.
+# evidence artifacts after log.txt has been uploaded. Every job keeps
+# explicit least-privilege permissions; the workflow-level default is
+# contents: read.
 
 on:
-  workflow_call:
-    inputs:
-      called:
-        description: "Internal: true when build-desktop.yml aggregates this run's evidence"
-        required: false
-        type: boolean
-        default: false
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '17 3 * * 1' # weekly, Monday 03:17 UTC
   workflow_dispatch:
+
+# Newer commits supersede stale security scans of the same ref. This group
+# is scoped to THIS workflow only — it never cancels build-desktop runs.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -277,12 +282,12 @@ jobs:
           path: ci-logs
           if-no-files-found: error
 
-  # Only standalone schedule/dispatch runs collect here. Reusable invocations
-  # are collected by build-desktop.yml, which owns the single run-level log.txt.
+  # Standalone collection for every invocation of this workflow (the
+  # `called` input was removed with the reusable-workflow trigger).
   collect:
     name: collect-logs (standalone CodeQL evidence)
     needs: [analyze_go, analyze_actions]
-    if: ${{ always() && !cancelled() && inputs.called != true }}
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
@@ -563,9 +568,57 @@ jobs:
             fail=1
           fi
 
+          # rc=3 (a required analyze job failed) is verdict-separated like
+          # build-desktop.yml: the collector's own conclusion reports
+          # COLLECTION health only; the upstream analysis failure is
+          # surfaced by the dedicated final-verdict job below.
+          if [ "$rc" = "3" ]; then
+            echo "Consolidated CodeQL report uploaded; upstream analyze-job failure is reported by the final-verdict job."
+            exit 0
+          fi
           if [ "$rc" -ne 0 ] || [ "$fail" -ne 0 ]; then
             echo "CodeQL collector exit code: $rc (0=complete, 1=incomplete, 2=hard error, 3=required analysis failed)"
             if [ "$rc" -eq 0 ]; then rc=1; fi
             exit "$rc"
           fi
           echo "CodeQL standalone collection, report validation, upload and cleanup all succeeded."
+
+  # Run-43612608237 verdict separation for the standalone workflow: ONE
+  # dedicated user-facing gate that fails closed when either analysis job
+  # did not succeed. collect stays green exactly when the consolidated
+  # report was produced and uploaded, so a red collector always means a
+  # COLLECTION problem, never an upstream analysis failure (reported here).
+  # The result lookups use literal scalar keys — see
+  # scripts/ci/tests/test-verdict-expression.sh for the fixture that keeps
+  # the run-43612608237 `needs[job]` object-key defect from returning.
+  final-verdict:
+    name: final-verdict (both CodeQL analyses must be green)
+    needs: [analyze_go, analyze_actions, collect]
+    if: ${{ always() && !cancelled() }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Fail closed unless every required gate succeeded
+        run: |
+          set -Eeuo pipefail
+          failed=0
+          for gate in analyze_go analyze_actions collect; do
+            case "$gate" in
+              analyze_go)     result="${{ needs.analyze_go.result }}" ;;
+              analyze_actions) result="${{ needs.analyze_actions.result }}" ;;
+              collect)        result="${{ needs.collect.result }}" ;;
+              *)              result="unknown" ;;
+            esac
+            echo "${gate}: ${result}"
+            if [ "$result" != "success" ]; then
+              echo "::error title=Required gate ${gate} did not succeed::result=${result} — see the ${gate} job log and the consolidated artifact log.txt"
+              failed=1
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "FINAL VERDICT: RED — one or more CodeQL gates failed; the consolidated CodeQL report was still collected and uploaded (see collect)."
+            exit 1
+          fi
+          echo "FINAL VERDICT: GREEN — CodeQL Go, Actions and the consolidated CodeQL report are all green."
