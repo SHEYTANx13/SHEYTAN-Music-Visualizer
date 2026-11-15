@@ -3,15 +3,16 @@
 // optional audio AAC/M4A decoder adapter resolve their binaries here;
 // no subsystem implements its own search.
 //
-// Resolution order (first fully present pair wins):
+// Resolution order (first fully present pair wins; run 43712071111):
 //
 //  1. Explicit user configuration (SetDirOverride / SHEYTAN_FFMPEG
 //     env — back-compat with the existing documented override).
-//  2. App-local packaged tools: <app root>/tools/ffmpeg/bin
-//     (apppaths Layout.ToolsFFmpegBin). This is where a legally
-//     verified redistributable build or a user-approved setup puts
-//     the binaries.
-//  3. System PATH (exec.LookPath) — the documented external fallback.
+//  2. App-managed tools (the in-app Media Tools & Codecs download
+//     manager): <DataRoot>/media-tools/current/bin.
+//  3. App-local portable tools: <app root>/tools/ffmpeg/bin
+//     (apppaths Layout.ToolsFFmpegBin; the user-managed portable
+//     location — shipped as an EMPTY directory in the package).
+//  4. System PATH (exec.LookPath) — the documented external fallback.
 //
 // The locator only establishes CANDIDATE paths (existence + regular
 // file). Version/capability probing stays with the callers
@@ -58,21 +59,30 @@ func DirOverride() string {
 
 // Options carries the process inputs; tests inject them.
 type Options struct {
-	Override string // explicit directory (highest priority)
-	AppLocal string // <app root>/tools/ffmpeg/bin ("" = skip)
-	Lookup   func(string) (string, error)
-	GOOS     string
+	Override   string // explicit directory (highest priority)
+	AppManaged string // <DataRoot>/media-tools/current/bin ("" = skip)
+	AppLocal   string // <app root>/tools/ffmpeg/bin ("" = skip)
+	Lookup     func(string) (string, error)
+	GOOS       string
 }
 
 // OPOpts builds Options from process state and the app layout. The
 // explicit SHEYTAN_FFMPEG environment directory (documented override)
 // participates as the highest-priority location.
 func OPOpts(appLocalBin string) Options {
+	return OPOptsFull(appLocalBin, "")
+}
+
+// OPOptsFull builds Options including the app-managed directory (the
+// in-app Media Tools & Codecs install location under the user data
+// root). Empty strings skip the respective rule.
+func OPOptsFull(appLocalBin, appManagedBin string) Options {
 	o := Options{
-		Override: DirOverride(),
-		AppLocal: appLocalBin,
-		Lookup:   execLookPath,
-		GOOS:     runtime.GOOS,
+		Override:   DirOverride(),
+		AppLocal:   appLocalBin,
+		AppManaged: appManagedBin,
+		Lookup:     execLookPath,
+		GOOS:       runtime.GOOS,
 	}
 	if o.Override == "" {
 		o.Override = strings.TrimSpace(os.Getenv("SHEYTAN_FFMPEG"))
@@ -88,7 +98,8 @@ func execLookPath(name string) (string, error) {
 type Result struct {
 	FFmpeg  string
 	FFprobe string
-	// Source names which rule resolved: "override", "app-local", "path".
+	// Source names which rule resolved: "override", "app-managed",
+	// "app-local", "path".
 	Source string
 }
 
@@ -106,13 +117,19 @@ func Locate(o Options) (Result, error) {
 		return Result{}, fmt.Errorf(
 			"fflocate: configured FFmpeg directory %q does not contain a usable ffmpeg+ffprobe pair", d)
 	}
-	// 2) App-local tools.
+	// 2) App-managed tools (in-app Media Tools & Codecs download).
+	if d := strings.TrimSpace(o.AppManaged); d != "" {
+		if r, ok := pairInDir(d, "app-managed", o.GOOS); ok {
+			return r, nil
+		}
+	}
+	// 3) App-local portable tools.
 	if d := strings.TrimSpace(o.AppLocal); d != "" {
 		if r, ok := pairInDir(d, "app-local", o.GOOS); ok {
 			return r, nil
 		}
 	}
-	// 3) PATH fallback.
+	// 4) PATH fallback.
 	if o.Lookup == nil {
 		return Result{}, fmt.Errorf("fflocate: no lookup function configured")
 	}
@@ -122,8 +139,8 @@ func Locate(o Options) (Result, error) {
 		return Result{FFmpeg: ff, FFprobe: fp, Source: "path"}, nil
 	}
 	return Result{}, fmt.Errorf(
-		"fflocate: ffmpeg/ffprobe not found (searched: configured directory, app-local tools dir, PATH); " +
-			"install FFmpeg locally or place both binaries in <app>/tools/ffmpeg/bin")
+		"fflocate: ffmpeg/ffprobe not found (searched: configured directory, app-managed tools, app-local tools dir, PATH); " +
+			"install FFmpeg locally, use the in-app Media Tools & Codecs download, or place both binaries in <app>/tools/ffmpeg/bin")
 }
 
 // pairInDir checks the exact binary names inside dir.

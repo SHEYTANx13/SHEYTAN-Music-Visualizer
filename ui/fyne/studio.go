@@ -15,10 +15,13 @@ import (
 	"image/color"
 	"log/slog"
 	"net/url"
+	"os"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -36,6 +39,7 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fullscreen"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/mediatools"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/perf"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
@@ -83,6 +87,15 @@ func Run() error {
 		"data_root", lay.DataRoot,
 		"log_dir", lay.Logs)
 
+	// Session boundary markers (run 43712071111): the sentinel proves a
+	// previous session ended without a clean shutdown; the previous log
+	// stays preserved (append policy) so crash context survives.
+	if unclean, serr := logging.MarkSessionActive(lay.Logs); serr != nil {
+		log.Warn("session sentinel could not be written", "err", serr.Error())
+	} else if unclean {
+		lg.LogUncleanPreviousSession()
+	}
+
 	a := app.NewWithID(brand.AppID)
 	w := a.NewWindow(brand.WindowTitle())
 	w.SetPadded(false)
@@ -117,6 +130,15 @@ func Run() error {
 		u.policyMode = sysprofile.ModeAuto
 	}
 	u.rendererReq = make(chan render.Preference, 1)
+	// Media Tools & Codecs (run 43712071111): the in-app manager for
+	// the optional FFmpeg tool pack. Created on the startup path but
+	// fully lazy — no network access, no probing until the user opens
+	// the Media Tools section or requests an install (the 758 ms
+	// first-usable-window baseline is untouched).
+	u.mediaTools = mediatools.New(mediatools.Options{
+		DataRoot: lay.DataRoot,
+		Logger:   log,
+	})
 	// The persisted preference is READ here (fast file read) but applied
 	// in the background selection inside the render loop, so neither the
 	// GPU probe nor the explicit selection can delay the first frame.
@@ -184,6 +206,25 @@ func Run() error {
 		u.closeCtl.RequestClose("titlebar")
 	})
 
+	// OS termination signals enter the SAME close state machine
+	// (run 43712071111): SIGINT/SIGTERM request a normal close —
+	// cancel work, flush, release, then quit — instead of dying
+	// mid-frame with no shutdown record.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				u.logErr("recovered panic in signal watcher", "recovered", fmt.Sprint(r))
+			}
+		}()
+		if sig, ok := <-sigCh; ok {
+			u.logInfo("termination signal received; entering close state machine", "signal", sig.String())
+			u.closeCtl.RequestClose("signal:" + sig.String())
+		}
+	}()
+	defer signal.Stop(sigCh)
+
 	// File menu: the documented Fyne surface for a Quit action. Quit
 	// enters the SAME close state machine as the titlebar intercept.
 	w.SetMainMenu(fyne.NewMainMenu(fyne.NewMenu("File",
@@ -218,7 +259,7 @@ func Run() error {
 	})
 
 	log.Info("window shown",
-		"renderer", rendererSummary(u.rendererInfo),
+		"renderer", rendererSummary(u.currentRendererInfo()),
 		"fullscreen_desired", u.fs.Desired(),
 		"fullscreen_observed", u.fs.Observed())
 	w.ShowAndRun()
@@ -241,6 +282,10 @@ func Run() error {
 		"duration", res.Duration.String(),
 		"duration_ms", res.Duration.Milliseconds(),
 		"fullscreen_observed", u.fs.Observed())
+	// Join the render loop BEFORE the logger closes so no log write or
+	// fyne.Do can outlive the loop (run 43712071111 lifecycle repair).
+	u.joinRenderLoop(10 * time.Second)
+	lg.LogCleanShutdown(lay.Logs)
 	svc.Close() // idempotent; defensive final release of the transport
 	return nil
 }
@@ -368,6 +413,20 @@ type studioUI struct {
 	renderMu sync.Mutex
 	closing  bool
 
+	// Render-loop lifecycle (run 43712071111): loopDone is closed exactly
+	// once when the render-loop goroutine exits; the close path joins it
+	// so renderer teardown never races a mid-flight frame and no log
+	// write or fyne.Do can outlive the loop.
+	loopDone chan struct{}
+	// scrubMu guards the scrubbing flag across the UI thread, the drag
+	// reset timer and the render-loop goroutine (run 43712071111: the
+	// flag was previously read by the loop but never written anywhere).
+	scrubMu sync.Mutex
+	// mediaTools is the in-app Media Tools & Codecs manager (app-managed
+	// FFmpeg download/install/repair/remove). Nil only in tests that
+	// never build the full UI.
+	mediaTools *mediatools.Manager
+
 	// System Integration state (run 42598929646): the persisted
 	// renderer preference store, the in-main-window dialog, and the
 	// request channel through which ALL renderer lifecycle changes are
@@ -449,6 +508,7 @@ func (u *studioUI) build() fyne.CanvasObject {
 	u.applyRegions(u.rootResp.bp)
 	u.syncInspector()
 	u.subscribe()
+	u.loopDone = make(chan struct{})
 	u.startRenderLoop()
 	return u.rootResp
 }
@@ -645,9 +705,19 @@ func (u *studioUI) buildRegions() {
 	u.timeTot = widget.NewLabel("0:00")
 	u.scrubber = widget.NewSlider(0, 1000)
 	u.scrubber.Step = 1
+	var scrubReset *time.Timer
 	u.scrubber.OnChanged = func(v float64) {
 		// Throttled live seek; programmatic SetValue (render loop) does
 		// not fire OnChanged in Fyne, so every change here is user drag.
+		// The scrubbing flag suppresses the loop's programmatic scrubber
+		// writes during the drag and clears shortly after the last drag
+		// event (run 43712071111: previously a declared-but-never-set
+		// dead guard).
+		u.setScrubbing(true)
+		if scrubReset != nil {
+			scrubReset.Stop()
+		}
+		scrubReset = time.AfterFunc(250*time.Millisecond, func() { u.setScrubbing(false) })
 		now := time.Now()
 		if now.Sub(u.lastScrub) < 60*time.Millisecond {
 			return
@@ -936,7 +1006,7 @@ func (u *studioUI) refreshTransport() {
 	} else {
 		u.btnPlay.SetText("▶ Play")
 	}
-	if !u.scrubbing {
+	if !u.isScrubbing() {
 		if clock.Total > 0 {
 			u.scrubber.SetValue(1000 * clock.Position.Seconds() / clock.Total.Seconds())
 		} else {
@@ -1033,13 +1103,56 @@ func (u *studioUI) close() {
 		u.renderMu.Lock()
 		u.closing = true
 		u.renderMu.Unlock()
+		// The render loop owns renderer teardown: it observes closing at
+		// a frame boundary (no mid-flight release race — releaseGPU nils
+		// device fields with no internal lock, so closing a renderer from
+		// this teardown goroutine while a frame is in flight was a real
+		// data race and a nil-object crash path into the wgpu bindings).
+		// Join it here with a bound; on a timeout the loop still finishes
+		// teardown asynchronously (logged, never lost).
+		u.joinRenderLoop(8 * time.Second)
+	})
+}
+
+// joinRenderLoop waits (bounded) for the render-loop goroutine to
+// exit. A nil loopDone means the loop never started; any renderer
+// held at that point was never used concurrently and is released
+// here, on this goroutine.
+func (u *studioUI) joinRenderLoop(bound time.Duration) {
+	u.renderMu.Lock()
+	done := u.loopDone
+	u.renderMu.Unlock()
+	if done == nil {
 		u.renderMu.Lock()
 		r := u.renderer
+		u.renderer = nil
 		u.renderMu.Unlock()
 		if r != nil {
 			r.Close()
 		}
-	})
+		return
+	}
+	select {
+	case <-done:
+	case <-time.After(bound):
+		u.logWarn("render loop join timed out; teardown continues (loop finishes asynchronously)",
+			"bound", bound.String())
+	}
+}
+
+// setScrubbing records an active scrubber drag (UI-thread writes;
+// the reset timer and the render loop read under scrubMu).
+func (u *studioUI) setScrubbing(active bool) {
+	u.scrubMu.Lock()
+	u.scrubbing = active
+	u.scrubMu.Unlock()
+}
+
+// isScrubbing reports an active scrubber drag.
+func (u *studioUI) isScrubbing() bool {
+	u.scrubMu.Lock()
+	defer u.scrubMu.Unlock()
+	return u.scrubbing
 }
 
 // showCappedDialog shows a custom dialog sized by dialogSizeFor so it

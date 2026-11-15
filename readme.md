@@ -76,22 +76,25 @@ Input (first-party Go decoders, no external codec process for import):
 - **FLAC** — via `tphakala/go-flac` (streaming PCM API)
 - **Ogg/Vorbis** — via `jfreymuth/oggvorbis`
 
-**AAC family (optional, through your local FFmpeg):** when `ffmpeg` and
-`ffprobe` are available, the app additionally registers **M4A/MP4 (AAC)**,
-**raw AAC/ADTS** and **ALAC** import through a bounded local-FFmpeg adapter
-(`SHEYTAN_FFMPEG` overrides the binary directory). Nothing is bundled or
-downloaded: without FFmpeg those formats stay unregistered, and the UI's
-file dialog and the decoder registry agree on the registered list by
-construction. The cache sidecars record the adapter provenance truthfully
-(`NativeDecoder: false`).
+**AAC family (optional, through the app-managed or local FFmpeg):** when
+`ffmpeg` and `ffprobe` are available, the app additionally registers
+**M4A/MP4 (AAC)**, **raw AAC/ADTS** and **ALAC** import through a bounded
+FFmpeg adapter (`SHEYTAN_FFMPEG` overrides the binary directory). Nothing
+is bundled in the package: without a resolvable FFmpeg pair those formats
+stay unregistered, and the UI's file dialog and the decoder registry agree
+on the registered list by construction. The cache sidecars record the
+adapter provenance truthfully (`NativeDecoder: false`).
 
-Export: MP4 (H.264 video + AAC audio) through your **locally installed
-FFmpeg/ffprobe**. The portable test packages carry their OWN pinned
-FFmpeg 9.0.2 pair under `tools/ffmpeg/bin/` (see
-`packaging/FFMPEG-TOOLS-PROVENANCE.md` for the exact build, hashes,
-license texts and source offer); the app resolves its app-local pair
-BEFORE PATH, and a package with empty tools can never be labelled
-VERIFIED. Without FFmpeg, export is blocked with a clear message.
+Export: MP4 (H.264 + HEVC video, AAC audio) through the app-managed
+**Media Tools & Codecs** download. The published packages are COMPACT:
+they ship **no FFmpeg binaries** — the optional pinned GPL build
+(~184 MB Windows / ~143 MB Linux download) is installed by the in-app
+Media Tools & Codecs manager into `<DataRoot>/media-tools/current/bin`
+(see `packaging/FFMPEG-TOOLS-PROVENANCE.md` for the exact pinned build,
+hashes and GPL labeling). Tool resolution order: `SHEYTAN_FFMPEG`
+override → app-managed `<DataRoot>/media-tools/current/bin` → app-local
+`<exeDir>/tools/ffmpeg/bin` → `PATH`. Without a resolvable pair, export
+is blocked with a clear message.
 
 ## Audio pipeline in one paragraph
 
@@ -113,9 +116,11 @@ decoders are never shared across goroutines.
 - **Windows**: MSYS2 **UCRT64** toolchain (not the deprecated MINGW64):
   `mingw-w64-ucrt-x86_64-gcc` and `mingw-w64-ucrt-x86_64-pkgconf`, with
   `CGO_ENABLED=1 GOOS=windows GOARCH=amd64`.
-- **FFmpeg/ffprobe** (app-local `tools/ffmpeg/bin/`, a user-configured
-  location, or PATH; 6+ for the optional AAC/M4A adapter) — only
-  needed for MP4 export, not for import/playback/preview.
+- **FFmpeg/ffprobe** (optional; app-managed download via the in-app Media
+  Tools & Codecs manager, the `SHEYTAN_FFMPEG` override, the app-local
+  `tools/ffmpeg/bin` folder, or PATH; 6+ for the optional AAC/M4A adapter)
+  — only needed for MP4 export and the AAC-family import adapter, not for
+  built-in import/playback/preview.
 - Build tag: `-tags goffi_static` is **required** for binaries that link
   Fyne (CGO) and wgpu (goffi FFI) together; the build scripts and CI apply
   it automatically. See `ai-notes.md` for the linker-conflict evidence.
@@ -252,10 +257,12 @@ Keyboard: **Space** play/pause, **←/→** seek, **F11** fullscreen toggle,
   location (`%APPDATA%` on Windows, `~/.config` on Linux) are copied
   once as `app.legacy.log` — originals are never moved or deleted.
 - **FFmpeg resolution order** (`internal/fflocate`): explicit
-  configuration (`SHEYTAN_FFMPEG`), then the app-local
-  `tools/ffmpeg/bin` folder, then `PATH`. No binary is downloaded or
-  bundled; see `packaging/FFMPEG-TOOLS-LICENSING.md` for the legal
-  position and the user-approved local setup path.
+  configuration (`SHEYTAN_FFMPEG`), then the app-managed pair under
+  `<DataRoot>/media-tools/current/bin` (installed by the in-app Media
+  Tools & Codecs manager), then the app-local `tools/ffmpeg/bin` folder,
+  then `PATH`. No FFmpeg binary ships inside the package; see
+  `packaging/FFMPEG-TOOLS-LICENSING.md` for the legal position and
+  `packaging/FFMPEG-TOOLS-PROVENANCE.md` for the pinned download.
 - **Build/CI logs**: `ci-logs/` (bootstrapped by `scripts/ci/bootstrap-logs.sh`
   / `Bootstrap-Logs.ps1` before anything writes into it). Every executed
   gate writes a structured text record AND a machine-readable

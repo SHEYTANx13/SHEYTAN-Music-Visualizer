@@ -18,6 +18,13 @@
 #       $LASTEXITCODE).
 #   P6  Static root-cause assertions on build-windows.ps1: the failing
 #       forms are gone and the robust forms are present.
+#   P11 Negative-gate helper fixtures (run 43712071111 compact-package
+#       contract): scripts/ci/forbid-bundled-media-tools.sh must ACCEPT a
+#       clean synthetic package and REJECT synthetic archives carrying a
+#       fake tools/ffmpeg/bin/ffmpeg (or ffprobe), a DLL under tools/, a
+#       nested archive, or a file over the per-file budget. Pure bash +
+#       python3 + tar — runs on ANY host, so it executes BEFORE the pwsh
+#       availability check (P1-P10 need pwsh; P11 never does).
 #
 # Exit code 0 = every fixture PASS; nonzero = at least one FAILED.
 # A fixture that cannot run on this host (pwsh missing) is reported
@@ -50,6 +57,126 @@ echo "PACKAGE/PROCESS GATE FIXTURES — $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 echo "repo root: $REPO_ROOT"
 echo "pwsh: ${PWSH_BIN:-NOT FOUND}"
 echo "=============================================================="
+
+# ----------------------------------------------------------------------------
+# P11: negative-gate helper fixtures (run 43712071111 compact package).
+# The distributed archive must carry NO media-tool binaries: the reusable
+# helper is called DIRECTLY on synthetic archives in BOTH directions.
+# ----------------------------------------------------------------------------
+if command -v python3 >/dev/null 2>&1 && command -v tar >/dev/null 2>&1; then
+  P11DIR="$T/p11"
+  P11OK=1
+  mkdir -p "$P11DIR"
+  python3 - "$P11DIR" <<'P11PY' || P11OK=0
+import sys, zipfile, pathlib
+base = pathlib.Path(sys.argv[1])
+app = "SHEYTAN-Music-Visualizer-windows-x64"
+files = {
+    f"{app}/sheytan-music-visualizer.exe": "MZ-dummy",
+    f"{app}/license.md": "license",
+    f"{app}/readme.md": "readme",
+    f"{app}/portable.mode": "",
+    f"{app}/data/DATA-FOLDERS.txt": "contract",
+    f"{app}/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md": "licensing",
+}
+dirs = [f"{app}/", f"{app}/data/", f"{app}/tools/ffmpeg/", f"{app}/tools/ffmpeg/bin/"]
+
+def write_zip(path, extra_files, extra_dirs=()):
+    with zipfile.ZipFile(path, "w") as z:
+        for d in dirs + list(extra_dirs):
+            z.writestr(d, "")
+        for name, data in files.items():
+            z.writestr(name, data)
+        for name, data in extra_files.items():
+            z.writestr(name, data)
+
+# a) clean compact package (empty tools/ffmpeg/bin) — must be ACCEPTED
+write_zip(base / "clean.zip", {})
+# b) fake app-local ffmpeg binary — must be REJECTED
+write_zip(base / "bundled-ffmpeg.zip", {f"{app}/tools/ffmpeg/bin/ffmpeg": "fake-ffmpeg"})
+# c) fake app-local ffprobe binary — must be REJECTED
+write_zip(base / "bundled-ffprobe.zip", {f"{app}/tools/ffmpeg/bin/ffprobe.exe": "fake-ffprobe"})
+# d) DLL under tools/ — must be REJECTED
+write_zip(base / "dll-under-tools.zip", {f"{app}/tools/ffmpeg/bin/avcodec-64.dll": "MZ-dll"})
+# e) nested archive inside the package — must be REJECTED
+write_zip(base / "nested-archive.zip", {f"{app}/tools/ffmpeg/bin/ffmpeg.zip": "PK-dummy"})
+print("P11 synthetic archives written:", sorted(p.name for p in base.iterdir()))
+P11PY
+  if [ "$P11OK" -eq 1 ]; then
+    HELPER="$REPO_ROOT/scripts/ci/forbid-bundled-media-tools.sh"
+    # a) clean compact ZIP accepted
+    if bash "$HELPER" "$P11DIR/clean.zip" >"$T/p11a.log" 2>&1; then
+      report PASS "P11a" "clean compact zip ACCEPTED (empty tools/ffmpeg/bin, licensing notice present)"
+    else
+      report FAIL "P11a" "clean compact zip must be accepted"; sed 's/^/    /' "$T/p11a.log"; P11OK=0
+    fi
+    # b) fake tools/ffmpeg/bin/ffmpeg rejected
+    if bash "$HELPER" "$P11DIR/bundled-ffmpeg.zip" >"$T/p11b.log" 2>&1; then
+      report FAIL "P11b" "zip with a fake tools/ffmpeg/bin/ffmpeg was ACCEPTED (must be rejected)"; P11OK=0
+    else
+      grep -q "bundled media-tool binary" "$T/p11b.log" && report PASS "P11b" "zip with a fake tools/ffmpeg/bin/ffmpeg REJECTED" \
+        || { report FAIL "P11b" "rejection reason missing (see log)"; sed 's/^/    /' "$T/p11b.log"; P11OK=0; }
+    fi
+    # c) fake tools/ffmpeg/bin/ffprobe.exe rejected
+    if bash "$HELPER" "$P11DIR/bundled-ffprobe.zip" >"$T/p11c.log" 2>&1; then
+      report FAIL "P11c" "zip with a fake tools/ffmpeg/bin/ffprobe.exe was ACCEPTED (must be rejected)"; P11OK=0
+    else
+      grep -q "bundled media-tool binary" "$T/p11c.log" && report PASS "P11c" "zip with a fake tools/ffmpeg/bin/ffprobe.exe REJECTED" \
+        || { report FAIL "P11c" "rejection reason missing (see log)"; sed 's/^/    /' "$T/p11c.log"; P11OK=0; }
+    fi
+    # d) DLL under tools/ rejected
+    if bash "$HELPER" "$P11DIR/dll-under-tools.zip" >"$T/p11d.log" 2>&1; then
+      report FAIL "P11d" "zip with a DLL under tools/ was ACCEPTED (must be rejected)"; P11OK=0
+    else
+      grep -q "DLL under tools/" "$T/p11d.log" && report PASS "P11d" "zip with a DLL under tools/ REJECTED" \
+        || { report FAIL "P11d" "rejection reason missing (see log)"; sed 's/^/    /' "$T/p11d.log"; P11OK=0; }
+    fi
+    # e) nested archive rejected
+    if bash "$HELPER" "$P11DIR/nested-archive.zip" >"$T/p11e.log" 2>&1; then
+      report FAIL "P11e" "zip with a nested archive was ACCEPTED (must be rejected)"; P11OK=0
+    else
+      grep -q "nested archive" "$T/p11e.log" && report PASS "P11e" "zip with a nested archive REJECTED" \
+        || { report FAIL "P11e" "rejection reason missing (see log)"; sed 's/^/    /' "$T/p11e.log"; P11OK=0; }
+    fi
+    # f) per-file budget wiring: an explicit small budget must reject the
+    #    otherwise-clean package (rule 4 proof without a 40 MiB fixture)
+    if bash "$HELPER" "$P11DIR/clean.zip" 4 >"$T/p11f.log" 2>&1; then
+      report FAIL "P11f" "per-file budget not enforced (clean zip must fail under a 4-byte budget)"; P11OK=0
+    else
+      grep -q "oversized file" "$T/p11f.log" && report PASS "P11f" "per-file budget enforced (4-byte budget rejects the package)" \
+        || { report FAIL "P11f" "rejection reason missing (see log)"; sed 's/^/    /' "$T/p11f.log"; P11OK=0; }
+    fi
+    # g) Linux form: clean tar.gz accepted, dirty tar.gz (fake app-local
+    #    ffmpeg) rejected — the helper covers the tar side too
+    APP_DIR="SHEYTAN-Music-Visualizer-windows-x64"
+    mkdir -p "$P11DIR/tar-clean/$APP_DIR/tools/ffmpeg/bin" "$P11DIR/tar-clean/$APP_DIR/data" \
+             "$P11DIR/tar-dirty/$APP_DIR/tools/ffmpeg/bin" "$P11DIR/tar-dirty/$APP_DIR/data"
+    for d in tar-clean tar-dirty; do
+      printf 'MZ-dummy'   > "$P11DIR/$d/$APP_DIR/sheytan-music-visualizer.exe"
+      printf 'license'    > "$P11DIR/$d/$APP_DIR/license.md"
+      printf 'readme'     > "$P11DIR/$d/$APP_DIR/readme.md"
+      : >               "$P11DIR/$d/$APP_DIR/portable.mode"
+      printf 'contract'   > "$P11DIR/$d/$APP_DIR/data/DATA-FOLDERS.txt"
+      printf 'licensing'  > "$P11DIR/$d/$APP_DIR/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md"
+    done
+    printf 'fake-ffmpeg' > "$P11DIR/tar-dirty/$APP_DIR/tools/ffmpeg/bin/ffmpeg"
+    ( cd "$P11DIR/tar-clean" && tar -czf "$P11DIR/clean.tar.gz" "$APP_DIR" )
+    ( cd "$P11DIR/tar-dirty" && tar -czf "$P11DIR/dirty.tar.gz" "$APP_DIR" )
+    if bash "$HELPER" "$P11DIR/clean.tar.gz" >"$T/p11g1.log" 2>&1; then
+      report PASS "P11g" "clean tar.gz ACCEPTED"
+    else
+      report FAIL "P11g" "clean tar.gz must be accepted"; sed 's/^/    /' "$T/p11g1.log"; P11OK=0
+    fi
+    if bash "$HELPER" "$P11DIR/dirty.tar.gz" >"$T/p11g2.log" 2>&1; then
+      report FAIL "P11g" "tar.gz with a fake tools/ffmpeg/bin/ffmpeg was ACCEPTED (must be rejected)"; P11OK=0
+    else
+      grep -q "bundled media-tool binary" "$T/p11g2.log" && report PASS "P11g" "tar.gz with a fake tools/ffmpeg/bin/ffmpeg REJECTED" \
+        || { report FAIL "P11g" "rejection reason missing (see log)"; sed 's/^/    /' "$T/p11g2.log"; P11OK=0; }
+    fi
+  fi
+else
+  report "NOT RUN" "P11" "python3/tar unavailable on this host"
+fi
 
 if [ -z "$PWSH_BIN" ]; then
   for f in P1 P2 P3 P4 P5 P6; do report "NOT RUN" "$f" "pwsh not available on this host"; done

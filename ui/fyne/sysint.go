@@ -16,6 +16,7 @@ package fyneapp
 import (
 	"fmt"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/sysprofile"
 )
@@ -47,6 +49,8 @@ func (u *studioUI) onSystemIntegration() {
 	status.Wrapping = fyne.TextWrapWord
 
 	profileArea := container.NewVBox(status)
+
+	mediaBtn := widget.NewButton("Media Tools & Codecs…", func() { u.onMediaTools() })
 
 	scanBtn := widget.NewButton("Refresh / Rescan", func() {
 		u.logInfo("system-integration rescan requested")
@@ -111,10 +115,14 @@ func (u *studioUI) onSystemIntegration() {
 		widget.NewLabelWithStyle("Resource policy mode", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		modeSelect,
 		modeNote,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Media tools (optional)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		mediaBtn,
 		scanBtn,
 	)
-	d := dialog.NewCustom("System Integration — "+brand.ProductName, "Close", content, u.win)
-	d.Resize(fyne.NewSize(760, 620))
+	scroll := container.NewVScroll(content)
+	d := dialog.NewCustom("System Integration — "+brand.ProductName, "Close", scroll, u.win)
+	u.showCappedDialog(d, scroll)
 	d.SetOnClosed(func() { u.reconcileFullscreen("system-integration-closed") })
 	u.sysDialog = d
 	d.Show()
@@ -135,6 +143,19 @@ func (u *studioUI) scanSystemProfile(area *fyne.Container, status *widget.Label)
 	display := displayFactsFromWindow(u.win)
 	export := sysprofile.CollectExportFast(u.lay.ToolsFFmpegBin())
 	go func() {
+		// Panic boundary (run 43712071111): a scan panic must never
+		// terminate the app; it is contained, reported and the scan
+		// simply never completes.
+		defer func() {
+			if r := recover(); r != nil {
+				crashPath, werr := logging.WriteCrashReport(u.lay.Crashes,
+					"system-scan", "scanSystemProfile", r, debug.Stack())
+				u.logErr("recovered panic in system scan",
+					"recovered", fmt.Sprint(r),
+					"crash_report", crashPath,
+					"crash_report_err", errString(werr))
+			}
+		}()
 		start := time.Now()
 		p := sysprofile.CollectWith(active, export, display)
 		// Optional verification probe with the REAL render path (same
@@ -150,7 +171,12 @@ func (u *studioUI) scanSystemProfile(area *fyne.Container, status *widget.Label)
 		fyne.Do(func() {
 			status.SetText(fmt.Sprintf("Scan complete in %s (collector: %s)",
 				time.Since(start).Round(time.Millisecond), p.Collector))
-			area.Objects = []fyne.CanvasObject{widget.NewLabel(text)}
+			// Scroll the (long) profile text inside the fixed profile
+			// area so it can never push the dialog past the viewport
+			// (run 43712071111 P0-B).
+			profileLabel := widget.NewLabel(text)
+			profileLabel.Wrapping = fyne.TextWrapWord
+			area.Objects = []fyne.CanvasObject{container.NewVScroll(profileLabel)}
 			area.Refresh()
 			u.logInfo("system-integration scan complete",
 				"collector", p.Collector,

@@ -11,6 +11,18 @@
     runtime checks with ENFORCED build-metadata verification, and
     portable-folder staging with a ZIP validation.
 
+    COMPACT PACKAGE CONTRACT (run 43712071111): the package ships NO
+    media-tool binaries. FFmpeg/ffprobe are app-managed downloads (the
+    in-app Media Tools & Codecs manager installs the pinned pair under
+    <DataRoot>\media-tools\current\bin). CI enforces this negatively:
+    forbid-bundled-media-tools rejects any archive that carries
+    ffmpeg/ffprobe, package-size-budget caps the ZIP at 90 MiB, and the
+    media-tools gates prove the downloader plus the pinned install
+    integration; the extracted-package proof runs REAL h264 + hevc
+    exports through the app-managed pair with the system PATH scrubbed
+    of FFmpeg. The package-status record is derived from PERSISTED
+    evidence only (scripts/ci/write-package-status.py).
+
     Every command's stdout+stderr is captured from the first byte into
     ci-logs/phase2-build.log with a structured record and the original
     exit code. Independent gates keep running after a failure; dependent
@@ -61,6 +73,15 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $env:CI_LOG_FILE = Join-Path $logDir "phase2-build.log"
 Set-Content -Path $env:CI_LOG_FILE -Value "" -NoNewline # fresh local run
 
+# Persisted-evidence reset (run 43712071111): the export-proof result
+# files consumed by scripts/ci/write-package-status.py are rewritten by
+# the verify-extracted-path-with-spaces gate on every run; leftovers
+# from an earlier LOCAL run must never survive as stale PASS evidence.
+foreach ($staleProof in @("export-proof-h264.result.txt", "export-proof-h265.result.txt")) {
+    $stalePath = Join-Path $logDir $staleProof
+    if (Test-Path -LiteralPath $stalePath) { Remove-Item -Force -LiteralPath $stalePath }
+}
+
 . (Join-Path $repoRoot "scripts/ci/Capture-Step.ps1")
 
 $job = "phase2-windows-build"
@@ -89,6 +110,27 @@ if (-not $env:SHEYTAN_DATA_DIR) { $env:SHEYTAN_DATA_DIR = Join-Path $logDir "app
 # element as its own argument to native commands; a single
 # "-tags goffi_static" string would arrive at go as ONE argument.
 $env:SHEYTAN_GO_TAGS = "-tags goffi_static"
+
+# PINNED MEDIA-TOOLS PROOF CACHE (run 43712071111): the media-tools CI
+# proofs that need REAL ffmpeg/ffprobe binaries (the
+# media-tools-pinned-install integration gate and the packaged
+# app-managed export proof) download the pinned BtbN win64 GPL asset
+# ONCE into this cache — always OUTSIDE the repository, the dist\ tree
+# and the package stage tree. The distributed package ships NO
+# media-tool binaries; the pinned pair is proof machinery only. Both
+# consumer gates resolve the cache through
+# scripts/ci/MediaTools-Pinned.ps1 via this environment variable; the
+# parent owns cleanup after the last consumer has finished.
+$script:mediaToolsCacheOwned = $false
+if (-not $env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR) {
+    if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP) -and (Test-Path -LiteralPath $env:RUNNER_TEMP -PathType Container)) {
+        $env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR = Join-Path $env:RUNNER_TEMP "media-tools"
+    }
+    else {
+        $env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR = Join-Path ([System.IO.Path]::GetTempPath()) ("sheytan-media-tools-" + [guid]::NewGuid().ToString("N"))
+    }
+    $script:mediaToolsCacheOwned = $true
+}
 $script:failures = 0
 $script:failedGates = @()
 $script:skippedGates = @()
@@ -108,7 +150,9 @@ if ($null -eq $goResolved) {
         "go-build-packages", "build-executable", "run-version",
         "run-self-check", "verify-build-metadata", "stage-portable",
         "verify-package-license", "validate-pe", "create-portable-zip",
-        "verify-extracted-package"
+        "verify-extracted-package", "forbid-bundled-media-tools",
+        "package-size-budget", "media-tools-downloader-tests",
+        "media-tools-pinned-install", "verify-extracted-path-with-spaces"
     )
     foreach ($g in $blockedGates) {
         Add-Content -Path $env:CI_LOG_FILE -Value ("BLOCKED: gate {0} ({1})" -f $g, $blockedReason)
@@ -486,13 +530,16 @@ if ($exeOk) {
     }
     if ($rc -ne 0) { Fail-Gate "verify-build-metadata" }
 
-    # Failure-counter snapshot for the package-status record (run
-    # 42939743766 §6): gates BEFORE staging must be green for VERIFIED;
-    # later non-package gates do NOT invalidate a verified package — they
-    # produce the workflow's TEST-ONLY state instead.
-    $script:failuresBeforePackage = $script:failures
-
     # ---- portable staging + artifact validation -----------------------------
+    # COMPACT PACKAGE CONTRACT (run 43712071111): the package ships NO
+    # media-tool binaries. tools\ffmpeg\ + an EMPTY tools\ffmpeg\bin\
+    # stay as the documented app-local override location, and the
+    # FFmpeg licensing notice is staged beside them; the binaries
+    # themselves are app-managed downloads (the in-app Media Tools &
+    # Codecs manager installs the pinned pair under
+    # <DataRoot>\media-tools\current\bin, never into the package).
+    # forbid-bundled-media-tools and package-size-budget below enforce
+    # this negatively on the produced ZIP.
     $rc = Capture-Step -Job $job -Step "stage-portable" -ToolContext "gate:stage-portable" -Command {
         # CANONICAL ONE-PACKAGE CONTRACT (run 42939743766 §5.1): the GitHub
         # Actions artifact is EXACTLY dist\SHEYTAN-Music-Visualizer-windows-x64.zip
@@ -518,86 +565,6 @@ if ($exeOk) {
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "stage-portable" }
-
-    # ---- app-local FFmpeg/FFprobe staging (run 43612608237 P0) ------------
-    # Pinned BtbN FFmpeg 9.0.2 win64 GPL build (packaging/FFMPEG-TOOLS-PROVENANCE.md
-    # is the authoritative provenance record). SHA-256 verified download,
-    # then functional re-verification of the extracted pair: pinned version
-    # string, buildconf without --enable-nonfree (and with --enable-gpl),
-    # and the libx264 encoder. Failure leaves tools empty and the package
-    # status logic below refuses VERIFIED.
-    $script:ffmpegStaged = $false
-    $script:ffmpegStagedVersion = "not-staged"
-    $script:ffmpegStageReason = ""
-    $rc = Capture-Step -Job $job -Step "stage-ffmpeg-tools" -ToolContext "gate:stage-ffmpeg-tools (pinned 9.0.2 download + buildconf/encoder verification)" -Command {
-        $ffUrl = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip"
-        $ffSha256 = "40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae"
-        $expectedPrefix = "ffmpeg version n9.0.2"
-        $appDir = Join-Path (Get-Location).Path "dist\windows-x64-stage\SHEYTAN-Music-Visualizer-windows-x64"
-        $binDir = Join-Path $appDir "tools\ffmpeg\bin"
-        $tmpZip = Join-Path ([System.IO.Path]::GetTempPath()) ("ffmpeg-pinned-" + [guid]::NewGuid().ToString("N") + ".zip")
-        try {
-            Invoke-WebRequest -Uri $ffUrl -OutFile $tmpZip -UseBasicParsing
-            $hash = (Get-FileHash -Algorithm SHA256 $tmpZip).Hash.ToLowerInvariant()
-            if ($hash -ne $ffSha256) {
-                Write-Output ("ERROR: SHA-256 mismatch: got {0}, want {1}" -f $hash, $ffSha256)
-                $script:ffmpegStageReason = "pinned FFmpeg download SHA-256 mismatch"
-                exit 1
-            }
-            $tmpEx = Join-Path ([System.IO.Path]::GetTempPath()) ("ffmpeg-x-" + [guid]::NewGuid().ToString("N"))
-            Expand-Archive -Path $tmpZip -DestinationPath $tmpEx
-            $srcDir = Get-ChildItem -Directory $tmpEx | Where-Object { Test-Path (Join-Path $_.FullName "bin\ffmpeg.exe") } | Select-Object -First 1
-            if ($null -eq $srcDir) {
-                Write-Output "ERROR: extracted archive has no bin/ffmpeg.exe"
-                $script:ffmpegStageReason = "archive layout unexpected"
-                exit 1
-            }
-            $ffExe = Join-Path $srcDir.FullName "bin\ffmpeg.exe"
-            $fpExe = Join-Path $srcDir.FullName "bin\ffprobe.exe"
-            $vline = (& $ffExe -version | Select-Object -First 1)
-            if (-not "$vline".StartsWith($expectedPrefix)) {
-                Write-Output ("ERROR: version mismatch: {0}" -f $vline)
-                $script:ffmpegStageReason = "version mismatch: $vline"
-                exit 1
-            }
-            $bconf = (& $ffExe -hide_banner -buildconf) -join "`n"
-            if ("$bconf" -match "--enable-nonfree") {
-                Write-Output "ERROR: staged build declares --enable-nonfree (non-distributable)"
-                $script:ffmpegStageReason = "build is nonfree"
-                exit 1
-            }
-            if ("$bconf" -notmatch "--enable-gpl") {
-                Write-Output "ERROR: staged build lacks --enable-gpl (no libx264 expected)"
-                $script:ffmpegStageReason = "build lacks --enable-gpl"
-                exit 1
-            }
-            $encoders = (& $ffExe -hide_banner -encoders) -join "`n"
-            if ("$encoders" -notmatch "\slibx264\s") {
-                Write-Output "ERROR: staged build has no libx264 encoder"
-                $script:ffmpegStageReason = "no libx264 encoder"
-                exit 1
-            }
-            New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-            Copy-Item $ffExe $binDir -Force
-            Copy-Item $fpExe $binDir -Force
-            Copy-Item "packaging\ffmpeg-licenses\COPYING.GPLv2" (Join-Path $appDir "tools\ffmpeg\COPYING.GPLv2") -Force
-            Copy-Item "packaging\ffmpeg-licenses\COPYING.GPLv3" (Join-Path $appDir "tools\ffmpeg\COPYING.GPLv3") -Force
-            Copy-Item "packaging\FFMPEG-TOOLS-PROVENANCE.md" (Join-Path $appDir "tools\ffmpeg\FFMPEG-TOOLS-PROVENANCE.md") -Force
-            $prov = @("staged_utc=$(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')", "asset_url=$ffUrl", "asset_sha256=$ffSha256", "version=$vline", "libx264_encoder=present", "source_offer=https://ffmpeg.org/download.html (FFmpeg git d4070a14ce); build scripts: https://github.com/BtbN/FFmpeg-Builds", "licenses=COPYING.GPLv2, COPYING.GPLv3")
-            $prov -join "`n" | Set-Content -Path (Join-Path $appDir "tools\ffmpeg\FFMPEG-TOOLS-PROVENANCE.txt") -Encoding utf8NoBOM
-            $script:ffmpegStaged = $true
-            $script:ffmpegStagedVersion = "$vline"
-            Write-Output ("FFmpeg staging OK: {0}" -f $vline)
-            exit 0
-        }
-        finally {
-            if (Test-Path -LiteralPath $tmpZip) { Remove-Item -Force $tmpZip -ErrorAction SilentlyContinue }
-        }
-    }
-    if ($rc -ne 0) {
-        Fail-Gate "stage-ffmpeg-tools"
-        Write-Output ("ffmpeg tools NOT staged: {0} — package status cannot reach VERIFIED" -f $script:ffmpegStageReason)
-    }
 
     # BYTE-FOR-BYTE license identity gate (run 42481815519 contract):
     # the staged license.md must equal the canonical tracked file
@@ -860,6 +827,111 @@ if ($exeOk) {
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "verify-extracted-package" }
+
+    # ---- NEGATIVE PACKAGE GATE: no bundled media tools (run 43712071111) --
+    # The distributed archive must contain NO ffmpeg/ffprobe binary, no
+    # nested archive, no DLL under tools/ and no oversized single file:
+    # media tools are app-managed downloads (the in-app Media Tools &
+    # Codecs manager installs the pinned pair under
+    # <DataRoot>\media-tools\current\bin, never into the package). The
+    # reusable helper extracts the produced ZIP and scans BOTH the raw
+    # entry list and the extracted tree, always printing the archive
+    # size, packaged file count and top-10 largest files so a failure
+    # is diagnosable from the captured log alone.
+    $rc = Capture-Step -Job $job -Step "forbid-bundled-media-tools" -ToolContext "gate:forbid-bundled-media-tools (negative: zero bundled media tools)" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Forbid-BundledMediaTools.ps1") -Command {
+        $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
+        if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) {
+            Write-Output "ERROR: package ZIP not found: $zip (nothing to scan)"
+            exit 1
+        }
+        & (Join-Path $repoRoot "scripts/ci/Forbid-BundledMediaTools.ps1") -ArchivePath $zip
+        $helperRc = $LASTEXITCODE
+        if ($helperRc -ne 0) {
+            Write-Output "ERROR: forbid-bundled-media-tools FAILED (helper exit code $helperRc): the package must ship zero media-tool binaries"
+            exit 1
+        }
+        exit 0
+    }
+    if ($rc -ne 0) { Fail-Gate "forbid-bundled-media-tools" }
+
+    # ---- PACKAGE SIZE BUDGET (run 43712071111) ------------------------------
+    # The compact package (no bundled media tools) must stay UNDER
+    # 90 MiB = 94371840 bytes. Bundling FFmpeg binaries historically
+    # pushed the archive far past this budget; the budget now fails the
+    # build loudly with the exact byte count instead of shipping a
+    # bloated archive silently.
+    $rc = Capture-Step -Job $job -Step "package-size-budget" -ToolContext "gate:package-size-budget (90 MiB = 94371840 bytes)" -Command {
+        $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
+        if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) {
+            Write-Output "ERROR: package ZIP not found: $zip"
+            exit 1
+        }
+        $bytes = (Get-Item -LiteralPath $zip).Length
+        $budget = 94371840
+        Write-Output ("package:      {0}" -f $zip)
+        Write-Output ("package size: {0} bytes" -f $bytes)
+        Write-Output ("size budget:  {0} bytes (90 MiB)" -f $budget)
+        if ($bytes -ge $budget) {
+            Write-Output ("ERROR: package size {0} bytes meets or exceeds the {1}-byte budget (90 MiB)" -f $bytes, $budget)
+            exit 1
+        }
+        Write-Output ("package-size-budget PASSED: {0} bytes < {1} bytes ({2:N2} MiB of the 90 MiB budget)" -f $bytes, $budget, ($bytes / 1MB))
+        exit 0
+    }
+    if ($rc -ne 0) { Fail-Gate "package-size-budget" }
+
+    # ---- media-tools downloader fixture gate (run 43712071111) -------------
+    # The in-app Media Tools & Codecs manager (internal/mediatools)
+    # downloads and installs the pinned pair at runtime. Its fixture
+    # suite proves the downloader, resolution order and layout contracts
+    # WITHOUT network access; the env-gated real-download integration
+    # test is owned by media-tools-pinned-install below.
+    $rc = Capture-Step -Job $job -Step "media-tools-downloader-tests" -ToolContext "gate:media-tools-downloader-tests (internal/mediatools fixtures)" -GoTags -Command {
+        go test $goTags -count=1 ./internal/mediatools/
+        $tRc = $LASTEXITCODE
+        if ($tRc -ne 0) {
+            Write-Output "ERROR: internal/mediatools fixture suite failed (exit $tRc) — the app-managed downloader is not proven"
+            exit 1
+        }
+        Write-Output "media-tools downloader fixtures PASSED"
+        exit 0
+    }
+    if ($rc -ne 0) { Fail-Gate "media-tools-downloader-tests" }
+
+    # ---- pinned media-tools install integration gate (run 43712071111) -----
+    # Downloads the PINNED BtbN win64 GPL asset ONCE into the runner
+    # temp cache (outside repo/dist; never bundled into any artifact),
+    # SHA-256-verifies it, then runs the env-gated integration test
+    # TestMediaToolsInstallFromPinnedArchive with
+    # SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE/SHEYTAN_TEST_MEDIA_TOOLS_SHA256
+    # pointing at the verified archive. A download or hash failure fails
+    # the gate; the package can then reach TEST_ONLY at best (it still
+    # ships no binaries — that is enforced by the negative gates above).
+    $rc = Capture-Step -Job $job -Step "media-tools-pinned-install" -ToolContext "gate:media-tools-pinned-install (pinned BtbN win64 asset + env-gated integration test)" -GoTags -RequireRepoRoot -RepoRootHelpers @("scripts/ci/MediaTools-Pinned.ps1") -Command {
+        . (Join-Path $repoRoot "scripts/ci/MediaTools-Pinned.ps1")
+        $tools = Get-SheytanPinnedMediaTools
+        Write-Output ("pinned asset:   {0}" -f $tools.Url)
+        Write-Output ("pinned archive: {0} (SHA-256 verified)" -f $tools.Archive)
+        Write-Output ("pinned sha256:  {0}" -f $tools.Sha256)
+        Write-Output ("pinned bin dir: {0}" -f $tools.BinDir)
+        $env:SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE = $tools.Archive
+        $env:SHEYTAN_TEST_MEDIA_TOOLS_SHA256 = $tools.Sha256
+        try {
+            go test $goTags -count=1 -run 'TestMediaToolsInstallFromPinnedArchive' ./internal/mediatools/ -v
+            $tRc = $LASTEXITCODE
+        }
+        finally {
+            Remove-Item Env:SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE -ErrorAction SilentlyContinue
+            Remove-Item Env:SHEYTAN_TEST_MEDIA_TOOLS_SHA256 -ErrorAction SilentlyContinue
+        }
+        if ($tRc -ne 0) {
+            Write-Output "ERROR: TestMediaToolsInstallFromPinnedArchive failed (exit $tRc) — the app-managed install path is not proven"
+            exit 1
+        }
+        Write-Output "media-tools pinned install integration PASSED (pinned archive SHA-256 verified, installer test green)"
+        exit 0
+    }
+    if ($rc -ne 0) { Fail-Gate "media-tools-pinned-install" }
 }
 else {
     Skip-Gate "run-version" "executable build failed"
@@ -870,6 +942,11 @@ else {
     Skip-Gate "validate-pe" "executable build failed"
     Skip-Gate "create-portable-zip" "executable build failed"
     Skip-Gate "verify-extracted-package" "executable build failed"
+    Skip-Gate "forbid-bundled-media-tools" "executable build failed"
+    Skip-Gate "package-size-budget" "executable build failed"
+    Skip-Gate "media-tools-downloader-tests" "executable build failed"
+    Skip-Gate "media-tools-pinned-install" "executable build failed"
+    Skip-Gate "verify-extracted-path-with-spaces" "executable build failed"
 }
 
 # ---- dedicated GPU integration gate (Dedicated owner: TestPaletteReachesGPUShader)
@@ -883,15 +960,18 @@ $rc = Capture-Step -Job $job -Step "gpu-validation" -ToolContext "gate:gpu-valid
 if ($rc -ne 0) { Fail-Gate "gpu-validation" }
 
 # ---- path-with-spaces runtime check + package-status record ----------------
-# The package-status record (run 42939743766 §6, repaired for run
-# 43090342995 item D) is machine-readable state for the workflow upload
-# decision. VERIFIED only when every package-integrity gate passed AND
-# the expected commit (immutable github.sha context) exactly matches the
-# embedded build metadata of the built AND the extracted executable, read
-# from --build-info-json (typed JSON, never console-text regexes).
-# TEST_ONLY keeps the job red but preserves a testable package;
-# UNAVAILABLE is never uploaded.
-$script:packageStatus = "UNAVAILABLE"
+# The package-status record (run 43712071111 CONTRACT: persisted
+# evidence only) is machine-readable state for the workflow upload
+# decision, written by scripts/ci/write-package-status.py after the
+# gates below have persisted their verdicts. VERIFIED only when every
+# package-integrity gate passed AND the expected commit (immutable
+# github.sha context) exactly matches the embedded build metadata of
+# the built AND the extracted executable, read from --build-info-json
+# (typed JSON, never console-text regexes) AND the compact-package
+# proofs hold (zero bundled media tools, downloader fixture PASS,
+# app-managed h264 + hevc software export proofs PASS). TEST_ONLY
+# keeps the job red but preserves a testable package; UNAVAILABLE is
+# never uploaded.
 $script:commitExpected = $env:SHEYTAN_BUILD_COMMIT
 $script:commitObserved = "not-observed"
 $script:commitVerified = $false
@@ -904,12 +984,20 @@ $zipExists = (Test-Path -LiteralPath $zipPath) -and ((Get-Item -LiteralPath $zip
 # with earlier unrelated failures: a healthy executable must stay
 # uploadable as TEST_ONLY instead of being withheld as UNAVAILABLE.
 if ($exeExists -and $zipExists) {
-    $rc = Capture-Step -Job $job -Step "verify-extracted-path-with-spaces" -ToolContext "gate:package-verify (path with spaces)" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Invoke-CapturedProcess.ps1") -Command {
+    $rc = Capture-Step -Job $job -Step "verify-extracted-path-with-spaces" -ToolContext "gate:package-verify (path with spaces + app-managed media-tools export proofs)" -RequireRepoRoot -RepoRootHelpers @("scripts/ci/Invoke-CapturedProcess.ps1", "scripts/ci/MediaTools-Pinned.ps1") -Command {
         . (Join-Path $repoRoot "scripts/ci/Invoke-CapturedProcess.ps1")
+        . (Join-Path $repoRoot "scripts/ci/MediaTools-Pinned.ps1")
         $zip = Join-Path (Get-Location).Path "dist\SHEYTAN-Music-Visualizer-windows-x64.zip"
         $base = Join-Path ([System.IO.Path]::GetTempPath()) ("SHEYTAN Spaces Dir " + [guid]::NewGuid().ToString("N"))
         New-Item -ItemType Directory -Force -Path $base | Out-Null
         $cleanup = { if (Test-Path -LiteralPath $base) { Remove-Item -Recurse -Force $base } }
+        # Persisted proof files ("PASS <out>" / "FAIL <reason>") consumed
+        # by scripts/ci/write-package-status.py (run 43712071111 schema).
+        $proofH264 = "ci-logs\export-proof-h264.result.txt"
+        $proofH265 = "ci-logs\export-proof-h265.result.txt"
+        foreach ($pf in @($proofH264, $proofH265)) {
+            if (Test-Path -LiteralPath $pf) { Remove-Item -Force -LiteralPath $pf }
+        }
         try {
             Expand-Archive -Path $zip -DestinationPath $base
             $exe = Join-Path $base "SHEYTAN-Music-Visualizer-windows-x64\sheytan-music-visualizer.exe"
@@ -920,38 +1008,123 @@ if ($exeExists -and $zipExists) {
                 exit 1
             }
             Write-Output "spaces-path runtime check PASSED"
-            # Run 43612608237 packaged-export proof: when tools are packaged,
-            # run the REAL headless export from the extracted package with a
-            # PATH scrubbed of any system FFmpeg — the app must resolve its
-            # own tools\ffmpeg\bin pair and produce an ffprobe-validated MP4.
-            $pkgFF = Join-Path $base "SHEYTAN-Music-Visualizer-windows-x64\tools\ffmpeg\bin\ffmpeg.exe"
-            if (Test-Path -LiteralPath $pkgFF) {{
-                $outMp4 = Join-Path $base "packaged-export-proof.mp4"
-                $exArgs = @("--export-cli", "--export-out", $outMp4, "--export-w", "640", "--export-h", "360", "--export-fps", "30", "--export-seconds", "0.5")
-                $scrubBin = Join-Path $base "scrubbed-path-bin"
-                New-Item -ItemType Directory -Force -Path $scrubBin | Out-Null
+
+            # APP-MANAGED MEDIA-TOOLS EXPORT PROOF (run 43712071111): the
+            # package ships NO binaries, so the proof installs the PINNED
+            # pair into the app-managed location
+            # <DataRoot>\media-tools\current\bin\ and runs the EXTRACTED
+            # app with SHEYTAN_DATA_DIR pointing at that data root, with
+            # PATH scrubbed of every FFmpeg-carrying directory and
+            # SHEYTAN_FFMPEG unset — the app MUST resolve its own
+            # app-managed pair. Both codecs (h264 default, hevc software)
+            # are validated with the app-managed ffprobe.
+            $tools = Get-SheytanPinnedMediaTools
+            $dataDir = Join-Path $base "SHEYTAN App Data Dir"
+            $managedBin = Join-Path $dataDir "media-tools\current\bin"
+            New-Item -ItemType Directory -Force -Path $managedBin | Out-Null
+            Copy-Item -Force (Join-Path $tools.BinDir "ffmpeg.exe") (Join-Path $managedBin "ffmpeg.exe")
+            Copy-Item -Force (Join-Path $tools.BinDir "ffprobe.exe") (Join-Path $managedBin "ffprobe.exe")
+            Write-Output ("app-managed tools provisioned from the pinned asset: {0}" -f $managedBin)
+            $managedFfprobe = Join-Path $managedBin "ffprobe.exe"
+
+            # Keep DLL directories intact: only PATH entries that actually
+            # contain an ffmpeg.exe/ffprobe.exe binary are dropped.
+            $keptEntries = @($env:PATH -split ';' |
+                Where-Object { $_ -ne '' -and
+                    -not (Test-Path -LiteralPath (Join-Path $_ "ffmpeg.exe") -PathType Leaf) -and
+                    -not (Test-Path -LiteralPath (Join-Path $_ "ffprobe.exe") -PathType Leaf) })
+            $scrubbedPath = $keptEntries -join ';'
+            Write-Output ("PATH scrubbed of FFmpeg-carrying directories for the export proof ({0} of {1} entries kept)" -f $keptEntries.Count, @($env:PATH -split ';' | Where-Object { $_ -ne '' }).Count)
+
+            foreach ($codec in @("h264", "hevc")) {
+                $outMp4 = Join-Path $base ("packaged-export-proof-{0}.mp4" -f $codec)
+                $proofFile = if ($codec -eq "h264") { $proofH264 } else { $proofH265 }
+                $exArgs = @("--export-cli", "--export-out", $outMp4, "--export-w", "640", "--export-h", "360",
+                    "--export-fps", "30", "--export-seconds", "1", "--export-codec", $codec)
+                $oldDataDir = $env:SHEYTAN_DATA_DIR
                 $oldPath = $env:PATH
-                try {{
-                    $env:PATH = $scrubBin
+                $oldFfmpeg = $env:SHEYTAN_FFMPEG
+                try {
+                    $env:SHEYTAN_DATA_DIR = $dataDir
+                    $env:PATH = $scrubbedPath
+                    if (Test-Path Env:SHEYTAN_FFMPEG) { Remove-Item Env:SHEYTAN_FFMPEG }
                     $exRun = Invoke-CapturedProcess -FilePath $exe -ArgumentList $exArgs -TimeoutSeconds 600
-                }} finally {{ $env:PATH = $oldPath }}
-                if ($exRun.Kind -ne 'exited' -or $exRun.ExitCode -ne 0) {{
-                    Write-Output ("ERROR: packaged --export-cli failed with scrubbed PATH (kind={{0}} code={{1}})" -f $exRun.Kind, $exRun.ExitCode)
-                    if ($exRun.StdErr) {{ $exRun.StdErr | Select-Object -First 5 | ForEach-Object {{ Write-Output ("  stderr: {{0}}" -f $_) }} }}
+                }
+                finally {
+                    if ($null -ne $oldDataDir) { $env:SHEYTAN_DATA_DIR = $oldDataDir } else { Remove-Item Env:SHEYTAN_DATA_DIR -ErrorAction SilentlyContinue }
+                    if ($null -ne $oldPath) { $env:PATH = $oldPath }
+                    if ($null -ne $oldFfmpeg) { $env:SHEYTAN_FFMPEG = $oldFfmpeg } else { Remove-Item Env:SHEYTAN_FFMPEG -ErrorAction SilentlyContinue }
+                }
+                if ($exRun.Error -ne "" -or $exRun.Kind -ne 'exited' -or $exRun.ExitCode -ne 0) {
+                    $reason = ("app-managed export --export-codec {0} failed with scrubbed PATH (kind={1} code={2} err={3})" -f $codec, $exRun.Kind, $exRun.ExitCode, $exRun.Error)
+                    if ($exRun.StdErr) { $exRun.StdErr | Select-Object -First 5 | ForEach-Object { Write-Output ("  stderr: {0}" -f $_) } }
+                    Write-Output "FAIL $reason" | Set-Content -Path $proofFile -Encoding utf8NoBOM
+                    Write-Output ("ERROR: {0}" -f $reason)
                     exit 1
-                }}
-                if (-not (Test-Path -LiteralPath $outMp4) -or (Get-Item -LiteralPath $outMp4).Length -le 0) {{
-                    Write-Output "ERROR: packaged export produced no output"
+                }
+                if (-not (Test-Path -LiteralPath $outMp4) -or (Get-Item -LiteralPath $outMp4).Length -le 0) {
+                    $reason = "app-managed export --export-codec $codec produced no output file"
+                    Write-Output "FAIL $reason" | Set-Content -Path $proofFile -Encoding utf8NoBOM
+                    Write-Output ("ERROR: {0}" -f $reason)
                     exit 1
-                }}
-                $pkgFP = Join-Path $base "SHEYTAN-Music-Visualizer-windows-x64\tools\ffmpeg\bin\ffprobe.exe"
-                $probeRun = Invoke-CapturedProcess -FilePath $pkgFP -ArgumentList @("-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,width,height", "-of", "csv", $outMp4) -TimeoutSeconds 120
-                if ($probeRun.StdOut) {{ $probeRun.StdOut | ForEach-Object {{ Write-Output ("  ffprobe: {{0}}" -f $_) }} }}
-                Write-Output "PACKAGED-EXPORT PROOF PASSED (app-local tools, scrubbed PATH, ffprobe-validated)"
-            }} else {{
-                Write-Output "tools\ffmpeg\bin empty in extracted package — packaged-export proof NOT RUN (status stays TEST_ONLY)"
-            }}
+                }
+                $outBytes = (Get-Item -LiteralPath $outMp4).Length
+                # Validate with the APP-MANAGED ffprobe (the same pair the
+                # app resolved): expected codec, ~30 frames, ~1 s, size > 0.
+                $probeRun = Invoke-CapturedProcess -FilePath $managedFfprobe -ArgumentList @(
+                    "-v", "error", "-count_frames", "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name,width,height,nb_read_frames",
+                    "-show_entries", "format=duration", "-of", "json", $outMp4) -TimeoutSeconds 120
+                if ($probeRun.Error -ne "" -or $probeRun.ExitCode -ne 0) {
+                    $reason = ("app-managed ffprobe validation failed for {0} (code={1} err={2})" -f $codec, $probeRun.ExitCode, $probeRun.Error)
+                    Write-Output "FAIL $reason" | Set-Content -Path $proofFile -Encoding utf8NoBOM
+                    Write-Output ("ERROR: {0}" -f $reason)
+                    exit 1
+                }
+                $codecName = ""
+                $frames = 0
+                $duration = 0.0
+                try {
+                    $probeJson = (($probeRun.StdOut -join "`n") | ConvertFrom-Json)
+                    if ($null -ne $probeJson.streams -and $probeJson.streams.Count -gt 0) {
+                        $codecName = [string]$probeJson.streams[0].codec_name
+                        $frames = [int]$probeJson.streams[0].nb_read_frames
+                    }
+                    if ($null -ne $probeJson.format) { $duration = [double]$probeJson.format.duration }
+                }
+                catch {
+                    $reason = "app-managed ffprobe output for $codec could not be parsed: $($_.Exception.Message)"
+                    Write-Output "FAIL $reason" | Set-Content -Path $proofFile -Encoding utf8NoBOM
+                    Write-Output ("ERROR: {0}" -f $reason)
+                    exit 1
+                }
+                Write-Output ("  {0}: codec={1} frames={2} duration={3:N3}s size={4} bytes" -f $codec, $codecName, $frames, $duration, $outBytes)
+                $proofFailures = @()
+                if ($codecName -ne $codec) { $proofFailures += "codec '$codecName' does not match the requested '$codec'" }
+                if ($frames -lt 28 -or $frames -gt 32) { $proofFailures += "frame count $frames is not ~30 (30 fps x 1 s)" }
+                if ($duration -lt 0.8 -or $duration -gt 1.25) { $proofFailures += "duration {0:N3}s is not ~1 s" -f $duration }
+                if ($outBytes -le 0) { $proofFailures += "output is empty" }
+                if ($proofFailures.Count -gt 0) {
+                    $reason = "app-managed export --export-codec $codec failed validation: " + ($proofFailures -join "; ")
+                    Write-Output "FAIL $reason" | Set-Content -Path $proofFile -Encoding utf8NoBOM
+                    Write-Output ("ERROR: {0}" -f $reason)
+                    exit 1
+                }
+                Write-Output "PASS $outMp4" | Set-Content -Path $proofFile -Encoding utf8NoBOM
+                Write-Output ("app-managed export proof PASSED: {0} ({1})" -f $codec, $outMp4)
+            }
+            Write-Output "spaces-path + app-managed media-tools export proofs PASSED (h264 + hevc software; SHEYTAN_DATA_DIR app-managed pair; PATH scrubbed of system FFmpeg; app-managed ffprobe validation)"
             exit 0
+        }
+        catch {
+            # Provisioning/parse failures also leave truthful FAIL records
+            # (only for proofs that have not already been written).
+            $reason = $_.Exception.Message
+            foreach ($pf in @($proofH264, $proofH265)) {
+                if (-not (Test-Path -LiteralPath $pf)) { Write-Output "FAIL $reason" | Set-Content -Path $pf -Encoding utf8NoBOM }
+            }
+            Write-Output ("ERROR: verify-extracted-path-with-spaces failed: {0}" -f $reason)
+            exit 1
         }
         finally { & $cleanup }
     }
@@ -999,47 +1172,64 @@ if ($exeExists -and $zipExists) {
     $script:commitVerified = [bool]($builtStatus.verified -and $extractedStatus.verified)
     $script:commitExtractedObserved = $extractedStatus.observed
     $script:commitReason = if ($builtStatus.verified -and $extractedStatus.verified) { "" } else { $builtStatus.reason + " | extracted: " + $extractedStatus.reason }
+}
+else {
+    Skip-Gate "verify-extracted-path-with-spaces" "package not produced (executable or ZIP missing)"
+}
 
-    # STATUS SEMANTICS (run 43090342995 item D contract):
-    #   UNAVAILABLE — no valid package, unverified embedded commit, or any
-    #                 failed package-integrity gate; never uploaded.
-    #   TEST_ONLY   — every package-integrity gate AND commit identity
-    #                 passed, but an unrelated quality gate failed; the
-    #                 artifact is uploaded and the job/workflow stay red.
-    #   VERIFIED    — everything green.
-    $packageGatesFailed = $script:failures - $script:failuresBeforePackage
-    # Run 43612608237 status contract: VERIFIED additionally requires the
-    # packaged app-local FFmpeg/FFprobe pair (staged, verified, proven by
-    # the packaged-export gate). Empty tools/ffmpeg/bin is TEST_ONLY at best.
-    if (-not $script:commitVerified -or $packageGatesFailed -gt 0) {
-        $script:packageStatus = "UNAVAILABLE"
-    } elseif ($script:failuresBeforePackage -gt 0 -or -not $script:ffmpegStaged) {
-        $script:packageStatus = "TEST_ONLY"
-        if (-not $script:ffmpegStaged) {
-            $script:commitReason = "$($script:commitReason); ffmpeg_tools_not_staged: $($script:ffmpegStageReason)"
-        }
-    } else {
-        $script:packageStatus = "VERIFIED"
+# ---- package-status record from PERSISTED EVIDENCE (run 43712071111) ------
+# CONTRACT: ci-logs/package-status-windows.json is derived by the
+# canonical writer scripts/ci/write-package-status.py from PERSISTED
+# evidence ONLY — the per-gate verdict JSONs in
+# ci-logs\gate-results\<gate>.result.json, the export-proof result
+# files (export-proof-h264/h265.result.txt) and an actual scan of the
+# produced ZIP. In-memory parent variables are NEVER consulted: every
+# Capture-Step gate runs in a CHILD pwsh process, so parent-script
+# variables can never observe a gate's outcome (the previous in-parent
+# status derivation was exactly that defect class — a staging gate
+# flipped a parent variable inside a child that the parent never saw,
+# so the record claimed "not staged" while the ZIP actually carried
+# the binaries). The writer folds commit verification, package-gate
+# failures, the bundled-media-tools scan and the media/export proofs
+# into VERIFIED / TEST_ONLY / UNAVAILABLE semantics.
+$pyWriter = Get-Command python3 -ErrorAction SilentlyContinue
+if ($null -eq $pyWriter) { $pyWriter = Get-Command python -ErrorAction SilentlyContinue }
+if ($null -eq $pyWriter) {
+    Write-Output "ERROR: python3/python not found on PATH — ci-logs/package-status-windows.json cannot be written; failing closed (never fabricate a status record)"
+    Fail-Gate "package-status-record"
+}
+else {
+    $statusArgs = @(
+        (Join-Path $repoRoot "scripts/ci/write-package-status.py"),
+        "--platform", "windows-x64",
+        "--package", $zipPath,
+        "--package-file", "dist/SHEYTAN-Music-Visualizer-windows-x64.zip",
+        "--app-dir", "SHEYTAN-Music-Visualizer-windows-x64",
+        "--log-dir", $logDir,
+        "--out", (Join-Path $logDir "package-status-windows.json"),
+        "--commit-expected", "$script:commitExpected",
+        "--commit-observed", "$script:commitObserved",
+        "--commit-verified", "$(if ($script:commitVerified) { 'true' } else { 'false' })",
+        "--commit-source", "--build-info-json (built exe + extracted package, typed JSON parse)",
+        "--commit-reason", "$script:commitReason"
+    )
+    & $pyWriter.Source @statusArgs
+    $writerRc = $LASTEXITCODE
+    if ($writerRc -ne 0) {
+        Write-Output "ERROR: write-package-status.py failed with exit code $writerRc"
+        Fail-Gate "package-status-record"
     }
 }
-$pkgRecord = [ordered]@{
-    platform                    = "windows-x64"
-    package_status              = $script:packageStatus
-    package_file                = "dist/SHEYTAN-Music-Visualizer-windows-x64.zip"
-    app_dir                     = "SHEYTAN-Music-Visualizer-windows-x64"
-    commit_expected             = $(if ([string]::IsNullOrWhiteSpace($script:commitExpected)) { $null } else { $script:commitExpected })
-    commit_observed             = $script:commitObserved
-    commit_verified             = $script:commitVerified
-    commit_extracted_observed   = $script:commitExtractedObserved
-    commit_source               = "--build-info-json (built exe + extracted package, typed JSON parse)"
-    commit_reason               = $script:commitReason
-    ffmpeg_tools_staged         = [bool]$script:ffmpegStaged
-    ffmpeg_tools_version        = $script:ffmpegStagedVersion
-    note                        = "VERIFIED requires a non-blank expected commit exactly matching the embedded metadata of the built AND the extracted executable plus zero failed package-integrity gates; TEST_ONLY keeps the job red; UNAVAILABLE is never uploaded"
+Get-Content (Join-Path $logDir "package-status-windows.json")
+
+# PINNED CACHE CLEANUP (run 43712071111): every consumer of the pinned
+# media-tools proof cache (media-tools-pinned-install, the app-managed
+# export proof) has finished — remove the cache when this run owns it
+# (a caller-preset cache directory is never touched).
+if ($script:mediaToolsCacheOwned -and $env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR -and (Test-Path -LiteralPath $env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR)) {
+    Remove-Item -Recurse -Force -LiteralPath $env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR -ErrorAction SilentlyContinue
+    Write-Output "pinned media-tools proof cache cleaned: $($env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR)"
 }
-New-Item -ItemType Directory -Force -Path "ci-logs" | Out-Null
-$pkgRecord | ConvertTo-Json | Set-Content -Path "ci-logs\package-status-windows.json" -Encoding utf8NoBOM
-Get-Content "ci-logs\package-status-windows.json"
 
 # ---- run summary + failure index -------------------------------------------
 $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")

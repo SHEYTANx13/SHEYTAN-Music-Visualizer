@@ -2,8 +2,13 @@
 
 SHEYTAN Music Visualizer uses FFmpeg/ffprobe as an **optional, local
 encoder/decoder adapter** for MP4 export and the AAC/M4A/ALAC input
-family. The application never downloads binaries at runtime and this
-package ships **no FFmpeg binary**.
+family. This package ships **no FFmpeg binary** (run 43712071111
+compact-package contract: a hard negative gate fails the package when
+any ffmpeg/ffprobe binary, tool DLL pack or nested archive appears in
+the application archive). The optional tools are provided by the
+user, through the in-app **Media Tools & Codecs** manager, which
+downloads a pinned, digest-verified pack on explicit request into the
+user data directory (never into the application package).
 
 ## Why no binary ships in this package
 
@@ -22,13 +27,21 @@ claim of redistribution rights is made.
 
 1. Explicit user configuration (`SHEYTAN_FFMPEG` environment variable
    naming a directory that contains `ffmpeg` and `ffprobe`).
-2. **This directory**: `<application folder>/tools/ffmpeg/bin` —
-   the app-local location. Place `ffmpeg` + `ffprobe` here
-   (`ffmpeg.exe`/`ffprobe.exe` on Windows) to make the package
-   self-contained without touching PATH.
-3. The system `PATH` (external fallback).
+2. **App-managed tools**: `<user data root>/media-tools/current/bin`
+   — installed by the in-app Media Tools & Codecs manager (pinned
+   manifest, HTTPS-only, SHA-256 verified before extraction, bounded
+   traversal-safe extraction, binary verification incl. a real encode
+   + probe smoke test, atomic swap with rollback). Licenses and the
+   provenance record are copied beside the pair under
+   `media-tools/current/licenses/`.
+3. **This directory**: `<application folder>/tools/ffmpeg/bin` —
+   the app-local portable location (shipped EMPTY). Place `ffmpeg` +
+   `ffprobe` here (`ffmpeg.exe`/`ffprobe.exe` on Windows) to make the
+   package self-contained without touching PATH.
+4. The system `PATH` (external fallback).
 
-The resolved source (override / app-local / path), the FFmpeg version
+The resolved source (override / app-managed / app-local / path), the
+FFmpeg version
 and the actually available encoders are recorded in the runtime log
 and shown in Help / Diagnostics and the export dialog. MP4 export is
 proven only by a real, ffprobe-validated export — never by

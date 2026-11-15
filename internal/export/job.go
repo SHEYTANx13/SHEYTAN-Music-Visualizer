@@ -28,9 +28,12 @@ import (
 type Request struct {
 	OutputPath    string
 	Width, Height int
-	FPS           int
+	FPS           int       // integer fps (legacy; ignored when FPSRate is set)
+	FPSRate       FrameRate // exact rational rate (run 43712071111; preferred)
+	VideoCodec    string    // "" / "h264" (compatibility default) / "hevc"
 	QualityPreset string
-	Encoder       string // auto | libx264 | hardware name
+	Encoder       string // auto | libx264 | libx265 | hardware name
+	AudioBitrate  string // e.g. "192k" (AAC; empty = 192k default)
 	AudioWavPath  string // canonical WAV from the PCM cache
 	AudioDuration float64
 
@@ -94,14 +97,21 @@ func NewJob(req Request) (*Job, error) {
 	if req.Width <= 0 || req.Height <= 0 || req.Width > 7680 || req.Height > 4320 {
 		return nil, fmt.Errorf("export: invalid resolution %dx%d", req.Width, req.Height)
 	}
-	validFPS := false
-	for _, f := range FrameRates {
-		if req.FPS == f {
-			validFPS = true
-		}
+	rate := req.FPSRate
+	if rate.Num == 0 {
+		rate = IntFrameRate(req.FPS)
 	}
-	if !validFPS {
-		return nil, fmt.Errorf("export: unsupported frame rate %d (use 24/30/60/120)", req.FPS)
+	if !rate.Valid() {
+		return nil, fmt.Errorf("export: unsupported frame rate %s (supported: %d-%d fps, e.g. 24/25/29.97/30/50/59.94/60/119.88/120 or 24000/1001)",
+			rate.String(), MinFPS, MaxFPS)
+	}
+	req.FPSRate = rate
+	req.FPS = int(rate.Float())
+	if req.VideoCodec == "" {
+		req.VideoCodec = CodecH264
+	}
+	if req.AudioBitrate == "" {
+		req.AudioBitrate = "192k"
 	}
 	out, err := SanitizeOutputPath(req.OutputPath)
 	if err != nil {
@@ -118,7 +128,7 @@ func NewJob(req Request) (*Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	enc, err := ResolveEncoder(env, req.Encoder)
+	enc, err := ResolveEncoderCodec(env, req.Encoder, req.VideoCodec)
 	if err != nil {
 		return nil, err
 	}
@@ -187,11 +197,11 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 	}()
 
 	start := time.Now()
-	totalFrames := int(j.req.AudioDuration * float64(j.req.FPS))
+	totalFrames := int(j.req.AudioDuration * j.req.FPSRate.Float())
 	if totalFrames <= 0 {
 		return nil, fmt.Errorf("export: audio duration is zero")
 	}
-	if totalFrames > 8*60*60*j.req.FPS { // 8 h safety bound
+	if totalFrames > 8*60*60*int(j.req.FPSRate.Float()) { // 8 h safety bound
 		return nil, fmt.Errorf("export: requested duration is too long")
 	}
 
@@ -209,28 +219,30 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 		_ = os.Remove(partPath) // no-op after successful rename
 	}()
 
-	// ffmpeg command: rawvideo stdin + canonical wav
-	q := QualityArgs(j.req.QualityPreset)
+	// ffmpeg command: rawvideo stdin + canonical wav. The HEVC MP4
+	// sample entry is tagged for broad player compatibility via the
+	// default hvc1 tag ffmpeg writes for hevc in MP4.
+	q := qualityCRF(j.req.QualityPreset, j.req.VideoCodec)
 	args := []string{
 		"-nostdin", "-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1",
 		"-f", "rawvideo", "-pixel_format", "rgba",
 		"-video_size", fmt.Sprintf("%dx%d", j.req.Width, j.req.Height),
-		"-framerate", fmt.Sprint(j.req.FPS),
+		"-framerate", j.req.FPSRate.String(),
 		"-i", "pipe:0",
 		"-i", j.req.AudioWavPath,
 		"-map", "0:v:0", "-map", "1:a:0",
 		"-c:v", j.enc.Name,
 	}
 	args = append(args, j.enc.Args...)
-	if j.enc.Name == "libx264" {
+	if j.enc.Name == "libx264" || j.enc.Name == "libx265" {
 		args = append(args,
 			"-crf", q,
-			"-preset", x264PresetFor(j.req.Width, j.req.Height, j.req.FPS),
+			"-preset", encoderPresetFor(j.req.Width, j.req.Height, j.req.FPSRate.Float()),
 		)
 	}
 	args = append(args,
 		"-pix_fmt", "yuv420p",
-		"-c:a", "aac", "-b:a", "192k",
+		"-c:a", "aac", "-b:a", j.req.AudioBitrate,
 		"-shortest",
 		"-movflags", "+faststart",
 		partPath,
@@ -280,7 +292,7 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 				return
 			default:
 			}
-			t := float64(i) / float64(j.req.FPS)
+			t := float64(i) * float64(j.req.FPSRate.Den) / float64(j.req.FPSRate.Num)
 			img, rerr := j.renderFrame(i, t)
 			if rerr != nil {
 				procErr = fmt.Errorf("export: render frame %d: %w", i, rerr)
@@ -320,8 +332,8 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 
 	// ffprobe validation
 	val, verr := Validate(j.env.FFprobePath, partPath, ValidationExpect{
-		Width: j.req.Width, Height: j.req.Height, FPS: j.req.FPS,
-		ExpectedDuration: j.req.AudioDuration,
+		Width: j.req.Width, Height: j.req.Height, FPS: j.req.FPSRate.Float(),
+		VideoCodec: j.req.VideoCodec, ExpectedDuration: j.req.AudioDuration,
 	})
 	if verr != nil {
 		return nil, fmt.Errorf("export: validation error: %w", verr)

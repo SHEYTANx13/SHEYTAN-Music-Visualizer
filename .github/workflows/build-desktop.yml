@@ -476,14 +476,17 @@ jobs:
       # run-42921967187 recovery path): there is EXACTLY ONE Windows x64
       # application artifact — SHEYTAN-Music-Visualizer-windows-x64.zip.
       # No raw EXE, no staged-folder archive, no "recovery executable",
-      # no duplicate portable variant is ever uploaded. The package is
-      # uploaded when it exists AND its own package gates passed:
+      # no duplicate portable variant is ever uploaded. COMPACT PACKAGE
+      # (run 43712071111): the package ships NO media-tool binaries —
+      # FFmpeg/ffprobe are app-managed downloads, enforced negatively by
+      # the build gates and reflected in the status record. The package
+      # is uploaded when it exists AND its own package gates passed:
       #   - package_status VERIFIED → the canonical package of a green run
       #   - package_status TEST_ONLY → the canonical package of a run
       #     where a non-package gate failed; the job and workflow stay red
       #     and the summary labels it TEST-ONLY
-      #   - package_status UNAVAILABLE / file missing → NO package is
-      #     uploaded; diagnostics only
+      #   - package_status UNAVAILABLE / file missing / bundled media
+      #     tools detected → NO package is uploaded; diagnostics only
       # Uploads use actions/upload-artifact v7 archive:false, so the
       # downloaded artifact IS the ZIP (no double-zip wrapper); the
       # artifact name is the file's basename.
@@ -494,22 +497,58 @@ jobs:
         shell: pwsh
         run: |
           Set-StrictMode -Version 3.0
+          # COMPACT-PACKAGE STATUS FIELDS (run 43712071111 schema, written
+          # by scripts/ci/write-package-status.py from PERSISTED gate
+          # evidence only): package_status, ffmpeg_binaries_bundled,
+          # media_tools_downloader_fixture, app_launch_self_check,
+          # h264_export_proof, h265_software_export_proof. The decision
+          # is driven by package_status; the negative guards below make a
+          # bundled-media-tools regression a hard never-upload even if a
+          # future writer bug mislabelled the status. Field reads go
+          # through PSObject.Properties so a missing key (schema drift)
+          # keeps the fail-closed default instead of throwing under
+          # StrictMode.
+          function Get-StatusField($obj, [string]$name, $default) {
+            if ($null -ne $obj) {
+              $prop = $obj.PSObject.Properties[$name]
+              if ($null -ne $prop) { return $prop.Value }
+            }
+            return $default
+          }
           $status = 'UNAVAILABLE'
+          $bundled = $true
+          $downloader = 'SKIPPED'
+          $selfCheck = 'FAIL'
+          $h264 = 'NOT RUN'
+          $h265 = 'NOT RUN'
           $statusFile = 'ci-logs/package-status-windows.json'
           if (Test-Path $statusFile) {
-            try { $status = (Get-Content $statusFile -Raw | ConvertFrom-Json).package_status } catch { $status = 'UNAVAILABLE' }
+            try {
+              $pkg = Get-Content $statusFile -Raw | ConvertFrom-Json
+              $status = [string](Get-StatusField $pkg 'package_status' 'UNAVAILABLE')
+              $bundled = [bool](Get-StatusField $pkg 'ffmpeg_binaries_bundled' $true)
+              $downloader = [string](Get-StatusField $pkg 'media_tools_downloader_fixture' 'SKIPPED')
+              $selfCheck = [string](Get-StatusField $pkg 'app_launch_self_check' 'FAIL')
+              $h264 = [string](Get-StatusField $pkg 'h264_export_proof' 'NOT RUN')
+              $h265 = [string](Get-StatusField $pkg 'h265_software_export_proof' 'NOT RUN')
+            } catch { $status = 'UNAVAILABLE' }
           }
           $zip = 'dist/SHEYTAN-Music-Visualizer-windows-x64.zip'
           $exists = (Test-Path -LiteralPath $zip) -and ((Get-Item -LiteralPath $zip).Length -gt 0)
           Write-Output "package_status=$status zip_exists=$exists"
-          $upload = ($status -in @('VERIFIED','TEST_ONLY')) -and $exists
+          Write-Output "ffmpeg_binaries_bundled=$bundled media_tools_downloader_fixture=$downloader app_launch_self_check=$selfCheck"
+          Write-Output "h264_export_proof=$h264 h265_software_export_proof=$h265"
+          $upload = ($status -in @('VERIFIED','TEST_ONLY')) -and $exists -and (-not $bundled)
+          if ($status -in @('VERIFIED','TEST_ONLY') -and $bundled) {
+            Write-Output "ERROR: bundled media tools detected — the compact package contract forbids an upload regardless of the recorded status"
+          }
           if ($upload) {
             $size = (Get-Item -LiteralPath $zip).Length
             if ($size -lt 1048576) { Write-Output "ERROR: package implausibly small ($size bytes)"; $upload = $false }
             else { Write-Output "package size: $size bytes" }
           }
           if (-not $upload) {
-            Write-Output "NO Windows package upload: an unusable package is never published (status=$status). Diagnostics remain available."
+            Write-Output "NO Windows package upload: an unusable package is never published (status=$status bundled=$bundled). Diagnostics remain available."
           }
           "package_uploaded=$(if ($upload) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
           "package_status=$status" >> $env:GITHUB_OUTPUT
@@ -527,15 +566,42 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          Set-StrictMode -Version 3.0
+          # COMPACT-PACKAGE STATUS FIELDS (run 43712071111): the label
+          # surfaces the persisted evidence fields — no bundled binaries,
+          # downloader fixture, self-check and both app-managed export
+          # proofs — next to the package_status verdict. PSObject property
+          # lookups keep missing keys (schema drift) at their fail-closed
+          # defaults instead of throwing under StrictMode.
+          function Get-StatusField($obj, [string]$name, $default) {
+            if ($null -ne $obj) {
+              $prop = $obj.PSObject.Properties[$name]
+              if ($null -ne $prop) { return $prop.Value }
+            }
+            return $default
+          }
           $status = '${{ steps.win_package_decision.outputs.package_status }}'
           $uploaded = '${{ steps.win_package_decision.outputs.package_uploaded }}'
+          $bundled = $true; $downloader = 'SKIPPED'; $selfCheck = 'FAIL'; $h264 = 'NOT RUN'; $h265 = 'NOT RUN'
+          $statusFile = 'ci-logs/package-status-windows.json'
+          if (Test-Path $statusFile) {
+            try {
+              $pkg = Get-Content $statusFile -Raw | ConvertFrom-Json
+              $bundled = [bool](Get-StatusField $pkg 'ffmpeg_binaries_bundled' $true)
+              $downloader = [string](Get-StatusField $pkg 'media_tools_downloader_fixture' 'SKIPPED')
+              $selfCheck = [string](Get-StatusField $pkg 'app_launch_self_check' 'FAIL')
+              $h264 = [string](Get-StatusField $pkg 'h264_export_proof' 'NOT RUN')
+              $h265 = [string](Get-StatusField $pkg 'h265_software_export_proof' 'NOT RUN')
+            } catch { }
+          }
           if ($env:GITHUB_STEP_SUMMARY) {
+            $proofLine = "media_tools_downloader_fixture=$downloader app_launch_self_check=$selfCheck h264_export_proof=$h264 h265_software_export_proof=$h265 ffmpeg_binaries_bundled=$bundled"
             if ($uploaded -eq 'true' -and $status -eq 'VERIFIED') {
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- Artifact: SHEYTAN-Music-Visualizer-windows-x64.zip (VERIFIED — every required gate passed)"
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- Artifact: SHEYTAN-Music-Visualizer-windows-x64.zip (VERIFIED — every required gate passed)`n- $proofLine"
             } elseif ($uploaded -eq 'true') {
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- Artifact: SHEYTAN-Music-Visualizer-windows-x64.zip`n- **TEST-ONLY — required gates failed** (see the gate table below; the job and workflow remain red)"
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- Artifact: SHEYTAN-Music-Visualizer-windows-x64.zip`n- **TEST-ONLY — required gates failed** (see the gate table below; the job and workflow remain red)`n- $proofLine"
             } else {
-              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- NOT UPLOADED (package_status=$status; an unusable package is never published)"
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Windows x64 package`n- NOT UPLOADED (package_status=$status; an unusable package is never published)`n- $proofLine"
             }
           }
 
@@ -556,6 +622,13 @@ jobs:
           }
           $pkgFile = 'ci-logs/package-status-windows.json'
           $pkg = if (Test-Path $pkgFile) { (Get-Content $pkgFile -Raw | ConvertFrom-Json) } else { $null }
+          function Get-StatusField($obj, [string]$name, $default) {
+            if ($null -ne $obj) {
+              $prop = $obj.PSObject.Properties[$name]
+              if ($null -ne $prop) { return $prop.Value }
+            }
+            return $default
+          }
           if ($env:GITHUB_STEP_SUMMARY) {
             {
               '### build-windows gate table'
@@ -565,7 +638,9 @@ jobs:
               foreach ($n in $order) { "| $n | $($gates[$n]) |" }
               ''
               if ($null -ne $pkg) {
-                "package_status=$($pkg.package_status) commit_verified=$($pkg.commit_verified) (expected=$($pkg.commit_expected), observed=$($pkg.commit_observed))"
+                "package_status=$(Get-StatusField $pkg 'package_status' 'UNAVAILABLE') commit_verified=$(Get-StatusField $pkg 'commit_verified' $false) (expected=$(Get-StatusField $pkg 'commit_expected' $null), observed=$(Get-StatusField $pkg 'commit_observed' 'not-observed'))"
+                "ffmpeg_binaries_bundled=$(Get-StatusField $pkg 'ffmpeg_binaries_bundled' $true) media_tools_downloader_fixture=$(Get-StatusField $pkg 'media_tools_downloader_fixture' 'SKIPPED') app_launch_self_check=$(Get-StatusField $pkg 'app_launch_self_check' 'FAIL')"
+                "h264_export_proof=$(Get-StatusField $pkg 'h264_export_proof' 'NOT RUN') h265_software_export_proof=$(Get-StatusField $pkg 'h265_software_export_proof' 'NOT RUN') intel_qsv_hevc_proof=$(Get-StatusField $pkg 'intel_qsv_hevc_proof' 'NOT AVAILABLE')"
               } else {
                 'package_status=NOT RECORDED (the build script did not reach the package-status step)'
               }
@@ -712,19 +787,46 @@ jobs:
       # Linux x64 application artifact —
       # SHEYTAN-Music-Visualizer-linux-x64.tar.gz — uploaded when it exists
       # AND its own package gates passed (VERIFIED or TEST_ONLY per
-      # ci-logs/package-status-linux.json). An unusable package is never
-      # uploaded; the job stays red either way.
+      # ci-logs/package-status-linux.json). COMPACT PACKAGE (run
+      # 43712071111): the package ships NO media-tool binaries —
+      # FFmpeg/ffprobe are app-managed downloads, so an archive with
+      # ffmpeg_binaries_bundled=true is never uploaded. An unusable
+      # package is never uploaded; the job stays red either way.
       - name: Decide Linux package upload (canonical, status-driven)
         id: linux_package_decision
         if: always()
         run: |
           set -Eeuo pipefail
+          # COMPACT-PACKAGE STATUS FIELDS (run 43712071111 schema, written
+          # by scripts/ci/write-package-status.py from PERSISTED gate
+          # evidence only): package_status, ffmpeg_binaries_bundled,
+          # media_tools_downloader_fixture, app_launch_self_check,
+          # h264_export_proof, h265_software_export_proof. The decision is
+          # driven by package_status; ffmpeg_binaries_bundled=true is a
+          # hard never-upload guard.
           status=UNAVAILABLE
+          bundled=true
+          downloader=SKIPPED
+          self_check=FAIL
+          h264='NOT RUN'
+          h265='NOT RUN'
           if [ -s ci-logs/package-status-linux.json ]; then
-            status="$(python3 -c 'import json;print(json.load(open("ci-logs/package-status-linux.json")).get("package_status","UNAVAILABLE"))' 2>/dev/null || echo UNAVAILABLE)"
+            # One-line python (YAML literal block: no un-indented
+            # continuation lines); shlex-quoted key=value output is
+            # eval-safe, and a malformed record leaves the fail-closed
+            # defaults in place (python exits nonzero, || true, empty
+            # substitution).
+            read_status="$(python3 -c 'import json,shlex; d=json.load(open("ci-logs/package-status-linux.json")); print("status="+shlex.quote(str(d.get("package_status","UNAVAILABLE")))); print("bundled="+("true" if d.get("ffmpeg_binaries_bundled",True) else "false")); print("downloader="+shlex.quote(str(d.get("media_tools_downloader_fixture","SKIPPED")))); print("self_check="+shlex.quote(str(d.get("app_launch_self_check","FAIL")))); print("h264="+shlex.quote(str(d.get("h264_export_proof","NOT RUN")))); print("h265="+shlex.quote(str(d.get("h265_software_export_proof","NOT RUN"))))' 2>/dev/null || true)"
+            if [ -n "$read_status" ]; then
+              eval "$read_status"
+            fi
           fi
           tarball=dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz
-          if [ -s "$tarball" ] && { [ "$status" = "VERIFIED" ] || [ "$status" = "TEST_ONLY" ]; }; then
+          echo "package_status=$status"
+          echo "ffmpeg_binaries_bundled=$bundled media_tools_downloader_fixture=$downloader app_launch_self_check=$self_check"
+          echo "h264_export_proof=$h264 h265_software_export_proof=$h265"
+          upload=false
+          if [ -s "$tarball" ] && { [ "$status" = "VERIFIED" ] || [ "$status" = "TEST_ONLY" ]; } && [ "$bundled" != "true" ]; then
             size=$(stat -c%s "$tarball")
             echo "package_status=$status tarball_bytes=$size"
             if [ "$size" -lt 1048576 ]; then
@@ -732,11 +834,16 @@ jobs:
               echo "package_uploaded=false" >> "$GITHUB_OUTPUT"
             else
               echo "package_uploaded=true" >> "$GITHUB_OUTPUT"
+              upload=true
             fi
           else
-            echo "package_status=$status tarball missing or invalid — NO Linux package upload (an unusable package is never published)"
+            if [ "$bundled" = "true" ]; then
+              echo "ERROR: bundled media tools detected — the compact package contract forbids an upload regardless of the recorded status"
+            fi
+            echo "package_status=$status tarball missing, invalid or carries bundled media tools — NO Linux package upload (an unusable package is never published)"
             echo "package_uploaded=false" >> "$GITHUB_OUTPUT"
           fi
+          echo "upload_decision=$upload"
           echo "package_status=$status" >> "$GITHUB_OUTPUT"
 
       - name: Upload the canonical Linux x64 package (single artifact)
@@ -755,24 +862,42 @@ jobs:
       - name: Label the Linux package state in the job summary (TEST-ONLY contract)
         if: always()
         run: |
+          set -uo pipefail
           status="${{ steps.linux_package_decision.outputs.package_status }}"
           uploaded="${{ steps.linux_package_decision.outputs.package_uploaded }}"
+          # COMPACT-PACKAGE STATUS FIELDS (run 43712071111): surface the
+          # persisted evidence fields next to the package_status verdict.
+          bundled=true; downloader=SKIPPED; self_check=FAIL; h264='NOT RUN'; h265='NOT RUN'
+          if [ -s ci-logs/package-status-linux.json ]; then
+            # One-line python (YAML literal block: no un-indented
+            # continuation lines); shlex-quoted key=value output is
+            # eval-safe, and a malformed record leaves the fail-closed
+            # defaults in place.
+            fields="$(python3 -c 'import json,shlex; d=json.load(open("ci-logs/package-status-linux.json")); print("bundled="+("true" if d.get("ffmpeg_binaries_bundled",True) else "false")); print("downloader="+shlex.quote(str(d.get("media_tools_downloader_fixture","SKIPPED")))); print("self_check="+shlex.quote(str(d.get("app_launch_self_check","FAIL")))); print("h264="+shlex.quote(str(d.get("h264_export_proof","NOT RUN")))); print("h265="+shlex.quote(str(d.get("h265_software_export_proof","NOT RUN"))))' 2>/dev/null || true)"
+            if [ -n "$fields" ]; then
+              eval "$fields"
+            fi
+          fi
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            proof_line="media_tools_downloader_fixture=$downloader app_launch_self_check=$self_check h264_export_proof=$h264 h265_software_export_proof=$h265 ffmpeg_binaries_bundled=$bundled"
             if [ "$uploaded" = "true" ] && [ "$status" = "VERIFIED" ]; then
               {
                 echo "### Linux x64 package"
                 echo "- Artifact: SHEYTAN-Music-Visualizer-linux-x64.tar.gz (VERIFIED — every required gate passed)"
+                echo "- $proof_line"
               } >> "$GITHUB_STEP_SUMMARY"
             elif [ "$uploaded" = "true" ]; then
               {
                 echo "### Linux x64 package"
                 echo "- Artifact: SHEYTAN-Music-Visualizer-linux-x64.tar.gz"
                 echo "- **TEST-ONLY — required gates failed** (see the gate table inside the consolidated report; the job and workflow remain red)"
+                echo "- $proof_line"
               } >> "$GITHUB_STEP_SUMMARY"
             else
               {
                 echo "### Linux x64 package"
                 echo "- NOT UPLOADED (package_status=$status; an unusable package is never published)"
+                echo "- $proof_line"
               } >> "$GITHUB_STEP_SUMMARY"
             fi
           fi

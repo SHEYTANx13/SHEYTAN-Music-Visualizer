@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"image"
 	"net/url"
+	"runtime/debug"
+	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -18,6 +21,8 @@ import (
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export/estimate"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/sysprofile"
@@ -113,9 +118,18 @@ func (u *studioUI) onExport() {
 	}
 	env, err := export.DetectEnv(false)
 	if err != nil {
-		u.dialogError("Export requires FFmpeg",
-			err.Error()+"\n\nSHEYTAN uses your locally installed FFmpeg as the encoder adapter. "+
-				"No binary is downloaded or bundled. Install FFmpeg (for example a GPL or LGPL build of FFmpeg 6+) and make sure ffmpeg and ffprobe are on PATH.")
+		// No FFmpeg anywhere: playback and the visualizers still work;
+		// exports need the tools. Offer the in-app Media Tools & Codecs
+		// manager (run 43712071111) instead of a dead end.
+		u.logWarn("export unavailable: no FFmpeg resolved", "err", err.Error())
+		msg := widget.NewLabel(err.Error() + "\n\nExports need FFmpeg (encoder adapter). Playback and the visualizers keep working without it.\n" +
+			"You can install the pinned, verified tool pack from inside the app (Media Tools & Codecs), place your own ffmpeg+ffprobe pair in the app's tools/ffmpeg/bin folder, or install FFmpeg on your PATH.")
+		msg.Wrapping = fyne.TextWrapWord
+		scroll := container.NewVScroll(msg)
+		open := widget.NewButton("Open Media Tools & Codecs…", func() { u.onMediaTools() })
+		d := dialog.NewCustom("Export needs media tools", "Close",
+			container.NewVBox(scroll, open), u.win)
+		u.showCappedDialog(d, scroll)
 		return
 	}
 	export.ProofHardwareEncoders(env)
@@ -123,47 +137,121 @@ func (u *studioUI) onExport() {
 	u.showExportDialog(env)
 }
 
-// showExportDialog builds the export dialog with real settings.
+// showExportDialog builds the export dialog with real settings (run
+// 43712071111: H.264/H.265 codec choice with only encoders the local
+// build actually has, exact frame rates incl. common fractional rates
+// and a custom rate, audio bitrate, a pre-export size estimate and a
+// scrollable, viewport-capped dialog — no control can overflow the
+// tab area at any window size).
 func (u *studioUI) showExportDialog(env *export.Environment) {
-	var resSel *widget.Select
-	var fpsSel *widget.Select
-	var qualSel *widget.Select
-	var encSel *widget.Select
-	var outEntry *widget.Entry
-	var bar *widget.ProgressBar
-	var info *widget.Label
-
-	names := make([]string, len(export.Resolutions))
+	resNames := make([]string, len(export.Resolutions))
 	for i, r := range export.Resolutions {
-		names[i] = fmt.Sprintf("%s — %dx%d", r.Name, r.Width, r.Height)
+		resNames[i] = fmt.Sprintf("%s — %dx%d", r.Name, r.Width, r.Height)
 	}
-	fpsNames := []string{"24 fps", "30 fps", "60 fps"}
-	encNames := []string{"auto (best available)", "libx264 (software)"}
-	encNames = append(encNames, env.HardwareEncoders...)
+	fpsNames := make([]string, len(export.CommonFrameRates))
+	for i, c := range export.CommonFrameRates {
+		fpsNames[i] = c.Label
+	}
+	customRes, customFPS := "Custom…", "Custom…"
+	resNames = append(resNames, customRes)
+	fpsNames = append(fpsNames, customFPS)
 
-	resSel = widget.NewSelect(names, nil)
-	resSel.SetSelectedIndex(u.memoryAwareDefaultResolution()) // honest available-memory default (still fully manual)
-	fpsSel = widget.NewSelect(fpsNames, nil)
-	fpsSel.SetSelectedIndex(1)
-	qualSel = widget.NewSelect([]string{"high (CRF 18)", "balanced (CRF 21)", "compat (CRF 23)"}, nil)
-	qualSel.SetSelectedIndex(0)
-	encSel = widget.NewSelect(encNames, nil)
-	if len(encNames) > 1 {
+	// Codec choices: H.265 only when the local build has a real HEVC
+	// encoder (libx265 or a proven hardware HEVC encoder).
+	hevcAvailable := env.Encoders["libx265"] || len(env.HEVCEncoders(env)) > 0
+	codecNames := []string{"H.264 (AVC) — default"}
+	if hevcAvailable {
+		codecNames = append(codecNames, "H.265 (HEVC)")
+	}
+
+	qualNames := []string{"high (best quality)", "balanced (recommended)", "compat (smaller files)"}
+	audioNames := []string{"AAC 192 kbps (default)", "AAC 128 kbps", "AAC 256 kbps", "AAC 320 kbps"}
+
+	resSel := widget.NewSelect(resNames, nil)
+	resSel.SetSelectedIndex(u.memoryAwareDefaultResolution())
+	fpsSel := widget.NewSelect(fpsNames, nil)
+	fpsSel.SetSelectedIndex(3) // 30 fps
+	codecSel := widget.NewSelect(codecNames, nil)
+	codecSel.SetSelectedIndex(0)
+	qualSel := widget.NewSelect(qualNames, nil)
+	qualSel.SetSelectedIndex(1)
+	audioSel := widget.NewSelect(audioNames, nil)
+	audioSel.SetSelectedIndex(0)
+
+	wEntry := widget.NewEntry()
+	wEntry.SetPlaceHolder("width (even, e.g. 1920)")
+	hEntry := widget.NewEntry()
+	hEntry.SetPlaceHolder("height (even, e.g. 1080)")
+	fpsEntry := widget.NewEntry()
+	fpsEntry.SetPlaceHolder("e.g. 29.97 or 24000/1001")
+	for _, e := range []*widget.Entry{wEntry, hEntry, fpsEntry} {
+		e.Hide()
+	}
+	resSel.OnChanged = func(sel string) {
+		if sel == customRes {
+			wEntry.Show()
+			hEntry.Show()
+		} else {
+			wEntry.Hide()
+			hEntry.Hide()
+		}
+	}
+	fpsSel.OnChanged = func(sel string) {
+		if sel == customFPS {
+			fpsEntry.Show()
+		} else {
+			fpsEntry.Hide()
+		}
+	}
+
+	// Encoder choices follow the codec selection (auto by default).
+	encSel := widget.NewSelect([]string{"auto (best available)"}, nil)
+	encSel.SetSelectedIndex(0)
+	refreshEncoders := func(codec string) {
+		names := []string{"auto (best available)"}
+		if codec == export.CodecHEVC {
+			if env.Encoders["libx265"] {
+				names = append(names, "libx265 (software)")
+			}
+			names = append(names, env.HEVCEncoders(env)...)
+		} else {
+			if env.Encoders["libx264"] {
+				names = append(names, "libx264 (software)")
+			}
+			names = append(names, env.H264HardwareEncoders(env)...)
+		}
+		encSel.Options = names
 		encSel.SetSelectedIndex(0)
 	}
-	outEntry = widget.NewEntry()
+	refreshEncoders(export.CodecH264)
+	codecSel.OnChanged = func(sel string) {
+		if sel == "H.265 (HEVC)" {
+			refreshEncoders(export.CodecHEVC)
+		} else {
+			refreshEncoders(export.CodecH264)
+		}
+	}
+
+	outEntry := widget.NewEntry()
 	outEntry.SetPlaceHolder("Output .mp4 path (absolute or relative)")
 
-	// ffmpeg capability line (honest, detected)
-	caps := fmt.Sprintf("FFmpeg: %s\nH.264 encoders: %s\nAAC audio encoder: %s\nHardware encoders proven: %s",
-		env.Version,
-		joinOrNone(env.EncoderList(false)),
+	// Capability line: honest, detected — now including HEVC.
+	caps := fmt.Sprintf("FFmpeg: %s (source: %s)\nH.264: %s\nH.265: %s\nAAC: %s\nProven hardware: %s",
+		env.Version, env.Source,
+		joinOrNone(env.CodecEncoderList(export.CodecH264)),
+		joinOrNone(env.CodecEncoderList(export.CodecHEVC)),
 		yesNo(env.Encoders["aac"]),
 		joinOrNone(env.HardwareEncoders))
-	info = widget.NewLabel(caps)
+	info := widget.NewLabel(caps)
 	info.Wrapping = fyne.TextWrapWord
+	if !hevcAvailable {
+		info.SetText(caps + "\nH.265 unavailable: this FFmpeg build has no libx265 and no proven hardware HEVC encoder.")
+	}
 
-	bar = widget.NewProgressBar()
+	estimateLB := widget.NewLabel("Size estimate: run Estimate (encodes a short sample of the actual content).")
+	estimateLB.Wrapping = fyne.TextWrapWord
+
+	bar := widget.NewProgressBar()
 	u.exportBar = bar
 	u.exportLabel = widget.NewLabel("")
 	u.exportLabel.Wrapping = fyne.TextWrapWord
@@ -173,15 +261,46 @@ func (u *studioUI) showExportDialog(env *export.Environment) {
 			u.exportJob.Cancel()
 		}
 	})
+	var estimateBtn *widget.Button
+	estimateBtn = widget.NewButton("Estimate Size", func() {
+		u.runSizeEstimate(env, resSel, fpsSel, fpsEntry, codecSel, qualSel, audioSel, wEntry, hEntry, estimateLB, estimateBtn)
+	})
 	var startBtn *widget.Button
 	startBtn = widget.NewButton("Start Export", func() {
-		r := export.Resolutions[resSel.SelectedIndex()]
-		fps := export.FrameRates[fpsSel.SelectedIndex()]
-		quality := []string{"high", "balanced", "compat"}[qualSel.SelectedIndex()]
+		w, h := 0, 0
+		if resSel.SelectedIndex() == len(resNames)-1 {
+			w, h = atoiOr(wEntry.Text, -1), atoiOr(hEntry.Text, -1)
+			if w <= 0 || h <= 0 || w%2 != 0 || h%2 != 0 {
+				u.dialogError("Export", "custom resolution needs positive EVEN width and height")
+				return
+			}
+		} else {
+			r := export.Resolutions[resSel.SelectedIndex()]
+			w, h = r.Width, r.Height
+		}
+		var rate export.FrameRate
+		var err error
+		if fpsSel.SelectedIndex() == len(fpsNames)-1 {
+			rate, err = export.ParseFrameRate(fpsEntry.Text)
+			if err != nil {
+				u.dialogError("Export", err.Error())
+				return
+			}
+		} else {
+			rate = export.CommonFrameRates[fpsSel.SelectedIndex()].Rate
+		}
+		codec := export.CodecH264
+		if codecSel.SelectedIndex() == 1 {
+			codec = export.CodecHEVC
+		}
 		enc := "auto"
 		if encSel.SelectedIndex() > 0 {
-			enc = encNames[encSel.SelectedIndex()]
+			enc = encSel.Options[encSel.SelectedIndex()]
+			if i := indexOr(enc, " ("); i > 0 {
+				enc = enc[:i]
+			}
 		}
+		audio := []string{"192k", "128k", "256k", "320k"}[audioSel.SelectedIndex()]
 		out := outEntry.Text
 		if out == "" {
 			u.dialogError("Export", "choose an output file first")
@@ -189,11 +308,14 @@ func (u *studioUI) showExportDialog(env *export.Environment) {
 		}
 		req := export.Request{
 			OutputPath:    out,
-			Width:         r.Width,
-			Height:        r.Height,
-			FPS:           fps,
-			QualityPreset: quality,
+			Width:         w,
+			Height:        h,
+			FPSRate:       rate,
+			FPS:           int(rate.Float()),
+			VideoCodec:    codec,
+			QualityPreset: []string{"high", "balanced", "compat"}[qualSel.SelectedIndex()],
 			Encoder:       enc,
+			AudioBitrate:  audio,
 			PreferGPU:     true,
 		}
 		if jerr := u.svc.StartExport(req); jerr != nil {
@@ -202,34 +324,44 @@ func (u *studioUI) showExportDialog(env *export.Environment) {
 		}
 		u.exportJob = u.svc.ExportJob()
 		startBtn.Disable()
+		estimateBtn.Disable()
 		info.SetText("Exporting… progress below is real (rendered frames / encoder output).")
 	})
 
 	form := widget.NewForm(
+		widget.NewFormItem("Video codec", codecSel),
 		widget.NewFormItem("Resolution", resSel),
+		widget.NewFormItem("Custom size", container.NewVBox(wEntry, hEntry)),
 		widget.NewFormItem("Frame rate", fpsSel),
+		widget.NewFormItem("Custom fps", fpsEntry),
+		widget.NewFormItem("Encoder", encSel),
 		widget.NewFormItem("Quality", qualSel),
-		widget.NewFormItem("H.264 encoder", encSel),
+		widget.NewFormItem("Audio", audioSel),
 		widget.NewFormItem("Output file", outEntry),
 	)
+	audioNote := widget.NewLabel("Audio: AAC in MP4 (tested muxer/encoder combination). Other codecs are not offered for MP4 rather than failing after a long export.")
+	audioNote.Wrapping = fyne.TextWrapWord
 	content := container.NewVBox(
 		info,
 		form,
+		audioNote,
+		widget.NewSeparator(),
+		estimateLB,
 		bar,
 		u.exportLabel,
-		container.NewHBox(startBtn, cancelBtn),
+		container.NewHBox(startBtn, estimateBtn, cancelBtn),
 	)
-	d := dialog.NewCustom("Export MP4 — "+brand.ProductName, "Close", content, u.win)
-	d.Resize(fyne.NewSize(640, 520))
+	scroll := container.NewVScroll(content)
+	d := dialog.NewCustom("Export MP4 — "+brand.ProductName, "Close", scroll, u.win)
+	u.showCappedDialog(d, scroll)
 	d.SetOnClosed(func() {
 		u.exportDialog = nil
 		u.exportBar = nil
 		u.exportLabel = nil
 		// Keep the job reference while an export is running so the
-		// Cancel control stays reachable when the dialog is
-		// reopened, and so progress keeps flowing to a reopened
-		// dialog. The terminal events clear it. Closing the dialog
-		// never abandons a running export silently.
+		// Cancel control stays reachable when the dialog is reopened,
+		// and so progress keeps flowing to a reopened dialog. Closing
+		// the dialog never abandons a running export silently.
 		if u.exportJob != nil && u.exportJob.Running() {
 			u.status("Export continues in background — reopen Export MP4 to watch or cancel it")
 			return
@@ -237,7 +369,84 @@ func (u *studioUI) showExportDialog(env *export.Environment) {
 		u.exportJob = nil
 	})
 	u.exportDialog = d
-	d.Show()
+}
+
+// runSizeEstimate estimates the output size by encoding a short sample
+// of the ACTUAL visualizer and audio with the selected settings (CRF
+// sizes cannot be known from settings alone) and extrapolating a range.
+func (u *studioUI) runSizeEstimate(env *export.Environment, resSel, fpsSel *widget.Select, fpsEntry *widget.Entry,
+	codecSel, qualSel, audioSel *widget.Select, wEntry, hEntry *widget.Entry, out *widget.Label, btn *widget.Button) {
+	track := u.svc.Track()
+	if track == nil {
+		u.dialogError("Size estimate", "import a track first")
+		return
+	}
+	w, h := 0, 0
+	if resSel.SelectedIndex() == len(resSel.Options)-1 {
+		w, h = atoiOr(wEntry.Text, -1), atoiOr(hEntry.Text, -1)
+	} else {
+		r := export.Resolutions[resSel.SelectedIndex()]
+		w, h = r.Width, r.Height
+	}
+	var rate export.FrameRate
+	var err error
+	if fpsSel.SelectedIndex() == len(fpsSel.Options)-1 {
+		rate, err = export.ParseFrameRate(fpsEntry.Text)
+	} else {
+		rate = export.CommonFrameRates[fpsSel.SelectedIndex()].Rate
+	}
+	if w <= 0 || h <= 0 || err != nil || !rate.Valid() {
+		out.SetText("Size estimate: fix the resolution/frame rate first.")
+		return
+	}
+	codec := export.CodecH264
+	if codecSel.SelectedIndex() == 1 {
+		codec = export.CodecHEVC
+	}
+	quality := []string{"high", "balanced", "compat"}[qualSel.SelectedIndex()]
+	audio := []string{"192k", "128k", "256k", "320k"}[audioSel.SelectedIndex()]
+
+	btn.Disable()
+	out.SetText("Size estimate: encoding a short sample of the actual content…")
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				u.recoverWorker("export-estimate", "sample encode", r)
+			}
+		}()
+		rng, note := u.svc.EstimateBySample(export.Request{
+			Width: w, Height: h, FPSRate: rate, VideoCodec: codec,
+			QualityPreset: quality, AudioBitrate: audio, Encoder: "auto",
+		}, track)
+		fyne.Do(func() {
+			btn.Enable()
+			if rng.Low <= 0 {
+				out.SetText("Size estimate: unavailable (" + note + ")")
+				return
+			}
+			out.SetText(fmt.Sprintf("Size estimate: %s – %s (expected ~%s)\nMethod: %s\n%s",
+				estimate.HumanBytes(rng.Low), estimate.HumanBytes(rng.High), estimate.HumanBytes(rng.Expected), rng.Method, rng.Note))
+			u.logInfo("size estimate computed", "low", rng.Low, "expected", rng.Expected, "high", rng.High, "method", rng.Method)
+		})
+	}()
+}
+
+// atoiOr parses an integer with a fallback.
+func atoiOr(s string, fallback int) int {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return fallback
+	}
+	return n
+}
+
+// indexOr finds a substring index with -1 fallback.
+func indexOr(s, sub string) int {
+	i := strings.Index(s, sub)
+	if i < 0 {
+		return -1
+	}
+	return i
 }
 
 // previewBufCount is the frame-copy ring depth for the preview loop.
@@ -252,6 +461,34 @@ const previewBufCount = 3
 // swapped on the UI thread via fyne.Do.
 func (u *studioUI) startRenderLoop() {
 	go func() {
+		// Panic boundary (run 43712071111): a panic in the render loop (or
+		// inside the wgpu bindings) must never terminate the app. The
+		// recovered stack is preserved in a bounded crash report under the
+		// crashes/ directory and the runtime log; the renderer is released
+		// on THIS goroutine (its owner) and the loop exits cleanly. The
+		// preview stays frozen for the session instead of crashing the app.
+		defer func() {
+			if r := recover(); r != nil {
+				stack := debug.Stack()
+				crashPath, werr := logging.WriteCrashReport(u.lay.Crashes,
+					"render-loop", "preview render loop", r, stack)
+				u.logErr("recovered panic in render loop (app continues; preview loop stopped)",
+					"recovered", fmt.Sprint(r),
+					"crash_report", crashPath,
+					"crash_report_err", errString(werr))
+				u.renderMu.Lock()
+				rend := u.renderer
+				u.renderer = nil
+				u.renderMu.Unlock()
+				if rend != nil {
+					rend.Close() // this goroutine owns the renderer
+				}
+			}
+		}()
+		// Loop lifecycle (run 43712071111): closed exactly once on every
+		// exit path so joinRenderLoop can wait for full teardown before
+		// the logger closes (no log write or fyne.Do outlives the loop).
+		defer close(u.loopDone)
 		idleSkip := 0
 		ticker := time.NewTicker(time.Second / 30)
 		defer ticker.Stop()
@@ -291,7 +528,7 @@ func (u *studioUI) startRenderLoop() {
 					"adapter", info.Adapter,
 					"device_class", info.DeviceClass,
 					"detail", info.Detail,
-					"policy_mode", string(u.policyMode),
+					"policy_mode", string(u.currentPolicyMode()),
 					"policy_workers", pol.Workers,
 					"policy_source", pol.Source)
 				fyne.Do(func() {
@@ -326,6 +563,16 @@ func (u *studioUI) startRenderLoop() {
 			r := u.renderer
 			u.renderMu.Unlock()
 			if closing {
+				// Loop-owned teardown (run 43712071111): close the renderer
+				// HERE, on the loop goroutine, at a frame boundary — never
+				// from the appclose teardown goroutine (that raced the
+				// in-flight frame and could crash inside the bindings).
+				if r != nil {
+					r.Close()
+					u.renderMu.Lock()
+					u.renderer = nil
+					u.renderMu.Unlock()
+				}
 				return
 			}
 			if r == nil || u.win == nil {
@@ -336,7 +583,7 @@ func (u *studioUI) startRenderLoop() {
 			// while nothing is playing the preview repaints at ~6 fps
 			// instead of 30 — no tight polling loop, and playback (or an
 			// in-flight scrub) restores the full 30 fps rate immediately.
-			if !u.svc.IsPlayingLike() && !u.scrubbing {
+			if !u.svc.IsPlayingLike() && !u.isScrubbing() {
 				idleSkip++
 				if idleSkip < 5 {
 					continue forRunning
@@ -398,7 +645,7 @@ func (u *studioUI) refreshTransportFrom(clock playback.ClockInfo, info render.Ba
 	} else {
 		u.btnPlay.SetText("▶ Play")
 	}
-	if !u.scrubbing && clock.Total > 0 {
+	if !u.isScrubbing() && clock.Total > 0 {
 		u.scrubber.SetValue(1000 * clock.Position.Seconds() / clock.Total.Seconds())
 	}
 	sec := int(clock.Position.Seconds())
@@ -417,6 +664,13 @@ func (u *studioUI) logInfo(msg string, args ...any) {
 func (u *studioUI) logErr(msg string, args ...any) {
 	if u.log != nil {
 		u.log.Error(msg, args...)
+	}
+}
+
+// logWarn is the warn-level variant of logInfo/logErr.
+func (u *studioUI) logWarn(msg string, args ...any) {
+	if u.log != nil {
+		u.log.Warn(msg, args...)
 	}
 }
 

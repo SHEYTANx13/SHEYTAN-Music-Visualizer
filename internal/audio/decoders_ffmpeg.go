@@ -74,8 +74,9 @@ type ffmpegBinLocater func() (ffmpeg, ffprobe string, err error)
 // (user configuration), the app-local tools directory
 // (<app root>/tools/ffmpeg/bin), then PATH.
 func defaultFFmpegLocater() (string, string, error) {
-	loc, err := fflocate.Locate(fflocate.OPOpts(
-		apppaths.Resolve(apppaths.OSEnv()).ToolsFFmpegBin()))
+	layFF := apppaths.Resolve(apppaths.OSEnv())
+	loc, err := fflocate.Locate(fflocate.OPOptsFull(
+		layFF.ToolsFFmpegBin(), layFF.MediaToolsBin()))
 	if err != nil {
 		return "", "", fmt.Errorf("audio: %w (the optional M4A/AAC adapter stays unregistered)", err)
 	}

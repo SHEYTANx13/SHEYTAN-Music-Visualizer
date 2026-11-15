@@ -305,6 +305,14 @@ type GPURenderer struct {
 	// sceneBins is the scratch the scene-smoothed bin values are packed
 	// from (run 43541087097 GPU/CPU parity repair — see renderGPU).
 	sceneBins [visualizer.NumVizBins]float64
+
+	// GPU failure containment (run 43712071111): consecutive-failure
+	// counter and cooldown deadline. fallbackCount>0 with an open
+	// cooldown window routes frames to the CPU without touching the
+	// device; reaching maxConsecutiveGPUFailures releases the GPU
+	// resources for this renderer's lifetime (bounded downgrade).
+	fallbackCount int
+	cooldownUntil time.Time
 }
 
 func f32bits(v float64) uint32 { return mathFloat32bits(float32(v)) }
@@ -647,6 +655,19 @@ func (g *GPURenderer) uniformDiagnostics() string {
 	)
 }
 
+// GPU failure containment (run 43712071111): a failing device must
+// not oscillate. The renderer counts consecutive GPU failures; while
+// the cooldown window is open the CPU path renders without touching
+// the device, and after maxConsecutiveGPUFailures the GPU resources
+// are released for the lifetime of this renderer (a permanent,
+// bounded downgrade — no unbounded per-frame retry, no automatic
+// re-create loop; the user can still switch the renderer preference,
+// which builds a fresh renderer through the normal selection path).
+const (
+	maxConsecutiveGPUFailures = 3
+	gpuFallbackCooldown       = 3 * time.Second
+)
+
 // Close releases GPU resources.
 func (g *GPURenderer) Close() {
 	g.releaseGPU()
@@ -708,6 +729,13 @@ func (g *GPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 	if in.Width <= 0 || in.Height <= 0 || in.Width > 7680 || in.Height > 4320 {
 		return nil, fmt.Errorf("render: invalid frame size %dx%d", in.Width, in.Height)
 	}
+	// Cooldown window: recent failures keep the CPU path active
+	// without submitting new GPU work (bounded back-off, never a
+	// tight retry loop; a wedged readback can no longer stall every
+	// frame).
+	if g.fallbackCount > 0 && time.Now().Before(g.cooldownUntil) {
+		return g.cpu.RenderFrame(in)
+	}
 	if err := g.renderGPUFn(in); err != nil {
 		// device loss / adapter failure: report and fall back. A
 		// lost device is named explicitly (wgpu.ErrDeviceLost) so
@@ -718,8 +746,23 @@ func (g *GPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 			g.info.Detail = err.Error()
 		}
 		g.info.GpuState = GpuFallback
+		g.fallbackCount++
+		if g.fallbackCount >= maxConsecutiveGPUFailures {
+			// Permanent bounded downgrade for THIS renderer: release
+			// the GPU resources in the documented order and route
+			// every later frame to the CPU renderer (device==nil).
+			// The app keeps running; the user can switch the
+			// renderer preference to build a fresh renderer. No
+			// automatic re-create loop exists by design.
+			g.releaseGPU()
+			g.info.Detail = fmt.Sprintf("GPU disabled after %d consecutive failures (last: %v); CPU renderer active — switch the renderer preference or restart to retry GPU",
+				maxConsecutiveGPUFailures, err)
+		} else {
+			g.cooldownUntil = time.Now().Add(gpuFallbackCooldown)
+		}
 		return g.cpu.RenderFrame(in)
 	}
+	g.fallbackCount = 0
 	return g.lastImage, nil
 }
 

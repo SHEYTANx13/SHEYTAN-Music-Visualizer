@@ -347,6 +347,47 @@ else
   report FAIL "D26" "GUI smoke static assertions failed"
 fi
 
+# ---------- D35: compact-package contract (run 43712071111) ------------------
+# Static assertions on both build scripts and the workflow: the removed
+# staging gate and its status field are gone everywhere, the four new gates
+# exist on BOTH platforms, the persisted-evidence writer owns the
+# package-status record, the export gate covers the new proofs, and the
+# workflow reads the new status fields (never the retired one).
+D35OK=1
+for g in forbid-bundled-media-tools package-size-budget media-tools-downloader-tests media-tools-pinned-install; do
+  assert_contains "$BL" "$g" "build-linux.sh: gate $g" || D35OK=0
+  assert_contains "$BW" "$g" "build-windows.ps1: gate $g" || D35OK=0
+done
+for tok in stage-ffmpeg-tools ffmpeg_tools_staged; do
+  assert_not_contains "$BL" "$tok" "build-linux.sh: retired token '$tok'" || D35OK=0
+  assert_not_contains "$BW" "$tok" "build-windows.ps1: retired token '$tok'" || D35OK=0
+  assert_not_contains "$BD" "$tok" "build-desktop.yml: retired token '$tok'" || D35OK=0
+done
+for fld in package_status ffmpeg_binaries_bundled media_tools_downloader_fixture app_launch_self_check h264_export_proof h265_software_export_proof; do
+  assert_contains "$BD" "$fld" "workflow reads the package-status field '$fld'" || D35OK=0
+done
+assert_contains "$BL" 'write-package-status.py' "build-linux.sh: persisted-evidence status writer" || D35OK=0
+assert_contains "$BW" 'write-package-status.py' "build-windows.ps1: persisted-evidence status writer" || D35OK=0
+assert_contains "$BL" 'export-proof-h264.result.txt' "build-linux.sh: persisted h264 proof file" || D35OK=0
+assert_contains "$BL" 'export-proof-h265.result.txt' "build-linux.sh: persisted h265 proof file" || D35OK=0
+assert_contains "$BW" 'export-proof-h264.result.txt' "build-windows.ps1: persisted h264 proof file" || D35OK=0
+assert_contains "$BW" 'export-proof-h265.result.txt' "build-windows.ps1: persisted h265 proof file" || D35OK=0
+assert_contains "$BL" 'SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE' "build-linux.sh: pinned-install integration test env" || D35OK=0
+assert_contains "$BW" 'SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE' "build-windows.ps1: pinned-install integration test env" || D35OK=0
+assert_contains "$BL" 'TestMediaToolsInstallFromPinnedArchive' "build-linux.sh: pinned-install integration test" || D35OK=0
+assert_contains "$BW" 'TestMediaToolsInstallFromPinnedArchive' "build-windows.ps1: pinned-install integration test" || D35OK=0
+assert_contains "$BL" 'TestExportHEVC1080p30Software|TestExportCustomFrameRates|TestExportSizeEstimates' \
+  "build-linux.sh: export gate extended with HEVC/frame-rate/size proofs" || D35OK=0
+assert_contains "$BL" '94371840' "build-linux.sh: 90 MiB package-size budget" || D35OK=0
+assert_contains "$BW" '94371840' "build-windows.ps1: 90 MiB package-size budget" || D35OK=0
+assert_contains "$BL" 'tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md' "build-linux.sh: licensing notice staged beside the empty bin/" || D35OK=0
+assert_contains "$BW" 'tools\ffmpeg\FFMPEG-TOOLS-LICENSING.md' "build-windows.ps1: licensing notice staged beside the empty bin\\" || D35OK=0
+if [ "$D35OK" -eq 1 ]; then
+  report PASS "D35" "compact-package contract: 4 new gates on both platforms, zero staging leftovers, persisted-evidence writer, new status fields wired into the workflow"
+else
+  report FAIL "D35" "compact-package contract static assertions failed"
+fi
+
 # ---------- E43/E44: emergency fallback report + redaction -----------------
 (
   cd "$T" || exit 3

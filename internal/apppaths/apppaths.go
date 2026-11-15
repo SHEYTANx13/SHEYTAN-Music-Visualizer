@@ -267,6 +267,16 @@ func appRoot(e Env) (root, tools string) {
 	return dir, filepath.Join(dir, "tools")
 }
 
+// MediaToolsBin is the app-managed FFmpeg binary directory (the
+// in-app Media Tools & Codecs install location under the user
+// data root; run 43712071111).
+func (l Layout) MediaToolsBin() string {
+	if l.DataRoot == "" {
+		return ""
+	}
+	return filepath.Join(l.DataRoot, "media-tools", "current", "bin")
+}
+
 // ToolsFFmpegBin is the app-local FFmpeg binary directory used by
 // fflocate: <AppRoot>/tools/ffmpeg/bin.
 func (l Layout) ToolsFFmpegBin() string {

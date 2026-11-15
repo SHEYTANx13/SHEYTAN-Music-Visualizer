@@ -1,10 +1,20 @@
-# FFmpeg tools provenance and redistribution record (run 43612608237)
+# FFmpeg tools provenance record (run 43712071111)
 
-The portable test packages carry their OWN FFmpeg/FFprobe pair under
-`tools/ffmpeg/bin/`. This file records exactly what is bundled, where it
-came from, and the redistribution obligations that ship with it. The
-packaging scripts verify every fact below at staging time and refuse a
-`VERIFIED` package status when any check fails.
+The application packages ship **no FFmpeg binaries**. The machine-
+readable authority for the optional, user-requested tool download is
+the committed, versioned manifest embedded in the application:
+`internal/mediatools/manifest.json` (schema-validated by tests; exact
+URLs, versions and pinned SHA-256 digests). This file documents the
+same facts for reviewers. The in-app Media Tools & Codecs manager
+downloads the pinned asset only on explicit user request, verifies the
+digest before extraction and the binaries after extraction, and
+records the provenance beside the installed pair under
+`media-tools/current/licenses/PROVENANCE.txt`.
+
+CI uses the same pinned assets as an EXTERNAL test dependency (a
+runner temp directory outside the package/stage tree) to run the real
+download-manager integration test and the packaged-export proofs with
+a scrubbed PATH — the binaries never enter the uploaded archives.
 
 ## Pinned build (both platforms)
 

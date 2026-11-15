@@ -20,7 +20,8 @@ import (
 // ValidationExpect describes what the output must satisfy.
 type ValidationExpect struct {
 	Width, Height    int
-	FPS              int
+	FPS              float64 // exact expected rate
+	VideoCodec       string  // "h264" (default) or "hevc"
 	ExpectedDuration float64 // audio duration (video within tolerance)
 }
 
@@ -103,8 +104,13 @@ func Validate(ffprobePath string, path string, expect ValidationExpect) (*Valida
 	if !strings.Contains(strings.ToLower(res.Format), "mp4") {
 		problems = append(problems, fmt.Sprintf("container %q is not MP4", res.Format))
 	}
-	if res.VideoCodec != "h264" {
-		problems = append(problems, fmt.Sprintf("video codec %q is not H.264", res.VideoCodec))
+	wantCodec := expect.VideoCodec
+	if wantCodec == "" {
+		wantCodec = "h264"
+	}
+	if res.VideoCodec != wantCodec {
+		problems = append(problems, fmt.Sprintf("video codec %q is not %s", res.VideoCodec,
+			map[string]string{"h264": "H.264", "hevc": "H.265/HEVC"}[wantCodec]))
 	}
 	if res.AudioCodec != "aac" {
 		problems = append(problems, fmt.Sprintf("audio codec %q is not AAC", res.AudioCodec))
@@ -113,8 +119,8 @@ func Validate(ffprobePath string, path string, expect ValidationExpect) (*Valida
 		problems = append(problems, fmt.Sprintf("resolution %dx%d != requested %dx%d",
 			res.Width, res.Height, expect.Width, expect.Height))
 	}
-	if expect.FPS > 0 && math.Abs(res.FPS-float64(expect.FPS)) > 0.05 {
-		problems = append(problems, fmt.Sprintf("fps %.3f != requested %d", res.FPS, expect.FPS))
+	if expect.FPS > 0 && math.Abs(res.FPS-expect.FPS) > 0.05 {
+		problems = append(problems, fmt.Sprintf("fps %.3f != requested %.3f", res.FPS, expect.FPS))
 	}
 	if res.Duration <= 0 {
 		problems = append(problems, "no duration reported")

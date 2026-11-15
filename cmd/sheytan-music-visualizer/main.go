@@ -64,7 +64,8 @@ func run(args []string, out, errW io.Writer) int {
 	exportOut := fs.String("export-out", "", "--export-cli output .mp4 path (required with --export-cli)")
 	exportW := fs.Int("export-w", 1920, "--export-cli frame width")
 	exportH := fs.Int("export-h", 1080, "--export-cli frame height")
-	exportFPS := fs.Int("export-fps", 30, "--export-cli frame rate (24/30/60/120)")
+	exportFPS := fs.Int("export-fps", 30, "--export-cli frame rate (1-120)")
+	exportCodec := fs.String("export-codec", "h264", "--export-cli video codec: h264 (default) or hevc (requires a build with libx265)")
 	exportSeconds := fs.Float64("export-seconds", 1.0, "--export-cli duration in seconds")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -91,7 +92,7 @@ func run(args []string, out, errW io.Writer) int {
 	case *exportCLIFlag:
 		return export.RunCLI(export.CLIOptions{
 			Out: *exportOut, Width: *exportW, Height: *exportH,
-			FPS: *exportFPS, Seconds: *exportSeconds,
+			FPS: *exportFPS, Seconds: *exportSeconds, Codec: *exportCodec,
 		}, out, errW)
 	default:
 		err := runGUI()

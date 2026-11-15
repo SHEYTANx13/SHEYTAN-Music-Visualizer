@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "updated": "2026-11-15",
+  "note": "Pinned media-tool packs for the in-app Media Tools & Codecs manager. These are optional downloads, never bundled in the application archive. Identity and digests mirror packaging/FFMPEG-TOOLS-PROVENANCE.md (BtbN FFmpeg-Builds autobuild-2026-11-08-12-35, FFmpeg n9.0.2-48-gd4070a14ce, GPL variant).",
+  "platforms": {
+    "windows/amd64": {
+      "platform": "windows/amd64",
+      "version": "n9.0.2-48-gd4070a14ce",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip",
+      "sha256": "40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae",
+      "archiveFormat": "zip",
+      "ffmpegPath": "ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0/bin/ffmpeg.exe",
+      "ffprobePath": "ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0/bin/ffprobe.exe",
+      "requiredEncoders": ["libx264", "libx265", "aac"],
+      "optionalEncoders": ["h264_qsv", "hevc_qsv", "h264_nvenc", "hevc_nvenc", "h264_amf", "hevc_amf"],
+      "licenseClass": "GPL-2.0-or-later (build enables GPL components incl. libx264/libx265)",
+      "licenseVerification": {
+        "mustContain": ["--enable-gpl"],
+        "mustNotContain": ["--enable-nonfree"]
+      },
+      "licenseNotice": "This optional tool pack is a GPL build of FFmpeg (BtbN FFmpeg-Builds). The GPL applies to the pack itself, not to the SHEYTAN application, which contains no FFmpeg code and ships no FFmpeg binaries.",
+      "sourceUrl": "https://github.com/BtbN/FFmpeg-Builds",
+      "buildUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-11-08-12-35",
+      "approxDownloadMB": 184,
+      "approxInstalledMB": 400,
+      "requiredSharedLibraries": []
+    },
+    "linux/amd64": {
+      "platform": "linux/amd64",
+      "version": "n9.0.2-48-gd4070a14ce",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz",
+      "sha256": "bf5e935a51afb65ddd14bf67104361508bcc7c77026a66d7e193a05a56ab8d77",
+      "archiveFormat": "tar.xz",
+      "ffmpegPath": "ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0/bin/ffmpeg",
+      "ffprobePath": "ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0/bin/ffprobe",
+      "requiredEncoders": ["libx264", "libx265", "aac"],
+      "optionalEncoders": ["h264_nvenc", "hevc_nvenc"],
+      "licenseClass": "GPL-2.0-or-later (build enables GPL components incl. libx264/libx265)",
+      "licenseVerification": {
+        "mustContain": ["--enable-gpl"],
+        "mustNotContain": ["--enable-nonfree"]
+      },
+      "licenseNotice": "This optional tool pack is a GPL build of FFmpeg (BtbN FFmpeg-Builds). The GPL applies to the pack itself, not to the SHEYTAN application, which contains no FFmpeg code and ships no FFmpeg binaries.",
+      "sourceUrl": "https://github.com/BtbN/FFmpeg-Builds",
+      "buildUrl": "https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-11-08-12-35",
+      "approxDownloadMB": 143,
+      "approxInstalledMB": 346,
+      "requiredSharedLibraries": []
+    }
+  }
+}

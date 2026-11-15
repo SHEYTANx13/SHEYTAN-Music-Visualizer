@@ -22,7 +22,7 @@ describe; this page is the orientation layer.
 | `internal/visualizer` | Visualization modes/config/presets (pure logic, no I/O). |
 | `internal/render` | Renderer selection + CPU renderer (deterministic software raster) + wgpu GPU renderer with verified readback; capability states. |
 | `internal/export` | MP4 export engine: FFmpeg discovery, streaming frame pipe, progress, cancellation, ffprobe validation. |
-| `internal/fflocate` | THE FFmpeg discovery authority (explicit override → app-local `tools/ffmpeg/bin` → PATH). |
+| `internal/fflocate` | THE FFmpeg discovery authority (explicit override → app-managed `<DataRoot>/media-tools/current/bin` → app-local `tools/ffmpeg/bin` → PATH). |
 | `internal/fullscreen` | Framework-agnostic fullscreen controller: desired vs observed state, persisted intent, event-driven reconciliation. |
 | `internal/studio` | Studio service: library, projects, analysis orchestration, session state. |
 | `internal/project` | Versioned project JSON, atomic save, validation, relink. |

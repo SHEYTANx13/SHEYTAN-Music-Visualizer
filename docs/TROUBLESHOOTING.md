@@ -74,9 +74,13 @@ if you ever see a console flash from them, report it with the log.
 
 **Export says FFmpeg is missing.** MP4 export requires a working
 `ffmpeg` AND `ffprobe` pair. Discovery order (documented, deterministic):
-configured path (`SHEYTAN_FFMPEG`), app-local `tools/ffmpeg/bin`, then
-`PATH`. A partial or broken pair fails with a clear message. Without
-FFmpeg, import/playback of the built-in formats (WAV/MP3/FLAC/Ogg) works;
+configured path (`SHEYTAN_FFMPEG`), the app-managed pair under
+`<DataRoot>/media-tools/current/bin` (installed by the in-app Media
+Tools & Codecs manager), app-local `tools/ffmpeg/bin`, then `PATH`. The
+published packages ship no FFmpeg binaries — use the in-app manager for
+the one-time pinned GPL download, or provide the pair yourself. A partial
+or broken pair fails with a clear message. Without FFmpeg,
+import/playback of the built-in formats (WAV/MP3/FLAC/Ogg) works;
 AAC/M4A/MP4 import and MP4 export stay explicitly unavailable — the app
 never advertises them falsely.
 

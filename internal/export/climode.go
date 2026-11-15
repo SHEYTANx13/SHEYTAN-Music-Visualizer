@@ -31,6 +31,8 @@ type CLIOptions struct {
 	Height  int     // frame height (default 1080)
 	FPS     int     // 24/30/60/120
 	Seconds float64 // duration (default 1.0)
+	Codec   string  // "h264" (default) or "hevc" (run 43712071111)
+	FPSRate string  // optional exact rational rate, e.g. "24000/1001"
 }
 
 // RunCLI executes one headless export and returns the process exit
@@ -55,6 +57,9 @@ func RunCLI(opts CLIOptions, out, errW io.Writer) int {
 	if opts.Seconds <= 0 {
 		opts.Seconds = 1.0
 	}
+	if opts.Codec == "" {
+		opts.Codec = "h264"
+	}
 
 	dir, err := os.MkdirTemp("", "sheytan-export-cli-")
 	if err != nil {
@@ -74,6 +79,7 @@ func RunCLI(opts CLIOptions, out, errW io.Writer) int {
 		Width:         opts.Width,
 		Height:        opts.Height,
 		FPS:           opts.FPS,
+		VideoCodec:    opts.Codec,
 		QualityPreset: "high",
 		Encoder:       "auto",
 		AudioWavPath:  wav,

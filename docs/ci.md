@@ -39,22 +39,52 @@ the decoder. Human `--version` output remains user-facing only.
 
 | Status | Meaning | Upload |
 |---|---|---|
-| `VERIFIED` | every package-integrity gate passed AND the expected commit (immutable `github.sha`) matches the embedded metadata of the built AND extracted executable AND no unrelated gate failed | yes |
+| `VERIFIED` | every package-integrity gate passed AND the expected commit (immutable `github.sha`) matches the embedded metadata of the built AND extracted executable AND `ffmpeg_binaries_bundled=false` AND the media-tools downloader fixtures passed AND the packaged H.264 and H.265 export proofs passed | yes |
 | `TEST_ONLY` | package integrity AND commit identity fully passed, but an unrelated quality gate failed — the job/workflow stay red and the summary labels the artifact TEST-ONLY | yes |
 | `UNAVAILABLE` | no valid package, unverified embedded commit, or any failed package-integrity gate | never |
+
+The package-status documents (`ci-logs/package-status-windows.json` /
+`ci-logs/package-status-linux.json`) are computed from PERSISTED evidence
+only — the `ci-logs/gate-results/*.result.json` records, the packaged
+export-proof result files and actual archive/filesystem inspection —
+never from in-memory variables (PowerShell gates run in child processes;
+parent-side variables set inside gate bodies are lost — which was the
+exact root cause of the run-43712071111 Windows package-status
+contradiction this repairs). Fields: `package_status`, `package_file`, `package_bytes`,
+`app_dir`, `commit_*`, `ffmpeg_binaries_bundled` (expected **false** —
+absence of bundled tools is the DESIGN, not a failure),
+`media_tools_download_supported`, `media_tools_downloader_fixture`,
+`media_tools_pinned_install_integration`, `app_launch_self_check`,
+`h264_export_proof`, `h265_software_export_proof`,
+`intel_qsv_hevc_proof` (hardware proof only on real hardware — `NOT
+AVAILABLE` in hosted CI), `ui_layout_matrix`, `crash_fault_injection`,
+`note`.
 
 ## The build scripts and their gates
 
 - `scripts/build/build-windows.ps1` — UCRT64 identity, gofmt,
   `go mod tidy -diff`, `go mod verify`, tests, vet, package build,
   executable build (`-H=windowsgui` + metadata `-X` flags), `--version`,
-  `--self-check`, metadata verification, portable staging, staged-license
-  byte identity, PE subsystem = 2, portable ZIP, fresh-extraction
+  `--self-check`, metadata verification, portable staging (NO media-tool
+  binaries: `tools/ffmpeg/bin` ships EMPTY), staged-license byte
+  identity, PE subsystem = 2, portable ZIP, fresh-extraction
   verification. Independent gates keep running after a failure; dependent
   gates are recorded SKIPPED, never passed.
 - `scripts/build/build-linux.sh` — the Linux ladder with the same
   capture discipline, plus race tests, FFmpeg export proofs and the Xvfb
   GUI smoke.
+- **New gates (both platforms, run 43712071111)**:
+  `forbid-bundled-media-tools` (hard NEGATIVE archive gate — the final
+  application archive must contain no ffmpeg/ffprobe binary, no tool DLL
+  pack, no nested archive, no file over 40 MiB), `package-size-budget`
+  (Windows ZIP < 90 MiB, Linux tar.gz < 70 MiB),
+  `media-tools-downloader-tests` (`go test ./internal/mediatools/`),
+  `media-tools-pinned-install` (the pinned archive is downloaded to a
+  RUNNER TEMP directory — OUTSIDE the package/stage tree — and the
+  env-gated `TestMediaToolsInstallFromPinnedArchive` runs the full
+  production install flow against it), and the packaged-export proofs
+  (H.264 AND H.265 through the app-managed pair with a scrubbed PATH,
+  ffprobe-validated, from an extraction path containing spaces).
 
 ### Gate ownership (do not duplicate work)
 
@@ -67,7 +97,10 @@ the decoder. Human `--version` output remains user-facing only.
 | package staging / license / archive / extract verification | see scripts | both platform jobs (exactly once) |
 | **dedicated GPU gate** | `go test -tags goffi_static -v -run '^TestPaletteReachesGPUShader$' -count=1 ./internal/render/` | **only** `gpu-validation`, once per platform |
 | race suite | `go test -race ... -skip '^TestPaletteReachesGPUShader$'` | platform jobs |
-| export / audio / studio validation | real FFmpeg fixtures | Linux job (Windows: FFmpeg unavailable on hosted runners — recorded honestly) |
+| export / audio / studio validation | real FFmpeg fixtures | Linux job (distro FFmpeg, external to the package); Windows uses the pinned external tool archive via the app-managed resolution drill |
+| media-tools downloader fixtures | `go test -tags goffi_static -count=1 ./internal/mediatools/` | both platform jobs |
+| pinned install integration | `TestMediaToolsInstallFromPinnedArchive` (env-gated; archive staged outside the package) | both platform jobs |
+| compact archive negative gate | `scripts/ci/forbid-bundled-media-tools.sh` / `Forbid-BundledMediaTools.ps1` | both platform jobs, after archive creation |
 
 `TestPaletteReachesGPUShader` is excluded from the default and race suites
 ONLY by its exact name because the dedicated GPU gate owns it — not because

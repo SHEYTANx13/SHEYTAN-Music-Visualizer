@@ -61,6 +61,11 @@ obsolete=(
   'SHEYTAN-Music-Visualizer-linux-x64-portable.tar.gz'
   'zizmor 1.16.2'
   'zizmor==1.16.2'
+  # run-43712071111 compact-package contract: the removed staging gate and
+  # its status field must never return to live docs (the package ships NO
+  # media-tool binaries; the status schema uses ffmpeg_binaries_bundled).
+  'stage-ffmpeg-tools'
+  'ffmpeg_tools_staged'
 )
 found_obsolete=0
 python3 - "${obsolete[@]}" <<'PYOBS'

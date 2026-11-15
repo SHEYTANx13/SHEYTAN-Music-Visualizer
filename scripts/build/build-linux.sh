@@ -15,6 +15,16 @@
 #              govulncheck and the export/GPU/audio validation
 #              fixtures. Default.
 #
+# COMPACT PACKAGE CONTRACT (run 43712071111): the package ships NO
+# media-tool binaries. FFmpeg/ffprobe are app-managed downloads (the
+# in-app Media Tools & Codecs manager installs the pinned pair under
+# <DataRoot>/media-tools/current/bin). CI enforces this negatively
+# (forbid-bundled-media-tools, package-size-budget at 90 MiB) and
+# proves the app-managed path with the media-tools gates plus REAL
+# h264/hevc exports from the extracted package. The package-status
+# record is derived from PERSISTED evidence only
+# (scripts/ci/write-package-status.py).
+#
 # Contract:
 #   - Every command's stdout+stderr is captured from the first byte into
 #     ci-logs/phase2-build.log with a structured record and the original
@@ -58,6 +68,12 @@ mkdir -p "$LOG_DIR"
 CI_LOG_FILE="$LOG_DIR/phase2-build.log"
 export CI_LOG_FILE
 : >"$CI_LOG_FILE" # fresh local run; the packaged copy is evidence/phase2-build.log
+
+# Persisted-evidence reset (run 43712071111): the export-proof result
+# files consumed by scripts/ci/write-package-status.py are rewritten by
+# the verify-extracted-path-with-spaces gate on every run; leftovers
+# from an earlier LOCAL run must never survive as stale PASS evidence.
+rm -f "$LOG_DIR/export-proof-h264.result.txt" "$LOG_DIR/export-proof-h265.result.txt"
 
 # shellcheck source=../ci/capture.sh
 # shellcheck disable=SC1091
@@ -106,7 +122,7 @@ if ! command -v go >/dev/null 2>&1; then
   blocked_gate go-mod-tidy-verify "go toolchain not found on PATH"
   blocked_gate go-mod-verify "go toolchain not found on PATH"
   if [ "$MODE" = "desktop" ]; then
-    for g in go-test go-vet go-build-packages build-executable run-version run-self-check go-test-race export-validation audio-validation gpu-validation studio-integration; do
+    for g in go-test go-vet go-build-packages build-executable run-version run-self-check go-test-race export-validation audio-validation gpu-validation studio-integration media-tools-downloader-tests media-tools-pinned-install; do
       blocked_gate "$g" "go toolchain not found on PATH"
     done
   fi
@@ -209,19 +225,45 @@ if [ "$MODE" = "desktop" ]; then
     skip_gate run-self-check "executable build failed"
   fi
 
-  # Failure-counter snapshots for the package-status record: gates BEFORE
-  # staging (build/version/self-check) must be green for VERIFIED, and the
-  # package gates themselves (stage/license/tar/extract) must additionally
-  # be green. Later non-package gates (race/export/audio/gpu/studio/GUI)
-  # intentionally do NOT invalidate a verified package — they produce the
-  # TEST-ONLY state in the workflow instead (run 42939743766 §5.2).
-  FAILURES_BEFORE_PACKAGE="$FAILURES"
+  # Package-status evidence note (run 43712071111): the record is
+  # derived from PERSISTED gate results by
+  # scripts/ci/write-package-status.py AFTER every gate has run —
+  # quality gates that execute later (race/export/audio/gpu/studio/
+  # GUI/govulncheck) are part of that persisted evidence, so a later
+  # failure downgrades the record to TEST_ONLY instead of being
+  # invisible to it.
+  commit_expected="${SHEYTAN_BUILD_COMMIT:-}"
+  commit_observed="not-observed"
+  commit_verified="false"
+  commit_extracted_observed="not-observed"
+  commit_reason="package missing or not built"
+
+  # PINNED MEDIA-TOOLS PROOF CACHE (run 43712071111): the media-tools
+  # CI proofs that need REAL ffmpeg/ffprobe binaries (the
+  # media-tools-pinned-install integration gate and the packaged
+  # app-managed export proof) download the pinned BtbN linux64 GPL
+  # asset ONCE into this cache — always OUTSIDE the repository, the
+  # dist/ tree and the package stage tree (scripts/ci/
+  # ensure-pinned-media-tools.sh resolves it). The distributed package
+  # ships NO media-tool binaries; the pinned pair is proof machinery
+  # only. The parent owns cleanup after the last consumer.
+  MEDIA_TOOLS_CACHE_OWNED=0
+  if [ -z "${SHEYTAN_MEDIA_TOOLS_CACHE_DIR:-}" ]; then
+    if [ -n "${RUNNER_TEMP:-}" ] && [ -d "${RUNNER_TEMP}" ]; then
+      SHEYTAN_MEDIA_TOOLS_CACHE_DIR="$RUNNER_TEMP/media-tools"
+    else
+      SHEYTAN_MEDIA_TOOLS_CACHE_DIR="$(mktemp -d)/media-tools"
+    fi
+    export SHEYTAN_MEDIA_TOOLS_CACHE_DIR
+    MEDIA_TOOLS_CACHE_OWNED=1
+  fi
 
   # ---- portable package staging (run 42481815519 directory contract) ----
   # One top-level application folder: executable, license.md, readme.md,
-  # portable.mode marker, tools/ffmpeg app-local dependency location and
-  # the documented data/ bootstrap. A tar.gz preserves the executable
-  # bit (a ZIP would not), so the portable contract survives extraction.
+  # portable.mode marker, the tools/ffmpeg app-local override location
+  # (kept EMPTY — see the compact-package contract) and the documented
+  # data/ bootstrap. A tar.gz preserves the executable bit (a ZIP would
+  # not), so the portable contract survives extraction.
   # CANONICAL ONE-PACKAGE CONTRACT (run 42939743766 §5.1): the GitHub
   # Actions artifact is EXACTLY dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz
   # containing exactly one top-level app directory
@@ -240,98 +282,13 @@ if [ "$MODE" = "desktop" ]; then
     install -m 0644 readme.md "$STAGE_APP/readme.md"
     install -m 0644 packaging/portable.mode "$STAGE_APP/portable.mode"
     install -m 0644 packaging/DATA-FOLDERS.txt "$STAGE_APP/data/DATA-FOLDERS.txt"
+    # COMPACT PACKAGE (run 43712071111): ONLY the licensing notice is
+    # staged under tools/ffmpeg/ — the bin/ directory stays EMPTY (the
+    # app-managed downloader owns the binaries; forbid-bundled-media-
+    # tools rejects any archive that ships them).
     install -m 0644 packaging/FFMPEG-TOOLS-LICENSING.md "$STAGE_APP/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md"
-    install -m 0644 packaging/FFMPEG-TOOLS-PROVENANCE.md "$STAGE_APP/tools/ffmpeg/FFMPEG-TOOLS-PROVENANCE.md"
-    install -m 0644 packaging/ffmpeg-licenses/COPYING.GPLv2 "$STAGE_APP/tools/ffmpeg/COPYING.GPLv2"
-    install -m 0644 packaging/ffmpeg-licenses/COPYING.GPLv3 "$STAGE_APP/tools/ffmpeg/COPYING.GPLv3"
   fi
 
-  # ---- app-local FFmpeg/FFprobe staging (run 43612608237 P0) ----
-  # The portable package is SELF-CONTAINED: tools/ffmpeg/bin carries the
-  # pinned FFmpeg 9.0.2 pair (packaging/FFMPEG-TOOLS-PROVENANCE.md is the
-  # authoritative provenance record). Resolution order:
-  #   1. SHEYTAN_FFMPEG_BUNDLE_DIR — a pre-staged pinned bundle (offline
-  #      runners); must contain ffmpeg, ffprobe, COPYING.GPLv2/v3.
-  #   2. Pinned BtbN release asset download with SHA-256 verification.
-  # Every staged build is functionally re-verified: version string,
-  # buildconf WITHOUT --enable-nonfree (and WITH --enable-gpl), and the
-  # libx264 encoder. A failed staging leaves tools empty and the package
-  # status logic below refuses VERIFIED — an empty tools dir can never be
-  # verified (the baseline run's mislabeled-VERIFIED defect).
-  FFMPEG_STAGED=0
-  ffmpeg_staged_version="not-staged"
-  ffmpeg_stage_reason=""
-  FF_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz"
-  FF_SHA256="bf5e935a51afb65ddd14bf67104361508bcc7c77026a66d7e193a05a56ab8d77"
-  FF_EXPECTED_VERSION_PREFIX="ffmpeg version n9.0.2"
-  ffmpeg_verify_and_install() {
-    # $1 = src dir containing ffmpeg/ffprobe
-    local src="$1"
-    [ -x "$src/ffmpeg" ] && [ -x "$src/ffprobe" ] || { ffmpeg_stage_reason="staged dir $src missing executable pair"; return 1; }
-    local vline bconf
-    vline="$("$src/ffmpeg" -version 2>/dev/null | head -1)"
-    case "$vline" in
-      "$FF_EXPECTED_VERSION_PREFIX"*) : ;;
-      *) ffmpeg_stage_reason="ffmpeg version mismatch: '$vline' does not start with '$FF_EXPECTED_VERSION_PREFIX'"; return 1 ;;
-    esac
-    bconf="$("$src/ffmpeg" -hide_banner -buildconf 2>&1)"
-    if printf '%s' "$bconf" | grep -q -- '--enable-nonfree'; then
-      ffmpeg_stage_reason="REJECTED: staged FFmpeg build declares --enable-nonfree (non-distributable)"
-      return 1
-    fi
-    if ! printf '%s' "$bconf" | grep -q -- '--enable-gpl'; then
-      ffmpeg_stage_reason="REJECTED: staged FFmpeg build lacks --enable-gpl (no libx264 software H.264 encoder expected)"
-      return 1
-    fi
-    if ! "$src/ffmpeg" -hide_banner -encoders 2>/dev/null | grep -q ' libx264 '; then
-      ffmpeg_stage_reason="REJECTED: staged FFmpeg build has no libx264 encoder (export capability gate fails)"
-      return 1
-    fi
-    install -m 0755 "$src/ffmpeg" "$STAGE_APP/tools/ffmpeg/bin/ffmpeg"
-    install -m 0755 "$src/ffprobe" "$STAGE_APP/tools/ffmpeg/bin/ffprobe"
-    ffmpeg_staged_version="$vline"
-    {
-      echo "staged_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-      echo "asset_url=$FF_URL"
-      echo "asset_sha256=$FF_SHA256"
-      echo "version=$vline"
-      echo "buildconf_flags=$(printf '%s' "$bconf" | grep -E -- '--enable-(gpl|version3|nonfree)' | tr '\n' ' ')"
-      echo "libx264_encoder=present"
-      echo "source_offer=https://ffmpeg.org/download.html (FFmpeg git d4070a14ce); build scripts: https://github.com/BtbN/FFmpeg-Builds"
-      echo "licenses=COPYING.GPLv2, COPYING.GPLv3 (packaging/ffmpeg-licenses/)"
-    } > "$STAGE_APP/tools/ffmpeg/FFMPEG-TOOLS-PROVENANCE.txt"
-    return 0
-  }
-  if [ "$EXE_OK" -eq 1 ]; then
-    if [ "${SHEYTAN_FFMPEG_BUNDLE_DIR:-}" != "" ] && [ -d "$SHEYTAN_FFMPEG_BUNDLE_DIR" ]; then
-      if ffmpeg_verify_and_install "$SHEYTAN_FFMPEG_BUNDLE_DIR"; then
-        FFMPEG_STAGED=1
-      else
-        echo "ERROR: bundle-dir staging failed: $ffmpeg_stage_reason"
-      fi
-    else
-      FF_DL="$(mktemp -d)/ffmpeg.tar.xz"
-      if curl -fsSL --retry 2 -o "$FF_DL" "$FF_URL" \
-        && echo "$FF_SHA256  $FF_DL" | sha256sum -c - >/dev/null 2>&1; then
-        FF_X="$(mktemp -d)"
-        if tar -xJf "$FF_DL" -C "$FF_X" \
-          && ffmpeg_verify_and_install "$FF_X"/ffmpeg-n9.0.2*/bin; then
-          FFMPEG_STAGED=1
-        else
-          ffmpeg_stage_reason="${ffmpeg_stage_reason:-archive extraction or verification failed}"
-          echo "ERROR: pinned FFmpeg download staging failed: $ffmpeg_stage_reason"
-        fi
-        rm -rf "$FF_X"
-      else
-        ffmpeg_stage_reason="pinned FFmpeg download or SHA-256 verification failed ($FF_URL)"
-        echo "ERROR: $ffmpeg_stage_reason — tools stay empty; package cannot reach VERIFIED"
-      fi
-      rm -f "$FF_DL"
-    fi
-    if [ "$FFMPEG_STAGED" -eq 1 ]; then
-      echo "FFmpeg staging OK: $ffmpeg_staged_version"
-    fi
-  fi
 
   if [ "$EXE_OK" -eq 1 ]; then
     # The gate body documents paths RELATIVE TO THE STAGING ROOT
@@ -348,10 +305,19 @@ if [ "$MODE" = "desktop" ]; then
         set -euo pipefail
         test -s "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable missing"; exit 1; }
         test -x "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable not executable"; exit 1; }
-        for f in license.md readme.md portable.mode data/DATA-FOLDERS.txt tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md tools/ffmpeg/FFMPEG-TOOLS-PROVENANCE.md tools/ffmpeg/COPYING.GPLv2 tools/ffmpeg/COPYING.GPLv3; do
+        for f in license.md readme.md portable.mode data/DATA-FOLDERS.txt tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md; do
           test -s "SHEYTAN-Music-Visualizer-linux-x64/$f" || { echo "ERROR: staged file missing/empty: $f"; exit 1; }
         done
-        echo "staged portable tree:"
+        # COMPACT PACKAGE CONTRACT (run 43712071111): tools/ffmpeg/bin is
+        # the documented app-local override location and MUST ship EMPTY —
+        # no media-tool binary is ever staged into the package.
+        test -d "SHEYTAN-Music-Visualizer-linux-x64/tools/ffmpeg/bin" || { echo "ERROR: app-local tools/ffmpeg/bin directory missing"; exit 1; }
+        if find "SHEYTAN-Music-Visualizer-linux-x64/tools/ffmpeg/bin" -mindepth 1 | grep -q .; then
+          echo "ERROR: tools/ffmpeg/bin must be EMPTY (compact package ships no media-tool binaries):"
+          find "SHEYTAN-Music-Visualizer-linux-x64/tools/ffmpeg/bin" -mindepth 1
+          exit 1
+        fi
+        echo "staged portable tree (compact contract: tools/ffmpeg/bin EMPTY, licensing notice staged):"
         find "SHEYTAN-Music-Visualizer-linux-x64" -type f -printf "STAGED: %P (%s bytes)\n" | sort
       '
     ) || fail_gate stage-portable
@@ -375,7 +341,7 @@ if [ "$MODE" = "desktop" ]; then
 
     if [ -s "$TARBALL" ]; then
       VERIFY_DIR="$(mktemp -d)"
-      CI_TOOL_CONTEXT="gate:package-verify (extracted tarball)" ci_capture "$JOB" verify-extracted-package bash -c '
+      CI_TOOL_CONTEXT="gate:package-verify (extracted tarball, compact contract)" ci_capture "$JOB" verify-extracted-package bash -c '
         set -euo pipefail
         VERIFY_DIR="$1"
         tar -xzf "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz" -C "$VERIFY_DIR"
@@ -383,165 +349,297 @@ if [ "$MODE" = "desktop" ]; then
         cmp license.md "$APP/license.md" || { echo "ERROR: DISTRIBUTED license.md differs from canonical (post-archive)"; exit 1; }
         test -x "$APP/sheytan-music-visualizer" || { echo "ERROR: executable bit lost in tarball"; exit 1; }
         test -f "$APP/portable.mode" || { echo "ERROR: portable.mode missing in tarball"; exit 1; }
-        test -f "$APP/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md" || { echo "ERROR: ffmpeg licensing doc missing in tarball"; exit 1; }
-        # Run 43612608237: the extracted package must carry its OWN working
-        # tools pair — the mislabeled-VERIFIED defect of the baseline run.
-        if [ -f "$APP/tools/ffmpeg/bin/ffmpeg" ]; then
-          test -x "$APP/tools/ffmpeg/bin/ffmpeg" || { echo "ERROR: packaged ffmpeg not executable"; exit 1; }
-          test -x "$APP/tools/ffmpeg/bin/ffprobe" || { echo "ERROR: packaged ffprobe not executable"; exit 1; }
-          test -s "$APP/tools/ffmpeg/FFMPEG-TOOLS-PROVENANCE.txt" || { echo "ERROR: staged tools lack their provenance record"; exit 1; }
-          "$APP/tools/ffmpeg/bin/ffmpeg" -version | head -1
-          "$APP/tools/ffmpeg/bin/ffprobe" -version | head -1
-          echo "extracted package verified: license byte-identical, executable bit preserved, portable.mode present, packaged ffmpeg/ffprobe functional"
-        else
-          echo "extracted package verified (NO packaged tools): license byte-identical, executable bit preserved, portable.mode present"
-          echo "WARNING: tools/ffmpeg/bin is EMPTY — the package can reach TEST_ONLY at best (never VERIFIED)"
+        test -s "$APP/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md" || { echo "ERROR: ffmpeg licensing doc missing in tarball"; exit 1; }
+        # COMPACT PACKAGE CONTRACT (run 43712071111): the app-local
+        # tools/ffmpeg/bin override location ships EMPTY — the
+        # app-managed downloader owns the binaries, and NO ffmpeg/ffprobe
+        # binary may appear anywhere in the extracted tree (the
+        # archive-level scan is owned by forbid-bundled-media-tools).
+        test -d "$APP/tools/ffmpeg/bin" || { echo "ERROR: app-local tools/ffmpeg/bin directory missing in tarball"; exit 1; }
+        if find "$APP/tools/ffmpeg/bin" -mindepth 1 | grep -q .; then
+          echo "ERROR: tools/ffmpeg/bin must be EMPTY in the distributed package (compact contract):"
+          find "$APP/tools/ffmpeg/bin" -mindepth 1
+          exit 1
         fi
+        if find "$APP" -type f \( -name ffmpeg -o -name ffprobe -o -name ffmpeg.exe -o -name ffprobe.exe \) | grep -q .; then
+          echo "ERROR: media-tool binary found in the extracted package:"
+          find "$APP" -type f \( -name ffmpeg -o -name ffprobe -o -name ffmpeg.exe -o -name ffprobe.exe \)
+          exit 1
+        fi
+        echo "extracted package verified (compact contract): license byte-identical, executable bit preserved, portable.mode present, licensing notice present, tools/ffmpeg/bin EMPTY, zero media-tool binaries"
       ' _ "$VERIFY_DIR" || fail_gate verify-extracted-package
       rm -rf "$VERIFY_DIR"
 
-      # PATH-WITH-SPACES RUNTIME CHECK (run 42939743766 §5.3): extract the
-      # SAME canonical tarball under a directory containing spaces and run
-      # the extracted executable's --version there. A package that only
-      # runs from a clean temp path is not shippable.
-      SPACES_DIR="$(mktemp -d)/SHEYTAN Package Dir (x64)"
-      mkdir -p "$SPACES_DIR"
-      CI_TOOL_CONTEXT="gate:package-verify (path with spaces)" ci_capture "$JOB" verify-extracted-path-with-spaces bash -c '
+      # ---- NEGATIVE PACKAGE GATE: no bundled media tools (run 43712071111)
+      # The reusable helper scans the produced tarball (raw entry list +
+      # extracted tree) and fails on any ffmpeg/ffprobe file, any DLL
+      # under tools/, any nested archive and any file over the 40 MiB
+      # per-file budget. Media tools are app-managed downloads (the
+      # in-app Media Tools & Codecs manager installs the pinned pair
+      # under <DataRoot>/media-tools/current/bin, never into the
+      # package).
+      CI_TOOL_CONTEXT="gate:forbid-bundled-media-tools (negative: zero bundled media tools)" ci_capture "$JOB" forbid-bundled-media-tools bash "$REPO_ROOT/scripts/ci/forbid-bundled-media-tools.sh" "$TARBALL" ||
+        fail_gate forbid-bundled-media-tools
+
+      # ---- PACKAGE SIZE BUDGET (run 43712071111) --------------------------
+      # The compact package (no bundled media tools) must stay UNDER
+      # 70 MiB = 73400320 bytes (Linux binary + docs only; the Windows
+      # ZIP uses its own 90 MiB budget).
+      CI_TOOL_CONTEXT="gate:package-size-budget (70 MiB = 73400320 bytes)" ci_capture "$JOB" package-size-budget bash -c '
         set -euo pipefail
-        SPACES_DIR="$1"
+        TARBALL="dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz"
+        test -s "$TARBALL" || { echo "ERROR: package tarball missing: $TARBALL"; exit 1; }
+        BYTES="$(stat -c%s "$TARBALL")"
+        BUDGET=73400320
+        echo "package:      $TARBALL"
+        echo "package size: $BYTES bytes"
+        echo "size budget:  $BUDGET bytes (70 MiB)"
+        if [ "$BYTES" -ge "$BUDGET" ]; then
+          echo "ERROR: package size $BYTES bytes meets or exceeds the $BUDGET-byte budget (70 MiB)"
+          exit 1
+        fi
+        echo "package-size-budget PASSED: $BYTES bytes < $BUDGET bytes"
+      ' || fail_gate package-size-budget
+    else
+      skip_gate verify-extracted-package "tarball not created"
+      skip_gate forbid-bundled-media-tools "tarball not created"
+      skip_gate package-size-budget "tarball not created"
+    fi
+
+    # ---- media-tools downloader fixture gate (run 43712071111) -----------
+    # The in-app Media Tools & Codecs manager (internal/mediatools)
+    # downloads and installs the pinned pair at runtime. Its fixture
+    # suite proves the downloader, resolution order and layout contracts
+    # WITHOUT network access; the env-gated real-download integration
+    # test is owned by media-tools-pinned-install below.
+    CI_TOOL_CONTEXT="gate:media-tools-downloader-tests (internal/mediatools fixtures)" ci_capture "$JOB" media-tools-downloader-tests go test $GO_TAGS -count=1 ./internal/mediatools/ ||
+      fail_gate media-tools-downloader-tests
+
+    # ---- pinned media-tools install integration gate (run 43712071111) --
+    # Downloads the PINNED BtbN linux64 GPL asset ONCE into the runner
+    # temp cache (outside repo/dist; never bundled into any artifact),
+    # SHA-256-verifies it, then runs the env-gated integration test
+    # TestMediaToolsInstallFromPinnedArchive with
+    # SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE/SHEYTAN_TEST_MEDIA_TOOLS_SHA256
+    # pointing at the verified archive. The proof cache is owned by the
+    # parent (SHEYTAN_MEDIA_TOOLS_CACHE_DIR) and cleaned after the last
+    # consumer; this gate never deletes it.
+    CI_TOOL_CONTEXT="gate:media-tools-pinned-install (pinned BtbN linux64 asset + env-gated integration test)" ci_capture "$JOB" media-tools-pinned-install bash -c '
+      set -euo pipefail
+      REPO_ROOT="$1"
+      helper_out="$(bash "$REPO_ROOT/scripts/ci/ensure-pinned-media-tools.sh")" || { echo "ERROR: pinned media-tools provisioning failed (download/SHA-256/layout)"; exit 1; }
+      eval "$helper_out"
+      echo "pinned archive: $SHEYTAN_MEDIA_ARCHIVE (SHA-256 verified)"
+      echo "pinned sha256:  $SHEYTAN_MEDIA_SHA256"
+      echo "pinned bin dir: $SHEYTAN_MEDIA_BIN"
+      export SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE="$SHEYTAN_MEDIA_ARCHIVE"
+      export SHEYTAN_TEST_MEDIA_TOOLS_SHA256="$SHEYTAN_MEDIA_SHA256"
+      rc=0
+      go test -tags goffi_static -count=1 -run "TestMediaToolsInstallFromPinnedArchive" ./internal/mediatools/ -v || rc=$?
+      unset SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE SHEYTAN_TEST_MEDIA_TOOLS_SHA256
+      if [ "$rc" -ne 0 ]; then
+        echo "ERROR: TestMediaToolsInstallFromPinnedArchive failed (exit $rc) — the app-managed install path is not proven"
+        exit "$rc"
+      fi
+      echo "media-tools pinned install integration PASSED (pinned archive SHA-256 verified, installer test green)"
+    ' _ "$REPO_ROOT" || fail_gate media-tools-pinned-install
+
+    # PATH-WITH-SPACES RUNTIME CHECK + APP-MANAGED EXPORT PROOFS
+    # (run 42939743766 §5.3, compact-contract proof run 43712071111):
+    # extract the SAME canonical tarball under a directory containing
+    # spaces and run the extracted executable there. The package ships
+    # NO binaries, so the proof installs the PINNED pair into the
+    # app-managed location <DataRoot>/media-tools/current/bin and runs
+    # the EXTRACTED app with SHEYTAN_DATA_DIR pointing at that data
+    # root, with PATH scrubbed of every FFmpeg-carrying directory and
+    # SHEYTAN_FFMPEG unset — the app MUST resolve its own app-managed
+    # pair. Both codecs (h264 default, hevc software) are validated
+    # with the app-managed ffprobe; the verdicts are PERSISTED to
+    # ci-logs/export-proof-h264.result.txt / export-proof-h265.result.txt
+    # (PASS <out> / FAIL <reason>) for scripts/ci/write-package-status.py.
+    if [ -s "$TARBALL" ]; then
+      SPACES_BASE="$(mktemp -d)"
+      SPACES_DIR="$SPACES_BASE/SHEYTAN Spaces Dir"
+      mkdir -p "$SPACES_DIR"
+      CI_TOOL_CONTEXT="gate:package-verify (path with spaces + app-managed media-tools export proofs)" ci_capture "$JOB" verify-extracted-path-with-spaces bash -c '
+        set -euo pipefail
+        SPACES_DIR="$1"; LOG_DIR="$2"; REPO_ROOT="$3"
+        PROOF_H264="$LOG_DIR/export-proof-h264.result.txt"
+        PROOF_H265="$LOG_DIR/export-proof-h265.result.txt"
+        rm -f "$PROOF_H264" "$PROOF_H265"
+        fail_proof() { # fail_proof <h264|h265> <reason>
+          case "$1" in
+            h264) printf "FAIL %s\n" "$2" > "$PROOF_H264" ;;
+            h265) printf "FAIL %s\n" "$2" > "$PROOF_H265" ;;
+          esac
+          echo "ERROR: $2"
+        }
         tar -xzf "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz" -C "$SPACES_DIR"
         APP="$SPACES_DIR/SHEYTAN-Music-Visualizer-linux-x64"
         test -x "$APP/sheytan-music-visualizer" || { echo "ERROR: executable bit lost in spaces-path extraction"; exit 1; }
         "$APP/sheytan-music-visualizer" --version || { echo "ERROR: extracted EXE --version failed from a path containing spaces"; exit 1; }
         echo "spaces-path runtime check PASSED"
-        # Run 43612608237 packaged-export proof: when tools are packaged,
-        # run the REAL headless export from the extracted package with a
-        # PATH that contains NO system FFmpeg — the app must resolve its
-        # own tools/ffmpeg/bin pair and produce an ffprobe-validated MP4.
-        if [ -x "$APP/tools/ffmpeg/bin/ffmpeg" ]; then
-          SCRUB="$(mktemp -d)/scrubbed-path-bin"
-          mkdir -p "$SCRUB"
-          OUT="$(mktemp -d)/packaged-export-proof.mp4"
-          if env -i PATH="$SCRUB" HOME="$SPACES_DIR" \
+
+        # Provision the app-managed pair from the PINNED asset (proof
+        # machinery only — never part of the package).
+        helper_out="$(bash "$REPO_ROOT/scripts/ci/ensure-pinned-media-tools.sh")" || { echo "ERROR: pinned media-tools provisioning failed (download/SHA-256/layout)"; exit 1; }
+        eval "$helper_out"
+        DATA_DIR="$SPACES_DIR/SHEYTAN App Data Dir"
+        MANAGED_BIN="$DATA_DIR/media-tools/current/bin"
+        mkdir -p "$MANAGED_BIN"
+        cp -f "$SHEYTAN_MEDIA_BIN/ffmpeg" "$MANAGED_BIN/ffmpeg"
+        cp -f "$SHEYTAN_MEDIA_BIN/ffprobe" "$MANAGED_BIN/ffprobe"
+        chmod 0755 "$MANAGED_BIN/ffmpeg" "$MANAGED_BIN/ffprobe"
+        echo "app-managed tools provisioned from the pinned asset: $MANAGED_BIN"
+
+        # Scrub PATH: keep every entry that does NOT carry an
+        # ffmpeg/ffprobe binary (toolchain directories stay intact).
+        SCRUBBED_PATH=""
+        ORIG_IFS="$IFS"
+        IFS=":"
+        for d in $PATH; do
+          [ -n "${d:-}" ] || continue
+          if [ -e "$d/ffmpeg" ] || [ -e "$d/ffprobe" ] || [ -e "$d/ffmpeg.exe" ] || [ -e "$d/ffprobe.exe" ]; then continue; fi
+          if [ -n "$SCRUBBED_PATH" ]; then SCRUBBED_PATH="$SCRUBBED_PATH:$d"; else SCRUBBED_PATH="$d"; fi
+        done
+        IFS="$ORIG_IFS"
+        echo "PATH scrubbed of FFmpeg-carrying directories for the export proof"
+
+        HOME_DIR="$SPACES_DIR/app-home"
+        mkdir -p "$HOME_DIR"
+        rc=0
+        for codec in h264 hevc; do
+          OUT="$SPACES_DIR/packaged-export-proof-$codec.mp4"
+          if [ "$codec" = "h264" ]; then PROOF="$PROOF_H264"; else PROOF="$PROOF_H265"; fi
+          if env -u SHEYTAN_FFMPEG SHEYTAN_DATA_DIR="$DATA_DIR" PATH="$SCRUBBED_PATH" HOME="$HOME_DIR" \
             "$APP/sheytan-music-visualizer" --export-cli \
             --export-out "$OUT" --export-w 640 --export-h 360 \
-            --export-fps 30 --export-seconds 0.5; then
-            test -s "$OUT" || { echo "ERROR: packaged export produced no output"; exit 1; }
-            "$APP/tools/ffmpeg/bin/ffprobe" -v error -select_streams v:0 -show_entries "stream=codec_name,width,height" -of csv "$OUT"
-            echo "PACKAGED-EXPORT PROOF PASSED (app-local tools, scrubbed PATH, ffprobe-validated)"
+            --export-fps 30 --export-seconds 1 --export-codec "$codec"; then
+            :
           else
-            echo "ERROR: packaged --export-cli failed with scrubbed PATH — app-local tool resolution or export broken"
-            exit 1
+            fail_proof "$codec" "app-managed export --export-codec $codec failed with scrubbed PATH"
+            rc=1
+            continue
           fi
-        else
-          echo "tools/ffmpeg/bin empty in extracted package — packaged-export proof NOT RUN (status stays TEST_ONLY)"
-        fi
-      ' _ "$SPACES_DIR" || fail_gate verify-extracted-path-with-spaces
-      rm -rf "$(dirname "$SPACES_DIR")"
-
-      # PACKAGE-STATUS RECORD (run 42939743766 §6, repaired for run
-      # 43090342995 item D): machine-readable package state for the
-      # workflow upload decision. The observed commit comes EXCLUSIVELY
-      # from --build-info-json (typed JSON via scripts/ci/observe_commit.py;
-      # never a regex over human --version text) of the built AND the
-      # extracted executable. Status contract:
-      #   UNAVAILABLE — no valid package, unverified embedded commit, or
-      #                 any failed package-integrity gate; never uploaded.
-      #   TEST_ONLY   — package integrity and commit identity passed but
-      #                 an unrelated quality gate failed; job stays red.
-      #   VERIFIED    — everything green.
-      pkg_status="UNAVAILABLE"
-      commit_verified="false"
-      commit_expected="${SHEYTAN_BUILD_COMMIT:-}"
-      commit_observed="not-observed"
-      commit_extracted_observed="not-observed"
-      commit_reason="package missing or not built"
-      OBSERVER="$REPO_ROOT/scripts/ci/observe_commit.py"
-      PACKAGE_GATES_FAILED=$(( FAILURES - FAILURES_BEFORE_PACKAGE ))
-      if [ "$EXE_OK" -eq 1 ] && [ -s "$TARBALL" ]; then
-        bi_line=""
-        bi_rc="1"
-        # Run-43541087097 repair: pass the REAL --build-info-json exit
-        # code into the observer (Windows already did; Linux hardcoded
-        # 0, so observer rule "non-zero exit never verified" was not
-        # enforced on this platform).
-        if bi_line="$(./bin/sheytan-music-visualizer --build-info-json 2>/dev/null)"; then
-          bi_rc="0"
-        fi
-        built_json="$(printf '%s' "$bi_line" | python3 "$OBSERVER" "$commit_expected" "$bi_rc" || true)"
-        commit_observed="$(printf '%s' "$built_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("observed","not-observed"))' 2>/dev/null || echo not-observed)"
-        built_verified="$(printf '%s' "$built_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("verified") else "false")' 2>/dev/null || echo false)"
-
-        VERIFY_DIR="$(mktemp -d)"
-        ex_verified="false"
-        if tar -xzf "$TARBALL" -C "$VERIFY_DIR" 2>/dev/null &&
-           [ -x "$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" ]; then
-          ex_line=""
-          ex_rc="1"
-          if ex_line="$("$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" --build-info-json 2>/dev/null)"; then
-            ex_rc="0"
+          if [ ! -s "$OUT" ]; then
+            fail_proof "$codec" "app-managed export --export-codec $codec produced no output file"
+            rc=1
+            continue
           fi
-          extracted_json="$(printf '%s' "$ex_line" | python3 "$OBSERVER" "$commit_expected" "$ex_rc" || true)"
-          commit_extracted_observed="$(printf '%s' "$extracted_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("observed","not-observed"))' 2>/dev/null || echo not-observed)"
-          ex_verified="$(printf '%s' "$extracted_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("verified") else "false")' 2>/dev/null || echo false)"
-        fi
-        rm -rf "$VERIFY_DIR"
-
-        if [ "$built_verified" = "true" ] && [ "$ex_verified" = "true" ]; then
-          commit_verified="true"
-          commit_reason=""
-        else
-          commit_reason="built_verified=$built_verified extracted_verified=$ex_verified (see observe_commit.py contract)"
-        fi
-
-        # Run 43612608237 status contract: VERIFIED additionally requires
-        # the packaged app-local FFmpeg/FFprobe pair (staged, verified,
-        # and proven by the packaged-export gate above). A package with
-        # empty tools/ffmpeg/bin is TEST_ONLY at best — never VERIFIED.
-        if [ "$commit_verified" != "true" ] || [ "$PACKAGE_GATES_FAILED" -gt 0 ]; then
-          pkg_status="UNAVAILABLE"
-        elif [ "$FAILURES_BEFORE_PACKAGE" -gt 0 ] || [ "$FFMPEG_STAGED" -ne 1 ]; then
-          pkg_status="TEST_ONLY"
-        else
-          pkg_status="VERIFIED"
-        fi
-        if [ "$FFMPEG_STAGED" -ne 1 ] && [ "$pkg_status" = "TEST_ONLY" ]; then
-          commit_reason="$commit_reason; ffmpeg_tools_not_staged: ${ffmpeg_stage_reason:-no bundle dir and pinned download unavailable}"
-        fi
-      fi
-      python3 - "$REPO_ROOT/ci-logs/package-status-linux.json" "$pkg_status" "$commit_expected" "$commit_observed" "$commit_verified" "$commit_extracted_observed" "$commit_reason" "$FFMPEG_STAGED" "$ffmpeg_staged_version" <<'PYJSON' || true
+          # Validate with the APP-MANAGED ffprobe (the same pair the app
+          # resolved): expected codec, ~30 frames, ~1 s, size > 0.
+          if ! PROBE_JSON="$("$MANAGED_BIN/ffprobe" -v error -count_frames -select_streams v:0 \
+              -show_entries stream=codec_name,width,height,nb_read_frames \
+              -show_entries format=duration -of json "$OUT")"; then
+            fail_proof "$codec" "app-managed ffprobe validation failed for $codec"
+            rc=1
+            continue
+          fi
+          if ! RESULT="$(printf "%s" "$PROBE_JSON" | python3 -c "
 import json, sys
-out, status, expected, observed, verified, extracted_observed, reason, ffmpeg_staged, ffmpeg_version = sys.argv[1:10]
-record = {
-    "platform": "linux-x64",
-    "package_status": status,
-    "package_file": "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz",
-    "app_dir": "SHEYTAN-Music-Visualizer-linux-x64",
-    "commit_expected": expected if expected else None,
-    "commit_observed": observed,
-    "commit_verified": verified == "true",
-    "commit_extracted_observed": extracted_observed,
-    "commit_source": "--build-info-json (built exe + extracted package, typed JSON parse)",
-    "commit_reason": reason,
-    "ffmpeg_tools_staged": ffmpeg_staged == "1",
-    "ffmpeg_tools_version": ffmpeg_version,
-    "note": "VERIFIED requires a non-blank expected commit exactly matching the embedded metadata of the built AND the extracted executable, zero failed package-integrity gates, AND a verified app-local FFmpeg/FFprobe pair proven by the packaged-export gate; TEST_ONLY keeps the job red; UNAVAILABLE is never uploaded",
-}
-with open(out, "w", encoding="utf-8") as f:
-    json.dump(record, f, indent=2)
-    f.write("\n")
-print(json.dumps(record))
-PYJSON
+doc = json.load(sys.stdin)
+stream = (doc.get(\"streams\") or [{}])[0]
+duration = float((doc.get(\"format\") or {}).get(\"duration\") or 0)
+print(stream.get(\"codec_name\", \"\"), int(stream.get(\"nb_read_frames\") or 0), duration)
+")"; then
+            fail_proof "$codec" "app-managed ffprobe output for $codec could not be parsed"
+            rc=1
+            continue
+          fi
+          CODEC_NAME="${RESULT%% *}"
+          REST="${RESULT#* }"
+          FRAMES="${REST%% *}"
+          DURATION="${REST#* }"
+          SIZE="$(stat -c%s "$OUT")"
+          echo "  $codec: codec=$CODEC_NAME frames=$FRAMES duration=${DURATION}s size=$SIZE bytes"
+          PROOF_FAILURES=""
+          if [ "$CODEC_NAME" != "$codec" ]; then
+            PROOF_FAILURES="codec [$CODEC_NAME] does not match the requested [$codec]"
+          fi
+          FRAMES_N="$(printf "%s" "$FRAMES" | tr -cd "0-9")"
+          [ -n "$FRAMES_N" ] || FRAMES_N=0
+          if [ "$FRAMES_N" -lt 28 ] || [ "$FRAMES_N" -gt 32 ]; then
+            PROOF_FAILURES="${PROOF_FAILURES:+$PROOF_FAILURES; }frame count $FRAMES is not ~30 (30 fps x 1 s)"
+          fi
+          DURATION_OK="$(python3 -c "import sys; d=float(sys.argv[1] or 0); print(1 if 0.8 <= d <= 1.25 else 0)" "$DURATION" 2>/dev/null || echo 0)"
+          if [ "$DURATION_OK" != "1" ]; then
+            PROOF_FAILURES="${PROOF_FAILURES:+$PROOF_FAILURES; }duration ${DURATION}s is not ~1 s"
+          fi
+          if [ "$SIZE" -le 0 ]; then
+            PROOF_FAILURES="${PROOF_FAILURES:+$PROOF_FAILURES; }output is empty"
+          fi
+          if [ -n "$PROOF_FAILURES" ]; then
+            fail_proof "$codec" "app-managed export --export-codec $codec failed validation: $PROOF_FAILURES"
+            rc=1
+            continue
+          fi
+          printf "PASS %s\n" "$OUT" > "$PROOF"
+          echo "app-managed export proof PASSED: $codec ($OUT)"
+        done
+        if [ "$rc" -ne 0 ]; then exit 1; fi
+        echo "spaces-path + app-managed media-tools export proofs PASSED (h264 + hevc software; SHEYTAN_DATA_DIR app-managed pair; PATH scrubbed of system FFmpeg; app-managed ffprobe validation)"
+      ' _ "$SPACES_DIR" "$LOG_DIR" "$REPO_ROOT" || fail_gate verify-extracted-path-with-spaces
+      rm -rf "$SPACES_BASE"
+
+      # COMMIT OBSERVER (run 43090342995 item D repair): the observed
+      # commit comes exclusively from the machine-readable
+      # --build-info-json output of BOTH the built executable and the
+      # extracted-package executable, parsed as typed JSON via
+      # scripts/ci/observe_commit.py (never a regex over human
+      # --version text). Human --version output stays user-facing only.
+      # The PERSISTED package-status record itself is written by
+      # scripts/ci/write-package-status.py at the END of this script,
+      # after every gate has produced its evidence. The commit_* values
+      # were initialized to their honest defaults before staging; this
+      # block overwrites them with the observed evidence.
+      OBSERVER="$REPO_ROOT/scripts/ci/observe_commit.py"
+      bi_line=""
+      bi_rc="1"
+      # Run-43541087097 repair: pass the REAL --build-info-json exit
+      # code into the observer (Windows already did; Linux hardcoded
+      # 0, so observer rule "non-zero exit never verified" was not
+      # enforced on this platform).
+      if bi_line="$(./bin/sheytan-music-visualizer --build-info-json 2>/dev/null)"; then
+        bi_rc="0"
+      fi
+      built_json="$(printf '%s' "$bi_line" | python3 "$OBSERVER" "$commit_expected" "$bi_rc" || true)"
+      commit_observed="$(printf '%s' "$built_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("observed","not-observed"))' 2>/dev/null || echo not-observed)"
+      built_verified="$(printf '%s' "$built_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("verified") else "false")' 2>/dev/null || echo false)"
+
+      VERIFY_DIR="$(mktemp -d)"
+      ex_verified="false"
+      if tar -xzf "$TARBALL" -C "$VERIFY_DIR" 2>/dev/null &&
+         [ -x "$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" ]; then
+        ex_line=""
+        ex_rc="1"
+        if ex_line="$("$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" --build-info-json 2>/dev/null)"; then
+          ex_rc="0"
+        fi
+        extracted_json="$(printf '%s' "$ex_line" | python3 "$OBSERVER" "$commit_expected" "$ex_rc" || true)"
+        commit_extracted_observed="$(printf '%s' "$extracted_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("observed","not-observed"))' 2>/dev/null || echo not-observed)"
+        ex_verified="$(printf '%s' "$extracted_json" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("verified") else "false")' 2>/dev/null || echo false)"
+      fi
+      rm -rf "$VERIFY_DIR"
+
+      if [ "$built_verified" = "true" ] && [ "$ex_verified" = "true" ]; then
+        commit_verified="true"
+        commit_reason=""
+      else
+        commit_reason="built_verified=$built_verified extracted_verified=$ex_verified (see observe_commit.py contract)"
+      fi
     else
-      skip_gate verify-extracted-package "tarball not created"
       skip_gate verify-extracted-path-with-spaces "tarball not created"
-      printf '{"platform":"linux-x64","package_status":"UNAVAILABLE","package_file":"dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz","commit_expected":%s,"commit_observed":"not-observed","commit_verified":false,"note":"package was not produced"}\n'         "$(printf '%s' "${SHEYTAN_BUILD_COMMIT:-}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read() or None))' 2>/dev/null || echo null)"         > "$REPO_ROOT/ci-logs/package-status-linux.json" || true
     fi
   else
     skip_gate stage-portable "executable build failed"
     skip_gate verify-package-license "executable build failed"
     skip_gate create-portable-tar "executable build failed"
     skip_gate verify-extracted-package "executable build failed"
+    skip_gate forbid-bundled-media-tools "executable build failed"
+    skip_gate package-size-budget "executable build failed"
+    skip_gate media-tools-downloader-tests "executable build failed"
+    skip_gate media-tools-pinned-install "executable build failed"
+    skip_gate verify-extracted-path-with-spaces "executable build failed"
   fi
 
   # race tests on concurrent core packages
@@ -557,8 +655,10 @@ CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race
   # app-local CLI export diagnostic joined the canonical export gate —
   # they are integration tests with real ffprobe validation, NOT config
   # checks, and they skip only when a local FFmpeg/FFprobe pair is
-  # genuinely absent.
-  CI_TOOL_CONTEXT="gate:export-validation" ci_capture "$JOB" export-validation go test $GO_TAGS -timeout 900s -v -run 'TestExport1080p30|TestExport4K24|TestExport4K60|TestExport4K120|TestExportCancel|TestExportMissingEncoderFails|TestRunCLIExportDiagnosticAppLocal' ./internal/export/ ||
+  # genuinely absent. Run 43712071111: the HEVC software 1080p30 proof,
+  # the custom-frame-rate proof and the size-estimate proof joined the
+  # same canonical list.
+  CI_TOOL_CONTEXT="gate:export-validation" ci_capture "$JOB" export-validation go test $GO_TAGS -timeout 900s -v -run 'TestExport1080p30|TestExport4K24|TestExport4K60|TestExport4K120|TestExportCancel|TestExportMissingEncoderFails|TestRunCLIExportDiagnosticAppLocal|TestExportHEVC1080p30Software|TestExportCustomFrameRates|TestExportSizeEstimates' ./internal/export/ ||
     fail_gate export-validation
 
   # audio pipeline validation (decoders, resampler, cache)
@@ -831,6 +931,51 @@ CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race
       fail_gate govulncheck
   else
     skip_gate govulncheck "govulncheck not installed on this host"
+  fi
+
+  # ---- package-status record from PERSISTED EVIDENCE (run 43712071111) --
+  # CONTRACT: ci-logs/package-status-linux.json is derived by the
+  # canonical writer scripts/ci/write-package-status.py from PERSISTED
+  # evidence ONLY — the per-gate verdict JSONs in
+  # ci-logs/gate-results/<gate>.result.json, the export-proof result
+  # files (export-proof-h264/h265.result.txt) and an actual scan of the
+  # produced tarball. In-memory gate bookkeeping is NEVER consulted
+  # (every ci_capture gate runs as a child process; the writer folds
+  # commit verification, package-gate failures, the bundled-media-tools
+  # scan and the media/export proofs into VERIFIED / TEST_ONLY /
+  # UNAVAILABLE semantics — identical to the Windows side).
+  if command -v python3 >/dev/null 2>&1; then
+    if python3 "$REPO_ROOT/scripts/ci/write-package-status.py" \
+      --platform linux-x64 \
+      --package "$TARBALL" \
+      --package-file "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz" \
+      --app-dir "SHEYTAN-Music-Visualizer-linux-x64" \
+      --log-dir "$LOG_DIR" \
+      --out "$LOG_DIR/package-status-linux.json" \
+      --commit-expected "$commit_expected" \
+      --commit-observed "$commit_observed" \
+      --commit-verified "$commit_verified" \
+      --commit-source "--build-info-json (built exe + extracted package, typed JSON parse)" \
+      --commit-reason "$commit_reason"; then
+      :
+    else
+      echo "ERROR: write-package-status.py failed with exit code $? — failing closed (never fabricate a status record)"
+      fail_gate package-status-record
+    fi
+  else
+    echo "ERROR: python3 not found on PATH — ci-logs/package-status-linux.json cannot be written; failing closed (never fabricate a status record)"
+    fail_gate package-status-record
+  fi
+  [ -s "$LOG_DIR/package-status-linux.json" ] || fail_gate package-status-record
+  cat "$LOG_DIR/package-status-linux.json"
+
+  # PINNED CACHE CLEANUP (run 43712071111): every consumer of the
+  # pinned media-tools proof cache (media-tools-pinned-install, the
+  # app-managed export proof) has finished — remove the cache when this
+  # run owns it (a caller-preset cache directory is never touched).
+  if [ "$MEDIA_TOOLS_CACHE_OWNED" -eq 1 ] && [ -n "${SHEYTAN_MEDIA_TOOLS_CACHE_DIR:-}" ] && [ -d "${SHEYTAN_MEDIA_TOOLS_CACHE_DIR}" ]; then
+    rm -rf "$SHEYTAN_MEDIA_TOOLS_CACHE_DIR"
+    echo "pinned media-tools proof cache cleaned: $SHEYTAN_MEDIA_TOOLS_CACHE_DIR"
   fi
 fi
 
