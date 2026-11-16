@@ -106,6 +106,26 @@ func Run() error {
 		log.Error("studio service initialization failed", "err", err.Error())
 		return err
 	}
+	// v3 §C structured play diagnostics: every transport lifecycle
+	// event (play.preroll.started/completed, play.state.changed,
+	// play.position.advanced, play.eos, play.stop.requested,
+	// play.resources.released, play.error) is written to the runtime
+	// log with its session/generation ID. No media bytes, titles or
+	// user library paths are ever logged.
+	svc.SetPlayEventSink(func(ev playback.PlayEvent) {
+		attrs := []any{
+			"session", ev.Session,
+			"state", ev.State.String(),
+			"position", ev.Position.String(),
+			"total", ev.Total.String(),
+		}
+		if ev.Err != nil {
+			attrs = append(attrs, "err", ev.Err.Error())
+			log.Error(ev.Kind, attrs...)
+			return
+		}
+		log.Info(ev.Kind, attrs...)
+	})
 	startup.Mark("studio-service-and-audio-init")
 	u := newStudioUI(w, svc)
 	u.app = a

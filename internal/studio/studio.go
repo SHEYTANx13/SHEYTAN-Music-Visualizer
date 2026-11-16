@@ -104,6 +104,11 @@ type Studio struct {
 	tempoOverrideBPM  float64
 	syncOffsetSeconds float64
 
+	// playSink (v3 §C) receives structured transport lifecycle events
+	// (play.state.changed, play.eos, ...) and is attached to every
+	// transport as soon as one is created.
+	playSink func(playback.PlayEvent)
+
 	subscriber func(Event)
 }
 
@@ -535,8 +540,27 @@ func (s *Studio) newTransportLocked() (*playback.Transport, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.playSink != nil {
+		tr.SetEventSink(s.playSink)
+	}
 	s.transport = tr
 	return tr, nil
+}
+
+// SetPlayEventSink installs the structured play lifecycle sink (v3 §C
+// diagnostics). It is applied to the live transport immediately (when
+// one exists) and to every transport created later. Events carry the
+// playback session/generation ID, state, position and error; the sink
+// itself must not block (it is invoked on the transport goroutine
+// trampoline).
+func (s *Studio) SetPlayEventSink(f func(playback.PlayEvent)) {
+	s.mu.Lock()
+	s.playSink = f
+	tr := s.transport
+	s.mu.Unlock()
+	if tr != nil {
+		tr.SetEventSink(f)
+	}
 }
 
 // Stop stops playback.

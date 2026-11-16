@@ -5,6 +5,19 @@ package playback
 // byte counting so the playhead reflects handed-to-device samples
 // minus the device-buffered remainder.
 //
+// State model (v3 §C): Stopped -> Priming -> Playing -> Paused ->
+// (Priming|Playing) -> Ended. Priming is entered synchronously by
+// Play()/Seek-while-playing; Playing is CONFIRMED lazily by the clock
+// accessors once the processed-sample counter has actually advanced
+// beyond the transition epoch — the transport never reports Playing
+// merely because a Play call was accepted (requirement 26). Ended is
+// the natural end-of-track terminal state (all samples handed, device
+// buffer drained); the next Play restarts (from the start when at the
+// end, otherwise from the last seek target). Every spawn increments a
+// session (playback generation) ID, exposed through ClockInfo and the
+// structured PlayEvent stream (SetEventSink), so consumers can
+// correlate and discard stale-generation observations.
+//
 // Clock contract (one coherent state-transition model):
 //
 //   - The canonical position source is the epoch triple
@@ -35,6 +48,32 @@ import (
 	"time"
 )
 
+// PlayEventKind names follow the v3 §C diagnostics contract so log
+// consumers can rely on a stable event vocabulary.
+const (
+	EvStateChanged      = "play.state.changed"
+	EvPrerollStarted    = "play.preroll.started"
+	EvPrerollCompleted  = "play.preroll.completed"
+	EvPositionAdvanced  = "play.position.advanced"
+	EvEOS               = "play.eos"
+	EvStopRequested     = "play.stop.requested"
+	EvResourcesReleased = "play.resources.released"
+	EvPlayError         = "play.error"
+)
+
+// PlayEvent is one structured transport lifecycle event. Events are
+// delivered on the caller's goroutine WITHOUT the transport mutex held,
+// so a sink may safely call back into the transport.
+type PlayEvent struct {
+	Kind     string
+	Session  uint64
+	State    State
+	Position time.Duration
+	Total    time.Duration
+	Err      error
+	At       time.Time
+}
+
 // Transport is one track's playback state machine. It is safe for
 // concurrent use (UI goroutines call it; the device goroutine consumes
 // the counting reader).
@@ -52,6 +91,14 @@ type Transport struct {
 	volume float64
 	state  State
 
+	// session increments on every player spawn; it is the playback
+	// generation ID. All state transitions and events carry it so a
+	// consumer can correlate and discard observations from an obsolete
+	// generation (v3 §C: reject stale callbacks).
+	session uint64
+	// sink receives structured lifecycle events (may be nil).
+	sink func(PlayEvent)
+
 	// Clock epoch, captured together under mu at every transition.
 	basePos   int64 // canonical playhead at the transition
 	baseCount int64 // counting.n at the transition
@@ -67,6 +114,8 @@ const (
 	StateStopped State = iota
 	StatePlaying
 	StatePaused
+	StatePriming // device started, playhead advance not yet confirmed
+	StateEnded   // end of track reached naturally (terminal until next transition)
 )
 
 // String renders the state.
@@ -76,6 +125,10 @@ func (s State) String() string {
 		return "playing"
 	case StatePaused:
 		return "paused"
+	case StatePriming:
+		return "priming"
+	case StateEnded:
+		return "ended"
 	default:
 		return "stopped"
 	}
@@ -119,27 +172,72 @@ func durationToBytes(d time.Duration) int64 {
 	return frames * BytesPerFrame
 }
 
+// SetEventSink installs a structured lifecycle event sink (optional;
+// events are dropped when nil). It must be called before Play.
+func (t *Transport) SetEventSink(f func(PlayEvent)) {
+	t.mu.Lock()
+	t.sink = f
+	t.mu.Unlock()
+}
+
+// emitLocked snapshots the sink under mu; the actual delivery happens
+// in emitAfter, outside the lock.
+func (t *Transport) emitLocked(ev PlayEvent) {
+	ev.Session = t.session
+	ev.State = t.state
+	ev.Total = framesToDuration(int64(t.total / BytesPerFrame))
+	if ev.At.IsZero() {
+		ev.At = time.Now()
+	}
+	ev.Position = framesToDuration(t.rawPositionLocked() / BytesPerFrame)
+	f := t.sink
+	if f == nil {
+		return
+	}
+	// Deliver after unlock via a tiny trampoline: the sink must be able
+	// to call transport accessors without deadlocking.
+	go func() { defer func() { _ = recover() }(); f(ev) }()
+}
+
 // Play starts or resumes playback. Resuming from a paused position
 // re-captures the clock epoch so counters moved while paused are
 // excluded from the resumed playhead.
+//
+// v3 §C confirmation contract: Play does NOT report StatePlaying. The
+// transport enters StatePriming; the state is promoted to Playing only
+// once the device has actually consumed samples beyond the transition
+// epoch (the processed-sample counter advanced), which is observed by
+// the clock accessors (Clock/Position/IsPlaying). Play is idempotent:
+// repeated calls during Priming or Playing never spawn a second device
+// player. Play after a natural end (StateEnded) restarts from the
+// beginning when the playhead is at the end, or from the last seek
+// target otherwise.
 func (t *Transport) Play() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
 		return ErrClosed
 	}
-	if t.state == StatePlaying {
-		return nil
+	if t.state == StatePlaying || t.state == StatePriming {
+		return nil // idempotent: no second pipeline, no decoder respawn
+	}
+	if t.state == StateEnded && t.basePos >= t.total {
+		// replay after a natural end restarts from the start
+		t.basePos = 0
 	}
 	if t.player == nil {
 		if err := t.spawnPlayerLocked(); err != nil {
+			t.emitLocked(PlayEvent{Kind: EvPlayError, Err: err})
 			return err
 		}
 	}
 	t.player.SetVolume(t.volume)
 	t.player.Play()
 	t.captureEpochLocked()
-	t.state = StatePlaying
+	t.state = StatePriming
+	t.emitLocked(PlayEvent{Kind: EvPrerollStarted})
+	t.emitLocked(PlayEvent{Kind: EvStateChanged})
+	t.confirmLocked()
 	return nil
 }
 
@@ -152,6 +250,7 @@ func (t *Transport) spawnPlayerLocked() error {
 	// a fresh section reader from the current position
 	r := io.NewSectionReader(t.file, t.basePos, t.total-t.basePos)
 	pr := &countingReader{r: r}
+	t.session++ // new playback generation
 	t.player = t.out.NewPlayer(pr)
 	t.counting = pr
 	if err := t.player.Err(); err != nil {
@@ -162,6 +261,18 @@ func (t *Transport) spawnPlayerLocked() error {
 	}
 	t.captureEpochLocked()
 	return nil
+}
+
+// handedLocked returns the bytes handed to the device beyond the
+// current epoch. Caller holds mu.
+func (t *Transport) handedLocked() int64 {
+	if t.counting == nil {
+		return 0
+	}
+	t.counting.mu.Lock()
+	d := t.counting.n - t.baseCount
+	t.counting.mu.Unlock()
+	return d
 }
 
 // captureEpochLocked records the current counter values as the new
@@ -178,6 +289,30 @@ func (t *Transport) captureEpochLocked() {
 		t.baseBuf = t.player.BufferedSize()
 	} else {
 		t.baseBuf = 0
+	}
+}
+
+// confirmLocked promotes Priming to Playing once the processed-sample
+// counter has advanced beyond the transition epoch (the device has
+// consumed real samples — v3 §C requirement 26), and detects natural
+// end-of-track (all samples handed and the device buffer drained).
+// Caller holds mu.
+func (t *Transport) confirmLocked() {
+	if t.state == StatePriming {
+		if t.handedLocked() >= BytesPerFrame {
+			t.state = StatePlaying
+			t.emitLocked(PlayEvent{Kind: EvPrerollCompleted})
+			t.emitLocked(PlayEvent{Kind: EvPositionAdvanced})
+			t.emitLocked(PlayEvent{Kind: EvStateChanged})
+		}
+	}
+	if t.state == StatePlaying || t.state == StatePriming {
+		if t.player != nil && t.livePositionLocked() >= t.total && t.player.BufferedSize() == 0 {
+			t.state = StateEnded
+			t.basePos = t.total
+			t.emitLocked(PlayEvent{Kind: EvEOS})
+			t.emitLocked(PlayEvent{Kind: EvStateChanged})
+		}
 	}
 }
 
@@ -211,14 +346,16 @@ func (c *countingReader) Seek(offset int64, whence int) (int64, error) {
 }
 
 // Pause pauses playback, freezing the playhead at the position captured
-// by this transition. Idempotent: pausing a paused or stopped transport
-// is a no-op. The device player is kept so resume keeps its buffer, but
-// every counter the device moves after this transition is excluded from
-// the frozen position and re-based on resume.
+// by this transition. Idempotent: pausing a paused, stopped or ended
+// transport is a no-op. Pausing during Priming is legal: the playhead
+// freezes at the epoch the same way. The device player is kept so
+// resume keeps its buffer, but every counter the device moves after
+// this transition is excluded from the frozen position and re-based on
+// resume.
 func (t *Transport) Pause() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.closed || t.state != StatePlaying {
+	if t.closed || (t.state != StatePlaying && t.state != StatePriming) {
 		return nil
 	}
 	// Capture the live playhead from the playing epoch before
@@ -228,6 +365,7 @@ func (t *Transport) Pause() error {
 	t.basePos = p
 	t.captureEpochLocked()
 	t.state = StatePaused
+	t.emitLocked(PlayEvent{Kind: EvStateChanged})
 	return nil
 }
 
@@ -238,11 +376,13 @@ func (t *Transport) Stop() error {
 	if t.closed {
 		return ErrClosed
 	}
+	t.emitLocked(PlayEvent{Kind: EvStopRequested})
 	t.releasePlayerLocked()
 	t.basePos = 0
 	t.baseCount = 0
 	t.baseBuf = 0
 	t.state = StateStopped
+	t.emitLocked(PlayEvent{Kind: EvStateChanged})
 	return nil
 }
 
@@ -254,6 +394,7 @@ func (t *Transport) releasePlayerLocked() {
 		_ = t.player.Close()
 		t.player = nil
 		t.counting = nil
+		t.emitLocked(PlayEvent{Kind: EvResourcesReleased})
 	}
 	t.baseCount = 0
 	t.baseBuf = 0
@@ -278,17 +419,23 @@ func (t *Transport) Seek(d time.Duration) error {
 		off = t.total
 	}
 	off -= off % BytesPerFrame // frame-align the canonical offset
-	wasPlaying := t.state == StatePlaying
+	wasPlaying := t.state == StatePlaying || t.state == StatePriming
 	t.releasePlayerLocked()
 	t.basePos = off
 	if wasPlaying {
 		if err := t.spawnPlayerLocked(); err != nil {
 			t.state = StatePaused
+			t.emitLocked(PlayEvent{Kind: EvPlayError, Err: err})
 			return err
 		}
 		t.player.SetVolume(t.volume)
 		t.player.Play()
-		t.state = StatePlaying
+		t.state = StatePriming
+		t.emitLocked(PlayEvent{Kind: EvPrerollStarted})
+		t.emitLocked(PlayEvent{Kind: EvStateChanged})
+		t.confirmLocked()
+	} else {
+		t.emitLocked(PlayEvent{Kind: EvStateChanged})
 	}
 	return nil
 }
@@ -339,11 +486,17 @@ func (t *Transport) livePositionLocked() int64 {
 	return pos
 }
 
-// rawPositionLocked returns the canonical playhead. While paused or
-// stopped it is the frozen epoch base; device counters moved after the
-// transition are ignored by design. Caller holds mu.
+// rawPositionLocked returns the canonical playhead. While paused,
+// priming, stopped or ended it is the frozen epoch base; device
+// counters moved after the transition are ignored by design. Caller
+// holds mu.
 func (t *Transport) rawPositionLocked() int64 {
-	if t.state != StatePlaying || t.player == nil {
+	if (t.state != StatePlaying && t.state != StatePriming) || t.player == nil {
+		return t.basePos
+	}
+	if t.state == StatePriming {
+		// during priming the epoch base is the honest position:
+		// nothing is confirmed advancing yet
 		return t.basePos
 	}
 	return t.livePositionLocked()
@@ -354,6 +507,7 @@ func (t *Transport) rawPositionLocked() int64 {
 func (t *Transport) Position() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.confirmLocked()
 	return framesToDuration(t.rawPositionLocked() / BytesPerFrame)
 }
 
@@ -364,12 +518,17 @@ type ClockInfo struct {
 	State      State         `json:"state"`
 	Latency    time.Duration `json:"latency"` // device-buffer uncertainty
 	DeviceReal bool          `json:"deviceReal"`
+	Session    uint64        `json:"session"` // playback generation ID
 }
 
-// Clock returns the full clock snapshot.
+// Clock returns the full clock snapshot. It first applies the
+// confirmation transitions (Priming -> Playing once samples actually
+// advance; Playing -> Ended at natural end of track), so the reported
+// state is never ahead of what the device has really done.
 func (t *Transport) Clock() ClockInfo {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.confirmLocked()
 	state := t.state
 	_, real := t.out.(*OtoOutput)
 	return ClockInfo{
@@ -378,13 +537,17 @@ func (t *Transport) Clock() ClockInfo {
 		State:      state,
 		Latency:    t.deviceLatency,
 		DeviceReal: real,
+		Session:    t.session,
 	}
 }
 
-// IsPlaying reports whether audio is currently playing.
+// IsPlaying reports whether audio is confirmed playing (the playhead
+// has actually advanced on the device; a transport that just accepted a
+// Play command reports false until then).
 func (t *Transport) IsPlaying() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.confirmLocked()
 	return t.state == StatePlaying
 }
 

@@ -1,5 +1,58 @@
 # Changelog
 
+## v3 work order — dependencies, playback confirmation contract, xz matrix (2026-11-16)
+
+- Dependencies (work-order item B, exact versions): `astral-sh/setup-uv`
+  v8.2.0 → **v10.3.3** pinned to the verified full commit
+  `68559e99cc807c1eb7e9238fd43a15bba460eec2` (tag→commit verified via
+  `git ls-remote` during execution; comment updated; unrelated inputs
+  untouched); `github.com/ulikunitz/xz` v0.5.15 → **v0.5.17** exactly
+  (Go proxy-verified tag `6ead826b…`, 2026-09-19; v0.6.0 alphas
+  deliberately not taken). `go mod tidy`/`verify`/`tidy -diff` clean;
+  no other dependency churn.
+- Playback (item C): the transport can no longer report `Playing`
+  merely because a Play call was accepted. New states `Priming`
+  (device started, confirmation pending) and `Ended` (natural
+  end-of-track, previously a stuck "playing" at the total); promotion
+  to `Playing` happens only once the processed-sample counter has
+  actually advanced beyond the transition epoch; replay-after-end
+  restarts from the start; every player spawn increments a session
+  (generation) ID exposed via `ClockInfo.Session`. Structured
+  lifecycle events (`play.preroll.started/completed`,
+  `play.state.changed`, `play.position.advanced`, `play.eos`,
+  `play.stop.requested`, `play.resources.released`, `play.error`) flow
+  through `Transport.SetEventSink` → `Studio.SetPlayEventSink` into
+  the runtime log; the UI also logs `play.requested` /
+  `play.pause.requested`. No media bytes/titles/paths logged. Six new
+  contract tests (plus all 17 pre-existing deterministic clock tests,
+  none weakened) pass under `-race`; pause-during-priming, EOS,
+  seek-at-end, session and event-stream behaviors pinned. Backend
+  unchanged: Oto v3 (NOT GStreamer; no migration per rule 27).
+- `internal/mediatools/xz_test.go` (new, 16 tests): the v3-required xz
+  regression matrix against the real v0.5.17 code — round-trips
+  (single/multi-block/empty/8 MiB), concatenated streams, truncation
+  (documented lenient block-boundary case: never wrong data, never
+  silent partial data), corrupt header/body, dictionary-cap bounds,
+  writer Close-error propagation (constructor writes 24 bytes —
+  measured), early/double Close, tar.xz extraction integration
+  (happy/traversal/corrupt/non-xz), CRC64 end-to-end guarantee.
+  Stable across `-count=25`.
+- Security documentation (item A): `docs/security/CODEQL-ALERT-REMEDIATION.md`
+  records the live OPEN alert inventory as `BLOCKED` with the exact
+  access evidence (no credentials in the execution environment;
+  unauthenticated API 403; web UI requires an authenticated session)
+  — no alert count invented, no dismissal/suppression added,
+  `codeql.yml` audited and unmodified. New `docs/DEPENDENCIES.md`,
+  `docs/AUDIO-PLAYBACK.md`, `docs/RUNTIME-DIAGNOSTICS.md`;
+  traceability extended with rows R25–R29 (work-order item V3-D).
+- Verified on Linux x64 (Go 1.27.4, `goffi_static`, CGO): full build,
+  `go vet`, `gofmt`, `go test ./...` (25 packages) all green; the
+  built executable's `--self-check` passes end-to-end. Windows-native
+  and real-audio-device verification remain hosted gates (no
+  Windows/audio hardware in this sandbox); Cogent Core POC and the 3D
+  vertical slice remain STAGED_WITH_GATE (no display/GPU here) — see
+  the traceability ledger.
+
 ## Run 43767556517 repair + content-integrity milestone (2026-11-16)
 
 Five confirmed CI defects fixed at root cause (no assertion weakening):

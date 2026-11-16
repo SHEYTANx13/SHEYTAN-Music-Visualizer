@@ -1052,7 +1052,9 @@ with `pip` but
 audited via `/usr/bin/python3 -m zizmor` — a different environment
 ("No module named zizmor"), so the audit never executed. The preflight now
 installs uv through the SHA-pinned `astral-sh/setup-uv` action (verified
-commit fac544c07dec837d0ccb6301d7b5580bf5edae39 = v8.2.0) and runs BOTH
+commit 68559e99cc807c1eb7e9238fd43a15bba460eec2 = v10.3.3, upgraded from
+fac544c07dec837d0ccb6301d7b5580bf5edae39 = v8.2.0 in the 2026-11-16
+dependency pass) and runs BOTH
 the version check and the audit through ONE isolated environment:
 `uvx --from zizmor==1.32.0 zizmor ...`. Verified locally this session:
 `zizmor 1.32.0` (PyPI, released 2026-11-02), audit clean at

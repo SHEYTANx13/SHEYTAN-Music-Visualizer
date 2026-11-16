@@ -30,6 +30,18 @@ import (
 
 // onPlayPause toggles playback (wired to the transport button).
 func (u *studioUI) onPlayPause() {
+	// v3 §C structured diagnostics: the request is logged before the
+	// service call (the transport's own event stream — play.preroll.*,
+	// play.state.changed, play.eos, … — is wired in Run()).
+	if u.log != nil {
+		if clock := u.svc.Clock(); clock.State == playback.StatePlaying {
+			u.log.Info("play.pause.requested", "session", clock.Session,
+				"position", clock.Position.String())
+		} else {
+			u.log.Info("play.requested", "session", clock.Session,
+				"position", clock.Position.String())
+		}
+	}
 	if err := u.svc.PlayPause(); err != nil {
 		u.dialogError("Playback", err.Error())
 	}
