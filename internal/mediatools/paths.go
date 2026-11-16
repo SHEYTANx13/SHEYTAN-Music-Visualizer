@@ -2,12 +2,12 @@ package mediatools
 
 // paths.go — app-managed media-tool directory layout (run 43712071111):
 //
-//	<DataRoot>/media-tools/current/bin/ffmpeg[.exe]   active pair
-//	<DataRoot>/media-tools/current/bin/ffprobe[.exe]
-//	<DataRoot>/media-tools/current/manifest.json      installed pack identity
-//	<DataRoot>/media-tools/current/licenses/…         provenance/license copies
-//	<DataRoot>/media-tools/previous/…                 last known-good (rollback)
-//	<DataRoot>/media-tools/.tmp-<rand>/…              in-flight install staging
+//      <DataRoot>/media-tools/current/bin/ffmpeg[.exe]   active pair
+//      <DataRoot>/media-tools/current/bin/ffprobe[.exe]
+//      <DataRoot>/media-tools/current/manifest.json      installed pack identity
+//      <DataRoot>/media-tools/current/licenses/…         provenance/license copies
+//      <DataRoot>/media-tools/previous/…                 last known-good (rollback)
+//      <DataRoot>/media-tools/.tmp-<rand>/…              in-flight install staging
 //
 // The resolver order (internal/fflocate) treats current/bin as the
 // app-managed location: user-selected > app-managed > app-local
@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 )
 
@@ -68,9 +67,20 @@ type InstalledInfo struct {
 
 // InspectInstalled reads current/ and reports what is actually there
 // (filesystem evidence only; it never runs the executables).
+//
+// Run-43767556517 repair (Gates B/C): the executable names resolved
+// here MUST come from the same package-level platform decision
+// (runtimeGOOS) the installer used when it materialized the pair.
+// Reading runtime.GOOS directly created a second source of truth that
+// diverged from the installer wherever tests pin the indirection — on
+// Windows CI the installer (pinned) wrote one name form while this
+// inspector (host) looked for another, so a verified install was
+// misreported as not-installed. In production the two are identical;
+// in tests there is now exactly one platform decision for the whole
+// package.
 func InspectInstalled(dataRoot string) (*InstalledInfo, error) {
 	bin := CurrentBin(dataRoot)
-	ff, fp := BinNames(runtime.GOOS)
+	ff, fp := BinNames(runtimeGOOS)
 	ffPath := filepath.Join(bin, ff)
 	fpPath := filepath.Join(bin, fp)
 	if !isRegular(ffPath) || !isRegular(fpPath) {

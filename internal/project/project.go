@@ -35,6 +35,17 @@ type Project struct {
 
 	Name string `json:"name"`
 
+	// Content identity (run-43767556517 §3.12, additive and
+	// backward-compatible: older builds ignore unknown JSON fields
+	// and newer builds treat them as optional). ContentID is the
+	// immutable typed ID of this persisted entity — it never
+	// changes on rename/move/duplicate-display-name. Revision is
+	// the optimistic-concurrency token: every persisted mutation
+	// bumps it, and a mutation carrying a stale expected revision
+	// is rejected instead of silently overwriting.
+	ContentID string `json:"contentId,omitempty"`
+	Revision  uint64 `json:"revision,omitempty"`
+
 	// Media: source reference + identity. RelPath is preferred for
 	// portability; AbsPath is the fallback used when the relative
 	// path does not resolve.
@@ -120,6 +131,13 @@ func (p *Project) Validate() error {
 	if p.MediaRef.Fingerprint == "" {
 		return fmt.Errorf("%w: missing media fingerprint", ErrCorrupt)
 	}
+	// Content identity: a present ContentID must have the typed
+	// service format (run-43767556517 §3.12). Legacy documents
+	// without an ID stay valid (the content service assigns one on
+	// first write).
+	if p.ContentID != "" && !validContentID(p.ContentID) {
+		return fmt.Errorf("%w: malformed content id %q", ErrCorrupt, p.ContentID)
+	}
 	if !validMode(p.Visualizer.Mode) {
 		return fmt.Errorf("%w: unknown visualizer mode %q", ErrCorrupt, p.Visualizer.Mode)
 	}
@@ -176,6 +194,22 @@ func validMode(m string) bool {
 		return true
 	}
 	return false
+}
+
+// validContentID enforces the typed identity format owned by the
+// content service: "prj-" + 26 lowercase crockford-base32 characters.
+func validContentID(id string) bool {
+	if !strings.HasPrefix(id, "prj-") || len(id) != 4+26 {
+		return false
+	}
+	for _, c := range id[4:] {
+		switch {
+		case c >= '0' && c <= '9', c >= 'a' && c <= 'v':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func clamp(v, lo, hi, def float64) float64 {

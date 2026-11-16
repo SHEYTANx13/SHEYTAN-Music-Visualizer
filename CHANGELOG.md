@@ -1,3 +1,58 @@
+# Changelog
+
+## Run 43767556517 repair + content-integrity milestone (2026-11-16)
+
+Five confirmed CI defects fixed at root cause (no assertion weakening):
+
+- `internal/mediatools` (Gates B/C): `InspectInstalled` resolved executable
+  names from `runtime.GOOS` while the installer used the package-level
+  platform pin — on Windows CI a verified install inspected as
+  `not-installed`. One platform decision now owns the whole package
+  (`paths.go`), with a host-agnostic regression test that reproduces the
+  exact `state=not-installed` failure on any runner, plus corrupt-manifest,
+  update-available, spaces/Unicode data-root and idempotent-remove tests.
+- `scripts/ci/MediaTools-Pinned.ps1` (Gate D): the resolver emitted
+  `Write-Output` progress strings, so callers received an `object[]` and
+  StrictMode threw on `.Url`/`.BinDir`. It now returns ONE schema-validated
+  `[pscustomobject]` (`Version, AssetURL, ArchivePath, SHA256, BinaryDir,
+  FFmpegPath, FFprobePath, Platform, ArchiveFormat`), progress goes to the
+  host stream, every consumer uses the authoritative fields, and the export
+  proofs use the resolver's validated `FFmpegPath`/`FFprobePath`.
+- `scripts/ci/tests/test-package-gates.sh` P6 (Gate A): the stale awk range
+  (`/^    }$/` never matched) swallowed the rest of build-windows.ps1 and
+  false-fired on other gates' legitimate `$LASTEXITCODE` reads; `echo | grep -q`
+  pipelines produced broken pipes. P6 now extracts exact gate blocks
+  (Capture-Step … Fail-Gate), greps files only, and rejects two negative
+  mutants so it cannot rot into always-pass.
+- `scripts/ci/tests/Test-ResolveRepoRoot.ps1` R8 (Gate E): updated to the
+  live SIX-gate RequireRepoRoot contract with exact ordered helper lists
+  (verify-build-metadata, create-portable-zip, verify-extracted-package,
+  forbid-bundled-media-tools, media-tools-pinned-install,
+  verify-extracted-path-with-spaces — the last with its two-helper list).
+- New fixture P12 (`scripts/ci/tests/Test-MediaToolsPinnedResolver.ps1`):
+  11-case resolver contract matrix (schema inventory, null/array rejection,
+  per-field missing-field diagnostics, digest-format strictness, URL/version
+  coherence, missing binaries, spaces+Unicode, env-gated dynamic contract).
+
+Content-integrity milestone (work order §3.12, `internal/content`):
+
+- Stable typed IDs (`prj-…`) stored additively in the existing project
+  schema; legacy documents get IDs on first write. Format, extension and
+  backward compatibility preserved.
+- Optimistic revision tokens plus external-modification (bytes-hash)
+  detection; stale or overwritten documents are refused, never
+  last-write-wins.
+- Transaction journal with deterministic crash recovery for move-class
+  operations; stale staging cleanup on open; corrupt journals fail safe.
+- Trash/restore with tombstones; explicit purge only for trashed entities;
+  external source media is out of reach by construction; render guard.
+- Bounded revision-scoped undo/redo with exact-state inverses.
+- Duplicate-aware import with canonical-content hashing and collision-safe
+  names (spaces/Unicode/hostile characters).
+- Studio routing: library-rooted saves go through the validated boundary;
+  saves outside keep plain atomic save. Scenario tests A–L all PASS
+  (Linux x64, `-count=1` and `-race -count=2`).
+
 # CHANGELOG — SHEYTAN Music Visualizer
 
 All notable changes to the application and its engineering machinery.

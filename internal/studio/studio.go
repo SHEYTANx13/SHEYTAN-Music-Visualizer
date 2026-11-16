@@ -16,11 +16,13 @@ import (
 	"image"
 	"math"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/content"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
@@ -83,6 +85,15 @@ type Studio struct {
 	projectPath    string
 	projectDoc     *project.Project
 	lastSourcePath string
+
+	// Content service (run-43767556517 §3.12): when a library is
+	// attached, project documents saved INSIDE the library root are
+	// managed through the validated content boundary (stable typed IDs,
+	// revision checks, trash/restore, undo/redo); documents saved
+	// outside keep the plain atomic-save behavior unchanged.
+	contentLib     *content.Library
+	contentID      string
+	contentRev     uint64
 	userCustomized bool
 	importing      bool
 	importCancel   context.CancelFunc
@@ -717,15 +728,106 @@ func (s *Studio) SaveProject(path string) error {
 		BackgroundLayer:     string(cfg.BackgroundLayer),
 		BackgroundIntensity: cfg.BackgroundIntensity,
 	}
+	if s.manageContentAt(filepath.Dir(path)) {
+		if err := s.saveThroughContentService(p, path); err != nil {
+			s.emit(Event{Kind: EventProjectFailed, Message: err.Error()})
+			return err
+		}
+		s.emit(Event{Kind: EventProjectSaved, Message: filepath.Base(s.projectPathLocked())})
+		return nil
+	}
 	if err := project.Save(p, path); err != nil {
 		s.emit(Event{Kind: EventProjectFailed, Message: err.Error()})
 		return err
 	}
 	s.mu.Lock()
 	s.projectPath = path
+	s.contentID, s.contentRev = "", 0 // unmanaged document
 	s.mu.Unlock()
 	s.emit(Event{Kind: EventProjectSaved, Message: filepath.Base(path)})
 	return nil
+}
+
+// manageContentAt reports whether the directory is the attached content
+// library root (managed content lives there and only there).
+func (s *Studio) manageContentAt(dir string) bool {
+	s.mu.RLock()
+	lib := s.contentLib
+	s.mu.RUnlock()
+	if lib == nil || dir == "" {
+		return false
+	}
+	return dir == lib.Root()
+}
+
+// saveThroughContentService persists the document through the validated
+// content boundary: an existing managed entity is updated under an
+// exact revision precondition; a first save creates the entity with a
+// stable typed ID. Conflicts surface as errors — never last-write-wins.
+func (s *Studio) saveThroughContentService(p *project.Project, path string) error {
+	s.mu.RLock()
+	lib, id, rev := s.contentLib, s.contentID, s.contentRev
+	s.mu.RUnlock()
+	if lib == nil {
+		return errors.New("studio: content service not attached")
+	}
+	if id != "" {
+		e, err := lib.Update(id, rev, func(doc *project.Project) error {
+			doc.Name = p.Name
+			doc.MediaRef = p.MediaRef
+			doc.Visualizer = p.Visualizer
+			doc.SongDNASeed = p.SongDNASeed
+			doc.Export = p.Export
+			doc.TimelineMarkers = p.TimelineMarkers
+			doc.TempoOverrideBPM = p.TempoOverrideBPM
+			doc.SyncOffsetSeconds = p.SyncOffsetSeconds
+			return nil
+		})
+		if errors.Is(err, content.ErrUnknownEntity) || errors.Is(err, content.ErrEntityTrashed) {
+			// The managed entity disappeared (purged/restored outside
+			// this editor): fall through to a fresh Create below.
+			id = ""
+		} else if err != nil {
+			return err
+		} else {
+			s.mu.Lock()
+			s.projectPath, s.contentID, s.contentRev = e.Path, e.ID, e.Revision
+			s.mu.Unlock()
+			return nil
+		}
+	}
+	name := strings.TrimSuffix(filepath.Base(path), ".sheytan.json")
+	e, err := lib.Create(content.CreateRequest{
+		Name:        name,
+		SourcePath:  p.MediaRef.AbsPath,
+		Fingerprint: p.MediaRef.Fingerprint,
+		Container:   p.MediaRef.Container,
+		Duration:    p.MediaRef.Duration,
+		Settings:    p,
+	})
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.projectPath, s.contentID, s.contentRev = e.Path, e.ID, e.Revision
+	s.mu.Unlock()
+	return nil
+}
+
+// projectPathLocked returns the current managed path (lock held by caller).
+func (s *Studio) projectPathLocked() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.projectPath
+}
+
+// AttachContentLibrary connects the studio to the validated content
+// service for the given library root (UI-independent; pass nil to detach).
+func (s *Studio) AttachContentLibrary(lib *content.Library) {
+	s.mu.Lock()
+	s.contentLib = lib
+	s.contentID, s.contentRev = "", 0
+	s.mu.Unlock()
 }
 
 // trackSourcePath prefers the original import path when remembered.
@@ -769,6 +871,7 @@ func (s *Studio) LoadProject(path string) error {
 	s.mu.Lock()
 	s.projectPath = path
 	s.projectDoc = p
+	s.contentID, s.contentRev = p.ContentID, p.Revision
 	cfg := s.vizConfig
 	cfg.Mode = visualizer.Mode(p.Visualizer.Mode)
 	cfg.Sensitivity = p.Visualizer.Sensitivity

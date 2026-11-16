@@ -18,11 +18,17 @@
 #       b) SHEYTAN_REPO_ROOT -> helper imports, package output touched
 #       c) GITHUB_WORKSPACE  -> fallback, helper imports via canonical path
 #   R8  static contract: build-windows.ps1 declares -RequireRepoRoot for the
-#       four helper-importing gates (verify-build-metadata,
+#       SIX helper-importing gates (verify-build-metadata,
 #       create-portable-zip, verify-extracted-package,
-#       verify-extracted-path-with-spaces) with their exact helpers, keeps a
-#       single documented parent-side $env:SHEYTAN_REPO_ROOT assignment, and no
-#       gate body consumes workspace env directly.
+#       forbid-bundled-media-tools, media-tools-pinned-install,
+#       verify-extracted-path-with-spaces) with their exact ordered helper
+#       lists, keeps a single documented parent-side $env:SHEYTAN_REPO_ROOT
+#       assignment, and no gate body consumes the workspace-root env directly.
+#       (Run-43767556517 repair: the fixture expected the four-gate era;
+#       the live script added forbid-bundled-media-tools and
+#       media-tools-pinned-install and a second helper for
+#       verify-extracted-path-with-spaces, so the stale fixture failed R8
+#       and P7.)
 #   R9  generated gate preamble interpolates the diagnostic: prints the
 #       actual resolved root directory, never the literal variable name.
 #
@@ -233,32 +239,42 @@ $bw = Get-Content (Join-Path $RepoRoot "scripts/build/build-windows.ps1") -Raw
 # Every helper-importing gate declares -RequireRepoRoot (one executable
 # invocation per gate) and dotsources its exact helper through the
 # resolver-owned $repoRoot. Count only EXECUTABLE invocations, never
-# comment prose. The four canonical call sites are: verify-build-metadata,
-# create-portable-zip, verify-extracted-package and
+# comment prose. The six canonical call sites are: verify-build-metadata,
+# create-portable-zip, verify-extracted-package,
+# forbid-bundled-media-tools, media-tools-pinned-install and
 # verify-extracted-path-with-spaces.
 $declared = ([regex]::Matches($bw, '(?m)^\s*\$rc = Capture-Step .*-RequireRepoRoot')).Count
 # Exactly ONE executable $env:SHEYTAN_REPO_ROOT occurrence is allowed: the
 # documented parent-side assignment. Gate bodies must use $repoRoot.
 $directUses = ([regex]::Matches($bw, '(?m)^\s*\$env:SHEYTAN_REPO_ROOT = ')).Count
 $assignment = [bool]($bw -match [regex]::Escape('$env:SHEYTAN_REPO_ROOT = $repoRoot'))
-# Exact gate -> helper call-site coverage (per gate, helper-exact).
+# Exact gate -> helper call-site coverage (per gate, EXACT ORDERED helper
+# list). Run-43767556517 repair: the live architecture has six
+# RequireRepoRoot gates; verify-extracted-path-with-spaces imports TWO
+# helpers (Invoke-CapturedProcess + MediaTools-Pinned) for the path-with-
+# spaces runtime check plus the app-managed media-tools export proof.
 $callSites = @(
-    @{ gate = 'verify-build-metadata';             helper = 'scripts/ci/Invoke-CapturedProcess.ps1' },
-    @{ gate = 'create-portable-zip';               helper = 'scripts/ci/New-PortableZip.ps1' },
-    @{ gate = 'verify-extracted-package';          helper = 'scripts/ci/Invoke-CapturedProcess.ps1' },
-    @{ gate = 'verify-extracted-path-with-spaces'; helper = 'scripts/ci/Invoke-CapturedProcess.ps1' }
+    @{ gate = 'verify-build-metadata';             helpers = @('scripts/ci/Invoke-CapturedProcess.ps1') },
+    @{ gate = 'create-portable-zip';               helpers = @('scripts/ci/New-PortableZip.ps1') },
+    @{ gate = 'verify-extracted-package';          helpers = @('scripts/ci/Invoke-CapturedProcess.ps1') },
+    @{ gate = 'forbid-bundled-media-tools';        helpers = @('scripts/ci/Forbid-BundledMediaTools.ps1') },
+    @{ gate = 'media-tools-pinned-install';        helpers = @('scripts/ci/MediaTools-Pinned.ps1') },
+    @{ gate = 'verify-extracted-path-with-spaces'; helpers = @('scripts/ci/Invoke-CapturedProcess.ps1', 'scripts/ci/MediaTools-Pinned.ps1') }
 )
 $callSitesOk = $true
 foreach ($cs in $callSites) {
-    $pattern = '-Step "{0}" .*-RequireRepoRoot .*-RepoRootHelpers @\("{1}"\)' -f `
-        [regex]::Escape($cs.gate), [regex]::Escape($cs.helper)
+    $helpersLiteral = '@(' + (($cs.helpers | ForEach-Object { '"{0}"' -f $_ }) -join ', ') + ')'
+    $pattern = '-Step "{0}" .*-RequireRepoRoot .*-RepoRootHelpers {1}' -f `
+        [regex]::Escape($cs.gate), [regex]::Escape($helpersLiteral)
     if (-not ($bw -match $pattern)) {
-        Write-Output ("        call site missing or wrong helper: gate='{0}' helper='{1}'" -f $cs.gate, $cs.helper)
+        Write-Output ("        call site missing or wrong helper list: gate='{0}' expected='{1}'" -f $cs.gate, $helpersLiteral)
         $callSitesOk = $false
     }
 }
-# No gate may bypass the resolver by consuming workspace env directly.
-$bypass = [bool]($bw -match 'Join-Path \$env:')
+# No gate body may bypass the resolver by consuming a workspace-ROOT env
+# variable directly. The parent-side RUNNER_TEMP media-tools cache path is
+# unrelated to root resolution and is NOT a bypass.
+$bypass = [bool]($bw -match 'Join-Path \$env:(SHEYTAN_REPO_ROOT|GITHUB_WORKSPACE)')
 Verdict "R8" ($declared -eq $callSites.Count -and $directUses -eq 1 -and $assignment -and $callSitesOk -and -not $bypass) `
     "build-windows.ps1: $($callSites.Count) declared RequireRepoRoot gate invocations with exact helper call sites, single documented env assignment, no gate-body env use"
 

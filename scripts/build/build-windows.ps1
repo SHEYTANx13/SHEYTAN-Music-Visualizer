@@ -909,13 +909,17 @@ if ($exeOk) {
     # ships no binaries — that is enforced by the negative gates above).
     $rc = Capture-Step -Job $job -Step "media-tools-pinned-install" -ToolContext "gate:media-tools-pinned-install (pinned BtbN win64 asset + env-gated integration test)" -GoTags -RequireRepoRoot -RepoRootHelpers @("scripts/ci/MediaTools-Pinned.ps1") -Command {
         . (Join-Path $repoRoot "scripts/ci/MediaTools-Pinned.ps1")
+        # Run-43767556517 repair: the resolver returns ONE schema-validated
+        # [pscustomobject]; every consumer reads the authoritative fields
+        # (Version, AssetURL, ArchivePath, SHA256, BinaryDir, FFmpegPath,
+        # FFprobePath, Platform, ArchiveFormat) - never ad-hoc names.
         $tools = Get-SheytanPinnedMediaTools
-        Write-Output ("pinned asset:   {0}" -f $tools.Url)
-        Write-Output ("pinned archive: {0} (SHA-256 verified)" -f $tools.Archive)
-        Write-Output ("pinned sha256:  {0}" -f $tools.Sha256)
-        Write-Output ("pinned bin dir: {0}" -f $tools.BinDir)
-        $env:SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE = $tools.Archive
-        $env:SHEYTAN_TEST_MEDIA_TOOLS_SHA256 = $tools.Sha256
+        Write-Output ("pinned asset:   {0}" -f $tools.AssetURL)
+        Write-Output ("pinned archive: {0} (SHA-256 verified)" -f $tools.ArchivePath)
+        Write-Output ("pinned sha256:  {0}" -f $tools.SHA256)
+        Write-Output ("pinned bin dir: {0}" -f $tools.BinaryDir)
+        $env:SHEYTAN_TEST_MEDIA_TOOLS_ARCHIVE = $tools.ArchivePath
+        $env:SHEYTAN_TEST_MEDIA_TOOLS_SHA256 = $tools.SHA256
         try {
             go test $goTags -count=1 -run 'TestMediaToolsInstallFromPinnedArchive' ./internal/mediatools/ -v
             $tRc = $LASTEXITCODE
@@ -1022,8 +1026,11 @@ if ($exeExists -and $zipExists) {
             $dataDir = Join-Path $base "SHEYTAN App Data Dir"
             $managedBin = Join-Path $dataDir "media-tools\current\bin"
             New-Item -ItemType Directory -Force -Path $managedBin | Out-Null
-            Copy-Item -Force (Join-Path $tools.BinDir "ffmpeg.exe") (Join-Path $managedBin "ffmpeg.exe")
-            Copy-Item -Force (Join-Path $tools.BinDir "ffprobe.exe") (Join-Path $managedBin "ffprobe.exe")
+            # Run-43767556517 repair: use the resolver's VALIDATED
+            # FFmpegPath/FFprobePath (never ambient PATH binaries,
+            # never re-derived file names from a stale schema).
+            Copy-Item -Force $tools.FFmpegPath (Join-Path $managedBin "ffmpeg.exe")
+            Copy-Item -Force $tools.FFprobePath (Join-Path $managedBin "ffprobe.exe")
             Write-Output ("app-managed tools provisioned from the pinned asset: {0}" -f $managedBin)
             $managedFfprobe = Join-Path $managedBin "ffprobe.exe"
 

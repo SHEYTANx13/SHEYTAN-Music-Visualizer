@@ -25,7 +25,8 @@ not exist. Links are verified by `scripts/ci/tests/test-docs-consistency.sh`.
 | [docs/PERFORMANCE.md](PERFORMANCE.md) | Performance methodology, current measured baselines and the honesty rules for claims. |
 | [docs/performance-baseline.md](performance-baseline.md) | Full measured baseline history with exact commands, host identity and caveats. |
 | [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Canonical user-facing diagnostics + troubleshooting: runtime log, capability states, startup metrics, common failures with actionable fixes. |
-| [docs/REQUIREMENTS-TRACEABILITY.md](REQUIREMENTS-TRACEABILITY.md) | Every requirement mapped to implementation, tests, gates, user entry point and verification status. |
+| [docs/REQUIREMENTS-TRACEABILITY.md](REQUIREMENTS-TRACEABILITY.md) | Every requirement mapped to implementation, tests, gates, user entry point and verification status. Includes the run-43767556517 R01–R24 zero-omission ledger (the canonical MV-REQUIREMENTS-TRACEABILITY mapping). |
+| [docs/MV-CONTENT-INTEGRITY.md](MV-CONTENT-INTEGRITY.md) | Project-content CRUD contract: stable typed IDs, revision/external-modification safety, transaction journal + recovery, Trash/restore/purge, undo/redo, import safety, scenario test matrix (`internal/content`). |
 
 ## Repository guides (`.github/`, `packaging/`)
 
@@ -40,8 +41,9 @@ not exist. Links are verified by `scripts/ci/tests/test-docs-consistency.sh`.
 
 | Fixture file | Fixes |
 | --- | --- |
-| `scripts/ci/tests/test-package-gates.sh` | P1–P8 packaging/process gates + P7 (repo-root fixtures) + P9/P10 (commit-observer fixtures). |
-| `scripts/ci/tests/Test-ResolveRepoRoot.ps1` | R1–R9 repository-root resolver and gate-preamble fixtures (R9: resolved-path diagnostic interpolation). |
+| `scripts/ci/tests/test-package-gates.sh` | P1–P8 packaging/process gates (P6: exact gate-block static contract with negative controls, pipe-safe) + P7 (repo-root fixtures) + P9/P10 (commit-observer fixtures) + P12 (media-tools resolver contract matrix). |
+| `scripts/ci/tests/Test-ResolveRepoRoot.ps1` | R1–R9 repository-root resolver and gate-preamble fixtures (R8: SIX-gate exact ordered helper-list contract; R9: resolved-path diagnostic interpolation). |
+| `scripts/ci/tests/Test-MediaToolsPinnedResolver.ps1` | Media-tools pinned resolver contract matrix (MX1–MX11): authoritative `[pscustomobject]` schema, Write-Output pollution class, missing fields/invalid digest/missing binaries/spaces+Unicode, env-gated dynamic contract. |
 | `scripts/ci/tests/Test-PackageStatusObserver.ps1` | Commit-observer matrix, PowerShell side (correct/missing/mismatch/whitespace/LF-CRLF/empty/malformed/non-zero). |
 | `scripts/ci/tests/test-package-status.sh` | The same matrix for the bash/python observer (`scripts/ci/observe_commit.py`). |
 | `scripts/ci/tests/Test-GuiProcessCapture.ps1` | Windows GUI-subsystem process capture (P8; Windows host required). |

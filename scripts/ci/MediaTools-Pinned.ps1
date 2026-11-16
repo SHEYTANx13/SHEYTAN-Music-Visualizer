@@ -1,10 +1,10 @@
 # MediaTools-Pinned.ps1 — pinned FFmpeg asset provider (PowerShell side).
 #
-# Contract (run 43712071111): CI proofs that need REAL ffmpeg/ffprobe
-# binaries (the media-tools-pinned-install integration gate and the
-# packaged app-managed export proof) download the PINNED BtbN win64 GPL
-# asset ONCE into a runner-temp cache directory (always OUTSIDE the
-# repository, the dist\ tree and the package stage tree; never bundled
+# Contract (run 43712071111; run-43767556517 repair): CI proofs that need
+# REAL ffmpeg/ffprobe binaries (the media-tools-pinned-install integration
+# gate and the packaged app-managed export proof) download the PINNED BtbN
+# win64 GPL asset ONCE into a runner-temp cache directory (always OUTSIDE
+# the repository, the dist\ tree and the package stage tree; never bundled
 # into any artifact — the package ships no media-tool binaries).
 #
 # Pinned asset (packaging/FFMPEG-TOOLS-PROVENANCE.md is the documented
@@ -23,24 +23,133 @@
 # caller, else $env:RUNNER_TEMP\media-tools, else the user temp dir
 # \sheytan-media-tools.
 #
+# RETURN CONTRACT (run-43767556517 repair, authoritative schema):
+# Get-SheytanPinnedMediaTools returns exactly ONE [pscustomobject] with
+# the properties below — nothing else ever reaches the success stream.
+# All human-readable progress goes through Write-Host (information
+# stream). The run-43767556517 defect class was Write-Output progress
+# strings inside the resolver: PowerShell merges ALL function output,
+# so callers assigning `$tools = Get-SheytanPinnedMediaTools` received
+# an object[] array, and under StrictMode reading `$tools.Url` threw
+# "The property 'Url' cannot be found on this object." — the exact
+# media-tools-pinned-install / verify-extracted-path-with-spaces
+# failure of that run. Rules:
+#   1. The resolver NEVER uses Write-Output; the contract fixture
+#      (scripts/ci/tests/Test-MediaToolsPinnedResolver.ps1) enforces
+#      this statically and dynamically.
+#   2. Every consumer reads ONLY the schema properties below; a
+#      property inventory is validated by Test-SheytanToolsResultSchema
+#      before the object leaves this file, and a missing/invalid field
+#      fails the gate with a diagnostic that NAMES the absent field.
+#   3. The expected digest is pinned here in source (never accepted
+#      from a server response) and is verified before extraction.
+#
+# Authoritative schema ([pscustomobject]):
+#   Version       e.g. "n9.0.2-48-gd4070a14ce" (matches the Go manifest)
+#   AssetURL      pinned download URL (contains the pinned version)
+#   ArchivePath   SHA-256-verified archive on disk
+#   SHA256        pinned lowercase hex digest (trust anchor, 64 hex)
+#   BinaryDir     extracted inner bin directory (ffmpeg.exe/ffprobe.exe)
+#   FFmpegPath    validated path to ffmpeg.exe inside BinaryDir
+#   FFprobePath   validated path to ffprobe.exe inside BinaryDir
+#   Platform      "windows/amd64" (the pinned pack identity)
+#   ArchiveFormat "zip"
+#
 # Usage (dot-sourced inside a generated gate script, which runs in a
 # CHILD pwsh process and therefore needs its own file-scoped provider):
 #   . (Join-Path $repoRoot "scripts/ci/MediaTools-Pinned.ps1")
 #   $tools = Get-SheytanPinnedMediaTools
-#   $tools.Archive  $tools.BinDir  $tools.Sha256  $tools.Url
+#   $tools.AssetURL  $tools.ArchivePath  $tools.SHA256
+#   $tools.BinaryDir $tools.FFmpegPath   $tools.FFprobePath
 #
-# Any failure (download, SHA-256 mismatch, unexpected archive layout)
-# THROWS — under the gates' Set-StrictMode/ErrorActionPreference=Stop
-# that fails the gate with the exact reason. Never a partial result.
+# Any failure (download, SHA-256 mismatch, unexpected archive layout,
+# schema violation) THROWS — under the gates' Set-StrictMode/
+# ErrorActionPreference=Stop that fails the gate with the exact reason.
+# Never a partial result.
 
+# The authoritative property inventory. Order is part of the contract:
+# the fixture matrix asserts it so silent renames cannot pass.
+$script:SheytanPinnedToolsSchema = @(
+    'Version', 'AssetURL', 'ArchivePath', 'SHA256', 'BinaryDir',
+    'FFmpegPath', 'FFprobePath', 'Platform', 'ArchiveFormat'
+)
+
+# Test-SheytanToolsResultSchema validates an object against the
+# authoritative resolver schema. Returns $true/$false; on failure each
+# violated field is named on the error stream (never a generic crash).
+# -RequireFiles additionally proves ArchivePath/FFmpegPath/FFprobePath
+# exist on disk (leaf files) — used by the resolver and the fixture
+# matrix's "missing binaries" case.
+function Test-SheytanToolsResultSchema {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory = $true)][AllowNull()]$Result,
+        [switch]$RequireFiles
+    )
+    if ($null -eq $Result) {
+        Write-Error -ErrorAction Continue "media tools result schema violation: object is null (expected a [pscustomobject] with: $($script:SheytanPinnedToolsSchema -join ', '))"
+        return $false
+    }
+    if ($Result -isnot [pscustomobject]) {
+        Write-Error -ErrorAction Continue ("media tools result schema violation: expected [pscustomobject], got '{0}' (the run-43767556517 defect class: Write-Output pollution turns the result into an object[] array)" -f $Result.GetType().FullName)
+        return $false
+    }
+    foreach ($field in $script:SheytanPinnedToolsSchema) {
+        $value = $Result.PSObject.Properties[$field]
+        if ($null -eq $value) {
+            Write-Error -ErrorAction Continue ("media tools result schema violation: absent field '{0}' (authoritative schema: {1})" -f $field, ($script:SheytanPinnedToolsSchema -join ', '))
+            return $false
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$value.Value)) {
+            Write-Error -ErrorAction Continue ("media tools result schema violation: empty field '{0}'" -f $field)
+            return $false
+        }
+    }
+    # Case-SENSITIVE comparison (-cnotmatch): the trust anchor is a
+    # lowercase 64-hex digest; -notmatch would silently accept an
+    # uppercase variant of the pinned digest.
+    if ($Result.SHA256 -cnotmatch '^[0-9a-f]{64}$') {
+        Write-Error -ErrorAction Continue ("media tools result schema violation: SHA256 '{0}' is not a lowercase 64-hex digest" -f $Result.SHA256)
+        return $false
+    }
+    if ($Result.AssetURL -notlike "*$($Result.Version)*") {
+        Write-Error -ErrorAction Continue ("media tools result schema violation: AssetURL does not correspond to the pinned Version '{0}'" -f $Result.Version)
+        return $false
+    }
+    if ($RequireFiles) {
+        foreach ($pair in @(
+            @{ name = 'ArchivePath';  path = $Result.ArchivePath },
+            @{ name = 'FFmpegPath';   path = $Result.FFmpegPath },
+            @{ name = 'FFprobePath';  path = $Result.FFprobePath }
+        )) {
+            if (-not (Test-Path -LiteralPath $pair.path -PathType Leaf)) {
+                Write-Error -ErrorAction Continue ("media tools result schema violation: {0} does not exist on disk: '{1}'" -f $pair.name, $pair.path)
+                return $false
+            }
+        }
+    }
+    return $true
+}
+
+# Get-SheytanPinnedMediaTools resolves the pinned win64 asset: cache or
+# download, pinned-digest verification BEFORE extraction, layout
+# validation, schema-validated single-object result.
 function Get-SheytanPinnedMediaTools {
     [CmdletBinding()]
-    [OutputType([hashtable])]
+    [OutputType([pscustomobject])]
     param()
 
+    # Pinned trust anchors (source-pinned; never taken from a response).
     $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip"
     $sha256 = "40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae"
+    $version = "n9.0.2-48-gd4070a14ce"
     $innerBin = "ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0/bin"
+    $platform = "windows/amd64"
+    $archiveFormat = "zip"
+    if ($url -notlike "*$version*") {
+        throw "pinned asset configuration incoherent: URL does not contain the pinned version '$version'"
+    }
 
     $base = $null
     if (-not [string]::IsNullOrWhiteSpace($env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR)) {
@@ -60,15 +169,15 @@ function Get-SheytanPinnedMediaTools {
         $cachedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
         if ($cachedHash -eq $sha256) {
             $needDownload = $false
-            Write-Output "pinned FFmpeg archive already cached and SHA-256-verified: $archive"
+            Write-Host "pinned FFmpeg archive already cached and SHA-256-verified: $archive"
         }
         else {
-            Write-Output "WARN: cached pinned archive SHA-256 mismatch - redownloading: $archive"
+            Write-Host "WARN: cached pinned archive SHA-256 mismatch - redownloading: $archive"
             Remove-Item -Force -LiteralPath $archive
         }
     }
     if ($needDownload) {
-        Write-Output "downloading pinned FFmpeg archive: $url"
+        Write-Host "downloading pinned FFmpeg archive: $url"
         Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
         $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
         if ($hash -ne $sha256) {
@@ -90,10 +199,24 @@ function Get-SheytanPinnedMediaTools {
         }
     }
 
-    return @{
-        Url     = $url
-        Sha256  = $sha256
-        Archive = $archive
-        BinDir  = $binDir
+    # Single result object; validated against the authoritative schema
+    # (with on-disk file checks) BEFORE it leaves this function. A
+    # violation throws naming the exact absent/invalid field.
+    $result = [pscustomobject][ordered]@{
+        Version       = $version
+        AssetURL      = $url
+        ArchivePath   = $archive
+        SHA256        = $sha256
+        BinaryDir     = $binDir
+        FFmpegPath    = $ffExe
+        FFprobePath   = $fpExe
+        Platform      = $platform
+        ArchiveFormat = $archiveFormat
     }
+    if (-not (Test-SheytanToolsResultSchema -Result $result -RequireFiles)) {
+        # Write-Error diagnostics were already emitted naming the field;
+        # fail the gate loudly instead of returning a broken contract.
+        throw "pinned media tools resolver produced an invalid result object (see schema diagnostics above)"
+    }
+    return $result
 }

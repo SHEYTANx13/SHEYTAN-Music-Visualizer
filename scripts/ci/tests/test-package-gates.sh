@@ -379,22 +379,130 @@ else
 fi
 
 # ----------------------------------------------------------------------------
-# P6: static root-cause assertions on build-windows.ps1
+# P6: static root-cause assertions on build-windows.ps1 (run-43767556517
+# repair of this fixture).
+#
+# History: the previous form extracted gate bodies with
+#   awk '/Step "verify-build-metadata"/,/^    }$/'
+# but the current build-windows.ps1 contains NO line matching "^    }$",
+# so the range never terminated and swallowed the REST OF THE FILE —
+# including later gates' legitimate `$tRc = $LASTEXITCODE` reads after
+# native go commands. The stale assertion then fired
+# ("verify-build-metadata still reads LASTEXITCODE") against code that
+# never reads it, and `echo "$VB" | grep -q ...` produced
+# "echo: write error: Broken pipe" (grep -q closes early; the verdict
+# survived only because this script does not set pipefail).
+#
+# The repaired fixture:
+#   1. extracts EXACT gate call-site blocks (Capture-Step ... Step "X"
+#      through the matching Fail-Gate "X"), a boundary that exists for
+#      every gate by construction;
+#   2. greps FILES, never pipes (no producer/early-closing-consumer
+#      pipelines, so no broken-pipe class is possible);
+#   3. asserts the SEMANTIC contract of run 42921967187/43090342995:
+#      verify-build-metadata and verify-extracted-package must launch
+#      the product through Invoke-CapturedProcess (typed results, real
+#      Process.ExitCode, fail-closed) and must NOT read $LASTEXITCODE
+#      for verdicts; build metadata must be proven via the
+#      machine-readable --self-check result file;
+#   4. runs NEGATIVE CONTROLS: mutated copies of build-windows.ps1
+#      (LASTEXITCODE injected / robust runner removed) MUST be rejected,
+#      so the assertions cannot rot into always-pass.
+# Behavioral exit-code cases (exit 0 / non-zero / not-started / timeout /
+# strict-mode first-command / no unbound LASTEXITCODE reuse) are covered
+# dynamically by P5's Invoke-CapturedProcess fixtures above.
 # ----------------------------------------------------------------------------
 BW="$REPO_ROOT/scripts/build/build-windows.ps1"
 P6OK=1
-# Only an EXECUTABLE Compress-Archive call would reintroduce the defect;
-# prose comments documenting the old root cause are expected to remain.
-grep -Eq '^[[:space:]]*Compress-Archive' "$BW" && { echo "  an executable Compress-Archive call is still present"; P6OK=0; }
-grep -q 'New-PortableZip -StageRoot' "$BW" || { echo "  New-PortableZip not used by create-portable-zip gate"; P6OK=0; }
-VB="$(awk '/Step "verify-build-metadata"/,/^    }$/' "$BW")"
-echo "$VB" | grep -q 'LASTEXITCODE' && { echo "  verify-build-metadata still reads LASTEXITCODE"; P6OK=0; }
-echo "$VB" | grep -q 'Invoke-CapturedProcess' || { echo "  verify-build-metadata missing robust runner"; P6OK=0; }
-VE="$(awk '/Step "verify-extracted-package"/,/^    }$/' "$BW")"
-echo "$VE" | grep -q 'Subsystem' || { echo "  verify-extracted-package missing PE subsystem check"; P6OK=0; }
-echo "$VE" | grep -q 'Invoke-CapturedProcess' || { echo "  verify-extracted-package missing robust runner"; P6OK=0; }
-echo "$VE" | grep -q 'SHA256' || { echo "  verify-extracted-package missing license hash compare"; P6OK=0; }
-if [ "$P6OK" -eq 1 ]; then report PASS "P6" "static root-cause assertions hold"; else report FAIL "P6" "static root-cause assertions failed"; fi
+P6T="$T/p6"
+mkdir -p "$P6T"
+
+# p6_gate_block SRC GATE OUT — extract the exact call-site block for GATE
+# (from its Capture-Step line through the matching Fail-Gate line).
+p6_gate_block() {
+  local src="$1" gate="$2" out="$3"
+  awk -v gate="$gate" '
+    $0 ~ ("Step \"" gate "\"") {inblk=1}
+    inblk {print}
+    inblk && $0 ~ ("Fail-Gate \"" gate "\"") {exit}
+  ' "$src" > "$out" && [ -s "$out" ]
+}
+
+# p6_run_checks SRC LABEL — echo every violated static contract for SRC;
+# return non-zero when at least one violation was found.
+p6_run_checks() {
+  local src="$1" label="$2" rc=0
+  # Only an EXECUTABLE Compress-Archive call would reintroduce the
+  # packaging defect; prose comments documenting it are expected.
+  if grep -Eq '^[[:space:]]*Compress-Archive' "$src"; then
+    echo "  [$label] an executable Compress-Archive call is still present"; rc=1
+  fi
+  if ! grep -q 'New-PortableZip -StageRoot' "$src"; then
+    echo "  [$label] New-PortableZip not used by create-portable-zip gate"; rc=1
+  fi
+  local vb="$P6T/vb-$label.txt" ve="$P6T/ve-$label.txt"
+  if ! p6_gate_block "$src" "verify-build-metadata" "$vb"; then
+    echo "  [$label] verify-build-metadata gate block not found"; rc=1
+  else
+    grep -q 'Invoke-CapturedProcess' "$vb" || { echo "  [$label] verify-build-metadata missing robust runner (Invoke-CapturedProcess)"; rc=1; }
+    grep -q 'LASTEXITCODE' "$vb" && { echo "  [$label] verify-build-metadata reads LASTEXITCODE (verdicts must come from Invoke-CapturedProcess typed results)"; rc=1; }
+    grep -q -- '--self-check-out' "$vb" || { echo "  [$label] verify-build-metadata does not validate the machine-readable self-check result file"; rc=1; }
+    grep -q 'self-check: all foundation invariants hold' "$vb" || { echo "  [$label] verify-build-metadata does not assert the self-check passing verdict"; rc=1; }
+  fi
+  if ! p6_gate_block "$src" "verify-extracted-package" "$ve"; then
+    echo "  [$label] verify-extracted-package gate block not found"; rc=1
+  else
+    grep -q 'Subsystem' "$ve" || { echo "  [$label] verify-extracted-package missing PE subsystem check"; rc=1; }
+    grep -q 'Invoke-CapturedProcess' "$ve" || { echo "  [$label] verify-extracted-package missing robust runner"; rc=1; }
+    grep -q 'SHA256' "$ve" || { echo "  [$label] verify-extracted-package missing license hash compare"; rc=1; }
+  fi
+  return "$rc"
+}
+
+if p6_run_checks "$BW" live; then
+  report PASS "P6-live" "static root-cause assertions hold on the real build script"
+else
+  report FAIL "P6-live" "static root-cause assertions failed (violations above)"
+  P6OK=0
+fi
+
+# Negative control 1: inject a $LASTEXITCODE read into the
+# verify-build-metadata block — the checker MUST reject the mutant.
+python3 - "$BW" "$P6T/mutant-lastexitcode.ps1" <<'PYEOF'
+import sys
+src = open(sys.argv[1], "r", encoding="utf-8").read()
+marker = 'Step "verify-build-metadata"'
+i = src.index(marker)
+j = src.index("\n", i) + 1
+mutated = src[:j] + '        $mutantProbe = $LASTEXITCODE\n' + src[j:]
+open(sys.argv[2], "w", encoding="utf-8").write(mutated)
+PYEOF
+if p6_run_checks "$P6T/mutant-lastexitcode.ps1" neg1 >/dev/null 2>&1; then
+  echo "  negative control 1 NOT detected: injected LASTEXITCODE read passed the checker"
+  P6OK=0
+else
+  echo "  negative control 1 detected: injected LASTEXITCODE read rejected"
+fi
+
+# Negative control 2: remove the robust runner from the
+# verify-extracted-package block — the checker MUST reject the mutant.
+python3 - "$BW" "$P6T/mutant-norunner.ps1" <<'PYEOF'
+import sys, re
+src = open(sys.argv[1], "r", encoding="utf-8").read()
+start = src.index('Step "verify-extracted-package"')
+end = src.index('Fail-Gate "verify-extracted-package"') + len('Fail-Gate "verify-extracted-package"')
+block = src[start:end]
+block = block.replace('Invoke-CapturedProcess', 'Start-ProcessNoWait')
+open(sys.argv[2], "w", encoding="utf-8").write(src[:start] + block + src[end:])
+PYEOF
+if p6_run_checks "$P6T/mutant-norunner.ps1" neg2 >/dev/null 2>&1; then
+  echo "  negative control 2 NOT detected: removed robust runner passed the checker"
+  P6OK=0
+else
+  echo "  negative control 2 detected: removed robust runner rejected"
+fi
+
+if [ "$P6OK" -eq 1 ]; then report PASS "P6" "static root-cause assertions hold and both negative mutants are rejected"; else report FAIL "P6" "static root-cause assertions failed"; fi
 
 # ----------------------------------------------------------------------------
 # P7: repository-root resolution regression suite (run-42921967187 repair).
@@ -472,6 +580,28 @@ if [ -f "$REPO_ROOT/scripts/ci/tests/test-package-status.sh" ]; then
   fi
 else
   report "NOT RUN" "P10" "test-package-status.sh not present in this tree"
+fi
+
+# ----------------------------------------------------------------------------
+# P12: media-tools pinned resolver contract matrix (run-43767556517 §2.2).
+# Authoritative [pscustomobject] schema, Write-Output pollution class,
+# missing fields/invalid hash/missing binaries/spaces+Unicode fixtures.
+# Cross-platform: runs on any pwsh 7 host; the env-gated dynamic contract
+# (MX11) records NOT RUN without the CI staged cache — never a fake pass.
+# ----------------------------------------------------------------------------
+if [ -f "$REPO_ROOT/scripts/ci/tests/Test-MediaToolsPinnedResolver.ps1" ]; then
+  "$PWSH_BIN" -NoProfile -NonInteractive -File "$REPO_ROOT/scripts/ci/tests/Test-MediaToolsPinnedResolver.ps1" > "$T/p12.out" 2>&1
+  P12_RC=$?
+  sed 's/^/  /' "$T/p12.out"
+  if [ "$P12_RC" -ne 0 ]; then
+    report FAIL "P12" "media-tools resolver contract fixtures failed (rc=$P12_RC)"
+  elif grep -q "^SUMMARY: pass=[0-9]* fail=0" "$T/p12.out"; then
+    report PASS "P12" "resolver returns one authoritative schema object; null/array/missing-field/invalid-hash/missing-binary/spaces+Unicode matrix verified; MX11 honesty rule holds"
+  else
+    report FAIL "P12" "fixture summary not recognized"
+  fi
+else
+  report "NOT RUN" "P12" "Test-MediaToolsPinnedResolver.ps1 not present in this tree"
 fi
 
 echo "SUMMARY: pass=$PASSED fail=$FAILED notrun=$NOT_RUN"

@@ -330,6 +330,224 @@ func newPinnedTLSServer(t *testing.T, body []byte) *httptest.Server {
 	}))
 }
 
+// dualPlatformArchive builds a test zip that carries BOTH name forms of
+// the pair so a manifest with linux/amd64 and windows/amd64 entries can
+// be exercised for either pinned platform from any host.
+func dualPlatformArchive(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	entries := map[string]string{
+		"pkg-root/bin/ffmpeg":      "ffmpeg-fake",
+		"pkg-root/bin/ffprobe":     "ffprobe-fake",
+		"pkg-root/bin/ffmpeg.exe":  "ffmpeg-fake",
+		"pkg-root/bin/ffprobe.exe": "ffprobe-fake",
+		"pkg-root/COPYING.GPLv2":   "fake license",
+	}
+	for name, content := range entries {
+		f, err := w.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// nonHostGOOS returns a GOOS that differs from the real host so the
+// platform-pin divergence is exercised on EVERY runner (the historical
+// Windows CI failure is thus reproducible on Linux and vice versa).
+func nonHostGOOS() string {
+	if runtimeGOOS == "windows" {
+		return "linux"
+	}
+	return "windows"
+}
+
+// TestManagerInstallInspectConsistentAcrossHostPlatforms reproduces the
+// run-43767556517 Windows failure (manager_test.go:312,
+// "check after install: state=not-installed") at its source on ANY
+// host: the installer resolved executable names through the package
+// platform pin while InspectInstalled read runtime.GOOS directly.
+// Wherever the pin differs from the host OS, a fully verified install
+// was misreported as not-installed. The pin below is deliberately the
+// NON-host GOOS, so any reintroduction of the divergence fails on
+// every runner. The assertion is intentionally NOT weakened: after a
+// successful install the check must report ready.
+func TestManagerInstallInspectConsistentAcrossHostPlatforms(t *testing.T) {
+	packBytes := dualPlatformArchive(t)
+	sum := sha256.Sum256(packBytes)
+	digest := hex.EncodeToString(sum[:])
+	// Same pack bytes for both manifest entries; the URL below is
+	// replaced per-manager via the injectable manifest hook.
+	packLinux := testPack()
+	packLinux.SHA256 = digest
+	packWin := packLinux
+	packWin.Platform = "windows/amd64"
+	packWin.FFmpegPath = "pkg-root/bin/ffmpeg.exe"
+	packWin.FFprobePath = "pkg-root/bin/ffprobe.exe"
+	pinned := map[string]PlatformPack{
+		"linux/amd64":   packLinux,
+		"windows/amd64": packWin,
+	}
+
+	host := nonHostGOOS() // "windows" on Linux hosts, "linux" on Windows hosts
+	dataRoot := t.TempDir()
+
+	// Pin the package platform FIRST so pack selection, executable
+	// naming and (pre-fix) inspection all run under one deliberate,
+	// host-differing decision.
+	oldGOOS, oldArch := runtimeGOOS, runtimeArch
+	runtimeGOOS, runtimeArch = host, "amd64"
+	t.Cleanup(func() { runtimeGOOS, runtimeArch = oldGOOS, oldArch })
+
+	newManifestFn := func() func() (Manifest, error) {
+		return func() (Manifest, error) {
+			return Manifest{Schema: SchemaVersion, Updated: "test", Platforms: pinned}, nil
+		}
+	}
+
+	newManager := func() *Manager {
+		return New(Options{DataRoot: dataRoot,
+			client:   newPinnedTLSServer(t, packBytes).Client(),
+			manifest: newManifestFn(),
+			verify: func(PlatformPack, string) (VerifyResult, error) {
+				return VerifyResult{Version: "ffmpeg version n-test", Encoders: []string{"aac", "libx264", "libx265"}}, nil
+			}})
+	}
+	m := newManager()
+	if m.Snapshot().State != StateNotInstalled {
+		t.Fatalf("pre-install state = %s, want not-installed", m.Snapshot().State)
+	}
+	if err := m.Install(context.Background()); err != nil {
+		t.Fatalf("install under pinned platform %s: %v", host, err)
+	}
+	// THE regression assertion: a verified install must inspect as
+	// ready — never not-installed (run 43767556517 exact failure).
+	if s, err := m.CheckForUpdate(context.Background()); err != nil || s.State != StateReady {
+		t.Fatalf("check after install: state=%s err=%v", s.State, err)
+	}
+	// A fresh manager over the same data root must see the installed
+	// state too (persistence is not scoped to the installing instance).
+	fresh := newManager()
+	if fresh.Snapshot().State != StateReady {
+		t.Fatalf("fresh manager state = %s, want ready (installed state must survive manager recreation)", fresh.Snapshot().State)
+	}
+	if _, err := fresh.CheckForUpdate(context.Background()); err != nil {
+		t.Fatalf("fresh manager check: %v", err)
+	}
+	if s := fresh.Snapshot().State; s != StateReady {
+		t.Fatalf("fresh manager post-check state = %s, want ready", s)
+	}
+	// Remove must be safe and idempotent; state returns to
+	// not-installed and stays there after a repeated remove.
+	if err := m.Remove(); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if err := m.Remove(); err != nil {
+		t.Fatalf("repeated remove must stay safe (idempotent): %v", err)
+	}
+	if m.Snapshot().State != StateNotInstalled {
+		t.Fatalf("state after remove = %s, want not-installed", m.Snapshot().State)
+	}
+	if _, err := os.Stat(CurrentDir(dataRoot)); !os.IsNotExist(err) {
+		t.Fatal("current dir must be removed")
+	}
+}
+
+// TestManagerCorruptInstalledManifestIsRepairNeeded proves a corrupted
+// installation is never conflated with not-installed (run-43767556517
+// §2.1.8: explicit states, errors for manifest corruption).
+func TestManagerCorruptInstalledManifestIsRepairNeeded(t *testing.T) {
+	packBytes := fakeArchive(t, testPack())
+	m, _, dataRoot := testManager(t, packBytes, nil)
+	if err := m.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := m.CheckForUpdate(context.Background()); err != nil || s.State != StateReady {
+		t.Fatalf("check after install: state=%s err=%v", s.State, err)
+	}
+	if err := os.WriteFile(InstalledManifestPath(dataRoot), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := m.CheckForUpdate(context.Background())
+	if err != nil {
+		t.Fatalf("check on corrupt manifest must not error the call itself: %v", err)
+	}
+	if s.State != StateRepairNeeded {
+		t.Fatalf("corrupt manifest state = %s, want repair-needed (never conflated with not-installed)", s.State)
+	}
+}
+
+// TestManagerUpdateAvailableAfterPinnedChange proves the update check
+// detects a pinned version newer than the installed one.
+func TestManagerUpdateAvailableAfterPinnedChange(t *testing.T) {
+	packBytes := fakeArchive(t, testPack())
+	m, _, _ := testManager(t, packBytes, nil)
+	if err := m.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Re-pin the manifest to a newer version: the installed pack no
+	// longer matches, so the check must report update-available.
+	updated := fakeArchive(t, testPack())
+	sum := sha256.Sum256(updated)
+	srv := newPinnedTLSServer(t, updated)
+	t.Cleanup(srv.Close)
+	pack := testPack()
+	pack.Version = "n-test-next"
+	pack.ArchiveFormat = "zip"
+	pack.URL = srv.URL + "/pack.zip"
+	pack.SHA256 = hex.EncodeToString(sum[:])
+	raw, err := json.Marshal(Manifest{Schema: SchemaVersion, Updated: "test-next", Platforms: map[string]PlatformPack{"linux/amd64": pack}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pinned manifest is embedded per binary: a changed pin means a
+	// NEW manager instance (new release) inspecting the same data root.
+	m2 := New(Options{DataRoot: m.opts.DataRoot,
+		client:   srv.Client(),
+		manifest: func() (Manifest, error) { return ParseManifest(raw) },
+		verify:   func(PlatformPack, string) (VerifyResult, error) { return VerifyResult{}, nil }})
+	s, err := m2.CheckForUpdate(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != StateUpdateAvailable {
+		t.Fatalf("state = %s, want update-available (installed n-test vs pinned n-test-next)", s.State)
+	}
+}
+
+// TestManagerInstallDataRootWithSpacesAndUnicode proves the app-managed
+// layout survives paths with spaces and non-ASCII characters on every
+// platform (run-43767556517 §2.1.9).
+func TestManagerInstallDataRootWithSpacesAndUnicode(t *testing.T) {
+	packBytes := fakeArchive(t, testPack())
+	m, _, dataRoot := testManager(t, packBytes, nil)
+	spaced := filepath.Join(filepath.Dir(dataRoot), "SHEYTAN Tools Музыка and spaces", filepath.Base(dataRoot))
+	if err := os.MkdirAll(spaced, 0o755); err != nil {
+		t.Skipf("host filesystem refuses the Unicode/spaced data root: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(spaced) })
+	m.opts.DataRoot = spaced
+	if err := m.Install(context.Background()); err != nil {
+		t.Fatalf("install into spaced/Unicode root: %v", err)
+	}
+	if s, err := m.CheckForUpdate(context.Background()); err != nil || s.State != StateReady {
+		t.Fatalf("check after install into spaced root: state=%s err=%v", s.State, err)
+	}
+	ff, fp := BinNames(runtimeGOOS)
+	for _, name := range []string{ff, fp} {
+		if _, err := os.Stat(filepath.Join(CurrentBin(spaced), name)); err != nil {
+			t.Fatalf("installed binary missing in spaced root: %v", err)
+		}
+	}
+}
+
 func TestManagerUnsupportedPlatform(t *testing.T) {
 	raw, _ := json.Marshal(Manifest{Schema: 1, Platforms: map[string]PlatformPack{
 		"linux/amd64": testPack(),
