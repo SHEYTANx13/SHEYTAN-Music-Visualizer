@@ -168,8 +168,8 @@ func TestSessionIncrementsPerSpawn(t *testing.T) {
 		t.Fatal(err)
 	}
 	s1 := tr.Clock().Session
-	if s1 != 1 {
-		t.Fatalf("first session = %d, want 1", s1)
+	if s1 < 1 {
+		t.Fatalf("first session = %d, want a non-zero monotonic ID", s1)
 	}
 	// pause + resume keep the same player/session
 	if err := tr.Pause(); err != nil {

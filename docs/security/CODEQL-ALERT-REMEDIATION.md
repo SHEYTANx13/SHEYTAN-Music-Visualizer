@@ -1,3 +1,137 @@
+# CodeQL Alert Remediation — V5 work order (2026-11-17)
+
+Execution environment: Linux sandbox, no GitHub credentials, no remote
+writes (work-order hard rule 1). Target repository:
+`SHEYTANx13/SHEYTAN-Music-Visualizer` (default branch `main`). Analyzed
+commit at execution start: `17325425d53e3f5a0737c59515f54f305745aeee`
+(clone HEAD = baseline green run 43938756323 head = `app(6).log`
+runtime build commit; working tree clean at clone).
+
+## Owner-reported alerts (V5 §2.1 inventory input)
+
+The owner supplied two OPEN alert references; live API retrieval of the
+complete inventory remains `NOT_RETRIEVED` (the code-scanning REST
+endpoint requires an authenticated principal; unauthenticated probe
+returned HTTP 401 and the shared egress-IP quota is exhausted — same
+blockers as the v3 section below, which retains the full detail):
+
+- **#1** `go/zipslip` (CWE-22, High, security severity 7.5) —
+  arbitrary file access during archive extraction,
+  `internal/mediatools/archive.go:129` (ZIP loop).
+- **#2** `go/zipslip` (CWE-22, High) — same rule,
+  `internal/mediatools/archive.go:205` (TAR.XZ loop).
+
+The related `go/unsafe-unzip-symlink` query was also defended against
+even though it was not among the two visible alerts (work-order §2.2).
+
+## Root cause (verified from live source)
+
+Both flows passed the untrusted archive entry name through
+`safeEntryName` — a string validator built on `filepath.Clean` plus
+prefix checks — and then materialized the result with
+`filepath.Join(dest, …)` into `os.MkdirAll` / `os.OpenFile` sinks.
+String sanitization of this shape is not recognized as a taint barrier
+by `go/zipslip`, and more importantly it is weaker than the
+operating-system-enforced containment the query help recommends: a
+single validation slip (separator ambiguity on Windows, reserved
+device aliasing, case-folding collisions) would be a real escape, not
+just a static-analysis finding.
+
+## Fix (source-level, single auditable boundary)
+
+`internal/mediatools/archive.go` was rewritten as ONE central,
+format-aware extraction boundary used by both formats (no parallel
+extractor exists anywhere else in the tree — grep-verified):
+
+1. **Slash-domain validation** — every entry name must be canonical
+   (`path.Clean(name) == name`), non-empty, non-dot, and
+   `io/fs.ValidPath`; control characters, NUL, backslashes (Windows
+   separator ambiguity), colons (drive prefixes + alternate data
+   streams), Windows reserved device names (CON/NUL/AUX/PRN/COM1-9/
+   LPT1-9/CONIN$/CONOUT$, with extensions), components ending in dot
+   or space (Win32 aliasing), and names over 2048 chars are rejected.
+   Directory entries tolerate exactly one trailing slash (the archive
+   convention); a trailing separator on a file entry is an anomaly and
+   rejected.
+2. **Sanitizer barrier** — the validated name is converted with
+   `filepath.Localize` and gated by `filepath.IsLocal` before any
+   filesystem use (the lexical barrier the query help recommends).
+3. **os.Root confinement** — the destination (always a fresh, private,
+   app-owned staging directory created by the manager) is opened with
+   `os.OpenRoot`, and EVERY file/directory creation goes through
+   `os.Root.MkdirAll` / `os.Root.OpenFile` with exclusive (O_EXCL)
+   creation. Containment is enforced by the OS (openat2
+   RESOLVE_BENEATH on Linux; reparse-point refusal on Windows), not by
+   string comparison. A symlinked destination is refused; a
+   pre-existing outside-pointing symlink inside the destination cannot
+   be followed out of the root.
+4. **Entry-type allowlist** — only regular files and directories are
+   honored; symlinks, hardlinks, devices, FIFOs and unknown types are
+   rejected outright (`go/unsafe-unzip-symlink` defense).
+5. **Collision rejection before writing** — exact and case-insensitive
+   duplicate files, file/directory collisions and parent/child
+   conflicts are refused from an in-memory tracker before any byte is
+   written.
+6. **Mode allowlist** — archive-supplied modes are ignored entirely;
+   files are created 0644, and 0755 only for the pinned executable
+   naming rule (setuid/setgid/sticky/stray exec bits impossible).
+7. **Bomb defenses retained and extended** — entry-count (50 000),
+   per-entry (512 MiB) and total (3 GiB) bounds, declared-size
+   prechecks, streamed bounded copies with a fixed 1 MiB buffer (never
+   an allocation sized from an untrusted declared length), CRC
+   verification through the archive readers, truncation errors as hard
+   failures, and per-entry byte-bound enforcement during the copy.
+
+The manager's install flow (digest verification BEFORE extraction,
+fresh unique staging directory, full pack verification, atomic swap
+with rollback, staging cleanup on every failure path) is unchanged and
+remains the promotion boundary — extraction never runs over an active
+installation.
+
+## Regression tests (attack matrix, V5 §2.4)
+
+`internal/mediatools/archive_test.go` + shared fixtures in
+`xz_test.go`, all passing (`go test -tags goffi_static -count=1
+./internal/mediatools/`, and `-race -count=3` for the whole package):
+traversal (`../`, `a/..`, `sub/../../`), backslash and mixed
+separators, absolute paths, drive-qualified, UNC, alternate data
+streams, reserved device names, NUL/control characters, empty and dot
+entries, double separators, trailing separators on files, trailing
+dot/space components, excessive length, exact and case-only duplicate
+files (`FFMPEG.EXE` vs `ffmpeg.exe`), directory/file collisions,
+parent/child conflicts (`a` then `a/b` and the reverse), symlink /
+hardlink / device / FIFO entries, symlink-parent-followed-by-child,
+excessive entry count, huge declared size, byte-bound enforcement
+during copy, bad CRC (patched central directory), truncated ZIP and
+TAR.XZ, pre-existing outside-pointing symlink inside the destination
+(sentinel file outside proves nothing escapes), symlinked destination
+refused — plus positive fixtures: nested directories, paths with
+spaces and non-ASCII, executable-bit policy (0755 pair / 0644 data),
+license-document selection, and re-extraction into a used destination
+refused. Outside sentinels are verified unchanged after every rejected
+extraction.
+
+## Verification states (truthful)
+
+- `LOCAL_CODEQL_CLEAN`: **NOT_RUN/BLOCKED** — the CodeQL CLI bundle
+  (~450 MB) could not be downloaded from this sandbox (release-asset
+  downloads hang; the GitHub REST quota is exhausted). The remediation
+  is verified at source level (the `filepath.IsLocal` barrier plus
+  `os.Root`-only sinks remove both dataflows by construction) and by
+  the attack matrix above; a local SARIF run remains owner follow-up
+  per the commands in the v3 section below.
+- Hosted alert state for #1/#2: **PENDING_FRESH_DEFAULT_BRANCH_SCAN** —
+  GitHub alone may report the alerts fixed, after the owner pushes
+  these changes and a new default-branch CodeQL analysis completes.
+  No suppression, dismissal, query narrowing or path exclusion was
+  added; `codeql.yml` is untouched by this work order.
+- Live OPEN inventory beyond the two owner-supplied alerts:
+  `NOT_RETRIEVED` (authentication blocker, unchanged from v3).
+
+---
+
+# Prior record — 2026-11-16 v3 work order
+
 # CodeQL Alert Remediation — 2026-11-16 v3 work order
 
 Execution environment: Linux sandbox (no GitHub credentials available to

@@ -119,6 +119,9 @@ func Run() error {
 			"position", ev.Position.String(),
 			"total", ev.Total.String(),
 		}
+		if ev.Detail != "" {
+			attrs = append(attrs, "detail", ev.Detail)
+		}
 		if ev.Err != nil {
 			attrs = append(attrs, "err", ev.Err.Error())
 			log.Error(ev.Kind, attrs...)

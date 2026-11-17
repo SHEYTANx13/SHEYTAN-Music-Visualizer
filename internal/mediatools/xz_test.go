@@ -291,52 +291,8 @@ func TestXZEarlyCloseIsSafe(t *testing.T) {
 }
 
 // ---- tar.xz extraction integration (production extractTarXZ path) ----
-
-type tarEntry struct {
-	name    string
-	content string
-	isDir   bool
-}
-
-func buildTarXZ(t *testing.T, entries []tarEntry) string {
-	t.Helper()
-	var tarBuf bytes.Buffer
-	tw := tar.NewWriter(&tarBuf)
-	for _, e := range entries {
-		if e.isDir {
-			if err := tw.WriteHeader(&tar.Header{Name: e.name, Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
-				t.Fatal(err)
-			}
-			continue
-		}
-		hdr := &tar.Header{Name: e.name, Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(e.content))}
-		if err := tw.WriteHeader(hdr); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write([]byte(e.content)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var xzBuf bytes.Buffer
-	xw, err := xz.NewWriter(&xzBuf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := xw.Write(tarBuf.Bytes()); err != nil {
-		t.Fatal(err)
-	}
-	if err := xw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "pack.tar.xz")
-	if err := os.WriteFile(path, xzBuf.Bytes(), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
+// The tarEntry fixture type and buildTarXZ builder live in
+// archive_test.go and are shared by both files.
 
 func testTarXZPack() PlatformPack {
 	p := testPack()

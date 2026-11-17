@@ -15,9 +15,11 @@ import (
 	"fmt"
 	"image"
 	"math"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
@@ -70,15 +72,18 @@ type Studio struct {
 	cacheDir string
 	cache    *audio.Cache
 
-	track      *audio.ImportedTrack
-	analysis   *dsp.Result
-	dna        *songdna.DNA
-	vizConfig  visualizer.Config
-	transport  *playback.Transport
-	output     playback.Output
-	deviceReal bool
-	outputOnce sync.Once
-	outputErr  string
+	track     *audio.ImportedTrack
+	analysis  *dsp.Result
+	dna       *songdna.DNA
+	vizConfig visualizer.Config
+	transport *playback.Transport
+
+	// Audio output opens lazily on the first Play and is published
+	// through an atomic pointer: the sync.Once body performs NO
+	// studio-mutex locking, so ensureOutput can never self-deadlock
+	// under a held s.mu (the app(6).log first-Play freeze root cause).
+	outputOnce  sync.Once
+	outputState atomic.Pointer[outputState]
 
 	analysisCancel context.CancelFunc
 	exportJob      *export.Job
@@ -106,8 +111,17 @@ type Studio struct {
 
 	// playSink (v3 §C) receives structured transport lifecycle events
 	// (play.state.changed, play.eos, ...) and is attached to every
-	// transport as soon as one is created.
+	// transport as soon as one is created. The studio also emits its own
+	// pre-transport lifecycle events (play.no-track, play.validation,
+	// play.session.created, play.device.selected, play.failed) through
+	// the same sink so every Play request terminates in a logged
+	// outcome (V5 §3.6).
 	playSink func(playback.PlayEvent)
+
+	// preparingPlay marks an in-flight FIRST play (device open + PCM
+	// cache open run off the UI thread); a second click during
+	// preparation is a harmless no-op instead of a duplicate session.
+	preparingPlay bool
 
 	subscriber func(Event)
 }
@@ -135,48 +149,54 @@ func New() (*Studio, error) {
 	return s, nil
 }
 
+// outputState is the immutable audio-device snapshot published once
+// by ensureOutput (real device, or the honest silent fallback with the
+// exact reason).
+type outputState struct {
+	out    playback.Output
+	real   bool
+	errStr string
+}
+
 // ensureOutput lazily opens the audio device exactly once: real device
-// when possible, silent fallback otherwise (honest state, logged by the
-// caller via DeviceReal/OutputReason).
+// when possible, silent fallback otherwise (honest state, surfaced via
+// DeviceReal/OutputReason). The Once body takes NO studio locks — it
+// publishes through the atomic pointer — so this function is safe to
+// call with or without s.mu held.
 func (s *Studio) ensureOutput() {
 	s.outputOnce.Do(func() {
+		st := &outputState{}
 		out, err := playback.NewOtoOutput()
 		if err == nil {
-			s.mu.Lock()
-			s.output = out
-			s.deviceReal = true
-			s.outputErr = ""
-			s.mu.Unlock()
-			return
+			st.out, st.real = out, true
+		} else {
+			st.out, st.errStr = playback.NewSilentOutput(), err.Error()
 		}
-		s.mu.Lock()
-		s.output = playback.NewSilentOutput()
-		s.deviceReal = false
-		s.outputErr = err.Error()
-		s.mu.Unlock()
+		s.outputState.Store(st)
 	})
 }
+
+// currentOutput returns the published output state (nil before the
+// first Play initialized the device).
+func (s *Studio) currentOutput() *outputState { return s.outputState.Load() }
 
 // OutputStarted reports whether the device has been initialized at all
 // (lazy startup: an untouched device is not a failure).
 func (s *Studio) OutputStarted() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.output != nil
+	return s.currentOutput() != nil
 }
 
 // OutputReason reports why a real device is (or is not yet) in use.
 func (s *Studio) OutputReason() string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.deviceReal {
+	st := s.currentOutput()
+	if st == nil {
+		return "device opens with the first playback (not yet initialized)"
+	}
+	if st.real {
 		return "active (Oto)"
 	}
-	if s.outputErr != "" {
-		return s.outputErr
-	}
-	if s.output == nil {
-		return "device opens with the first playback (not yet initialized)"
+	if st.errStr != "" {
+		return st.errStr
 	}
 	return "silent preview mode"
 }
@@ -241,11 +261,11 @@ func (s *Studio) DNA() *songdna.DNA {
 	return s.dna
 }
 
-// DeviceReal reports whether a real audio device is in use.
+// DeviceReal reports whether a real audio device is proven in use
+// (never true for the silent fallback).
 func (s *Studio) DeviceReal() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.deviceReal
+	st := s.currentOutput()
+	return st != nil && st.real
 }
 
 // SupportedFormats lists the registered input formats.
@@ -374,7 +394,23 @@ func (s *Studio) ImportFile(path string) error {
 		s.track = track
 		s.analysis = nil
 		s.dna = nil
+		// New track: the old transport's PCM source is stale. Drop it
+		// so the next Play creates a transport for the NEW fingerprint
+		// (stale-track playback fix, V5 §3.1 fixture I: track switch
+		// must never keep playing the previous track's cache).
+		stale := s.transport
+		s.transport = nil
+		// The import is DONE: clear the in-flight flag in the same
+		// critical section, BEFORE EventImportDone is emitted, so a
+		// Play request triggered by that event can never observe a
+		// stale "importing" state (race found by -race on the track
+		// switch test; the deferred cleanup stays as a backstop).
+		s.importing = false
+		s.importCancel = nil
 		s.mu.Unlock()
+		if stale != nil {
+			_ = stale.Close() // idempotent, thread-safe
+		}
 		s.emit(Event{
 			Kind:    EventImportDone,
 			Message: fmt.Sprintf("%s · %s · %s (imported in %s)", track.SourceName, track.Metadata.FormatText, track.Metadata.DurationText, time.Since(start).Round(time.Millisecond)),
@@ -492,25 +528,71 @@ func (s *Studio) analyzeTrack(ctx context.Context, track *audio.ImportedTrack) (
 
 // Playback -------------------------------------------------------------
 
+// Typed, actionable Play errors (V5 §3.1/§3.6: a bare technical
+// string is not an actionable message).
+var (
+	// ErrNoTrack: no playable audio asset is selected.
+	ErrNoTrack = errors.New("studio: no track loaded — import or select a track first")
+	// ErrImportInProgress: an import is still running for the selected track.
+	ErrImportInProgress = errors.New("studio: import still running — wait for it to finish, then press Play")
+)
+
+// emitPlayEvent delivers a studio-level play lifecycle event through
+// the play sink on a trampoline goroutine (the sink must never block
+// the caller — V5 §3.6).
+func (s *Studio) emitPlayEvent(ev playback.PlayEvent) {
+	s.mu.RLock()
+	sink := s.playSink
+	s.mu.RUnlock()
+	if sink == nil {
+		return
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now()
+	}
+	go func() {
+		defer func() { _ = recover() }()
+		sink(ev)
+	}()
+}
+
 // PlayPause toggles playback of the current track.
+//
+// Contract (V5 §3.2/§3.3/§3.6): the request is validated first (track
+// present, import finished); the FIRST play of a track opens the audio
+// device and the canonical PCM cache OFF the UI thread (no UI-thread
+// blocking for audio open — V5 non-negotiable #6); every outcome is
+// reported through the play event sink (play.no-track / play.validation
+// / play.session.created / play.device.selected / play.output.started
+// / play.failed), so no request can silently vanish. Subsequent
+// play/pause/seek/stop calls run synchronously on the existing
+// transport (non-blocking transport operations).
 func (s *Studio) PlayPause() error {
 	s.mu.RLock()
 	track := s.track
-	s.mu.RUnlock()
-	if track == nil {
-		return errors.New("studio: no track loaded")
-	}
-	s.mu.RLock()
+	importing := s.importing
 	tr := s.transport
+	preparing := s.preparingPlay
 	s.mu.RUnlock()
+	if importing {
+		s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvValidation,
+			Detail: "import of the selected track is still running"})
+		return ErrImportInProgress
+	}
+	if track == nil {
+		s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvNoTrack,
+			Detail: "no playable track selected — import or select a track first"})
+		return ErrNoTrack
+	}
 	if tr == nil {
-		s.mu.Lock()
-		var err error
-		tr, err = s.newTransportLocked()
-		s.mu.Unlock()
-		if err != nil {
-			return err
+		if preparing {
+			// double click while the first play is still preparing: no
+			// duplicate session, no error
+			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvValidation,
+				Detail: "playback is already starting"})
+			return nil
 		}
+		return s.startPlaybackAsync()
 	}
 	if tr.IsPlaying() {
 		err := tr.Pause()
@@ -528,16 +610,97 @@ func (s *Studio) PlayPause() error {
 	return err
 }
 
-// newTransportLocked creates the transport for the current track. The
-// audio device opens lazily on this first playback attempt.
+// startPlaybackAsync opens the audio device and the canonical PCM
+// cache and starts the FIRST play on a worker goroutine, keeping the
+// UI thread free of device-open blocking. The goroutine reports every
+// outcome through the play event sink; a concurrent track import
+// supersedes the attempt cleanly (the transport is closed by the
+// import path and the play reports play.superseded instead of failing).
+func (s *Studio) startPlaybackAsync() error {
+	s.mu.Lock()
+	if s.preparingPlay {
+		s.mu.Unlock()
+		return nil
+	}
+	s.preparingPlay = true
+	s.mu.Unlock()
+	go func() {
+		defer func() {
+			s.mu.Lock()
+			s.preparingPlay = false
+			s.mu.Unlock()
+			s.emit(Event{Kind: EventPlaybackChanged})
+		}()
+		// Open the audio device BEFORE taking the studio lock:
+		// ensureOutput locks s.mu inside sync.Once.Do, and Go
+		// mutexes are not reentrant — calling it while holding
+		// s.mu self-deadlocks the first play (the app(6).log
+		// silent-death root cause: the first Play froze the
+		// caller with the studio mutex held and nothing — no
+		// dialog, no event — ever followed play.requested).
+		s.ensureOutput()
+		s.mu.Lock()
+		tr, err := s.newTransportLocked()
+		var fp string
+		if s.track != nil {
+			fp = s.track.Fingerprint
+		}
+		s.mu.Unlock()
+		if err != nil {
+			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvFailed, Err: err,
+				Detail: "stage=open-transport (audio device open or canonical PCM cache read)"})
+			return
+		}
+		if err := tr.Play(); err != nil {
+			if errors.Is(err, playback.ErrClosed) {
+				s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvSupersededPlay, Err: err,
+					Detail: "a concurrent track import superseded this play request"})
+				return
+			}
+			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvFailed, Err: err,
+				Detail: "stage=play (device pipeline start)"})
+			return
+		}
+		// Play entered Priming with the player spawned: the
+		// session/generation ID is now allocated and non-zero.
+		clock := tr.Clock()
+		s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvSessionCreated, Session: clock.Session,
+			Detail: "fingerprint=" + fp})
+		// Device truth (never claims a real device before one is proven).
+		if s.DeviceReal() {
+			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvDeviceSelected, Session: clock.Session,
+				Detail: "backend=oto;device=real"})
+		} else {
+			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvDeviceSelected, Session: clock.Session,
+				Detail: "backend=silent(fallback);reason=" + s.OutputReason()})
+		}
+	}()
+	return nil
+}
+
+// newTransportLocked creates the transport for the current track.
+// ensureOutput MUST have already run (see startPlaybackAsync): it locks
+// s.mu inside sync.Once.Do and must never be called under this lock.
 func (s *Studio) newTransportLocked() (*playback.Transport, error) {
 	if s.transport != nil {
 		_ = s.transport.Close()
 		s.transport = nil
 	}
-	s.ensureOutput()
-	tr, err := playback.NewTransport(s.output, s.cache.RawPath(s.track.Fingerprint))
+	pcm := s.cache.RawPath(s.track.Fingerprint)
+	st := s.currentOutput()
+	if st == nil {
+		// Defensive: the async first-play path always runs ensureOutput
+		// before this lock; a nil state here is an internal ordering bug,
+		// reported honestly instead of dereferenced.
+		return nil, errors.New("studio: audio output not initialized before transport creation")
+	}
+	tr, err := playback.NewTransport(st.out, pcm)
 	if err != nil {
+		// Actionable cache-miss diagnosis (V5 §3.1 fixture C): the
+		// canonical PCM cache for the selected fingerprint is gone.
+		if _, serr := os.Stat(pcm); serr != nil {
+			return nil, fmt.Errorf("studio: audio cache missing for this track — re-import it (fingerprint %s)", s.track.Fingerprint)
+		}
 		return nil, err
 	}
 	if s.playSink != nil {

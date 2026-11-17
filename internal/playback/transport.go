@@ -45,21 +45,43 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// PlayEventKind names follow the v3 §C diagnostics contract so log
-// consumers can rely on a stable event vocabulary.
+// PlayEventKind names follow the v3 §C diagnostics contract (extended
+// by the V5 §3.6 play logging contract) so log consumers can rely on a
+// stable event vocabulary. Every Play request terminates in
+// play.output.started, play.failed, or a clear validation outcome
+// (play.no-track / play.validation) — no request may silently vanish.
 const (
 	EvStateChanged      = "play.state.changed"
 	EvPrerollStarted    = "play.preroll.started"
 	EvPrerollCompleted  = "play.preroll.completed"
+	EvOutputStarted     = "play.output.started"
 	EvPositionAdvanced  = "play.position.advanced"
+	EvClockAdvanced     = "play.clock.advanced"
 	EvEOS               = "play.eos"
 	EvStopRequested     = "play.stop.requested"
 	EvResourcesReleased = "play.resources.released"
 	EvPlayError         = "play.error"
+
+	// Studio-level lifecycle events (emitted by the service layer
+	// around the transport, through the same sink).
+	EvValidation     = "play.validation"
+	EvNoTrack        = "play.no-track"
+	EvSessionCreated = "play.session.created"
+	EvDeviceSelected = "play.device.selected"
+	EvFailed         = "play.failed"
+	EvSupersededPlay = "play.superseded"
 )
+
+// sessionCounter is the process-global monotonic playback generation
+// counter: every player spawn anywhere gets a unique non-zero ID, so
+// log correlation can never confuse sessions across track switches
+// or transport replacements (V5 §3.2 — monotonic per playback attempt,
+// not per transport object).
+var sessionCounter atomic.Uint64
 
 // PlayEvent is one structured transport lifecycle event. Events are
 // delivered on the caller's goroutine WITHOUT the transport mutex held,
@@ -72,6 +94,9 @@ type PlayEvent struct {
 	Total    time.Duration
 	Err      error
 	At       time.Time
+	// Detail carries stage/device context (never paths, media bytes or
+	// user library metadata).
+	Detail string
 }
 
 // Transport is one track's playback state machine. It is safe for
@@ -105,6 +130,9 @@ type Transport struct {
 	baseBuf   int   // player.BufferedSize() at the transition
 	// deviceLatency is the documented uncertainty of the playhead.
 	deviceLatency time.Duration
+	// lastClockAdv bounds the play.clock.advanced aggregate to at most
+	// one event every few seconds while playing (V5 §3.6).
+	lastClockAdv time.Time
 }
 
 // State is the transport state.
@@ -250,7 +278,7 @@ func (t *Transport) spawnPlayerLocked() error {
 	// a fresh section reader from the current position
 	r := io.NewSectionReader(t.file, t.basePos, t.total-t.basePos)
 	pr := &countingReader{r: r}
-	t.session++ // new playback generation
+	t.session = sessionCounter.Add(1) // new playback generation (unique process-wide)
 	t.player = t.out.NewPlayer(pr)
 	t.counting = pr
 	if err := t.player.Err(); err != nil {
@@ -294,16 +322,27 @@ func (t *Transport) captureEpochLocked() {
 
 // confirmLocked promotes Priming to Playing once the processed-sample
 // counter has advanced beyond the transition epoch (the device has
-// consumed real samples — v3 §C requirement 26), and detects natural
-// end-of-track (all samples handed and the device buffer drained).
-// Caller holds mu.
+// consumed real samples — v3 §C requirement 26; the promotion also emits
+// play.output.started, the V5 §3.6 confirmation that non-zero output is
+// real), and detects natural end-of-track (all samples handed and the
+// device buffer drained). Caller holds mu.
 func (t *Transport) confirmLocked() {
 	if t.state == StatePriming {
 		if t.handedLocked() >= BytesPerFrame {
 			t.state = StatePlaying
 			t.emitLocked(PlayEvent{Kind: EvPrerollCompleted})
+			t.emitLocked(PlayEvent{Kind: EvOutputStarted,
+				Detail: "non-zero samples confirmed handed to the output device"})
 			t.emitLocked(PlayEvent{Kind: EvPositionAdvanced})
 			t.emitLocked(PlayEvent{Kind: EvStateChanged})
+			t.lastClockAdv = time.Now()
+		}
+	}
+	if t.state == StatePlaying {
+		// Low-rate aggregate advance observation (at most every 3s).
+		if time.Since(t.lastClockAdv) >= 3*time.Second {
+			t.lastClockAdv = time.Now()
+			t.emitLocked(PlayEvent{Kind: EvClockAdvanced})
 		}
 	}
 	if t.state == StatePlaying || t.state == StatePriming {
