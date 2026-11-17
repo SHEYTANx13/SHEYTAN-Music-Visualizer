@@ -19,12 +19,15 @@ not exist. Links are verified by `scripts/ci/tests/test-docs-consistency.sh`.
 | Document | Scope |
 | --- | --- |
 | [docs/architecture.md](architecture.md) | Module map, data flow, threading rules (Fyne event loop, `fyne.Do`), the close/shutdown state machine (`internal/appclose`) and the responsive root (`ui/fyne/responsive.go`). |
+| [docs/architecture/queue-orchestration.md](architecture/queue-orchestration.md) | The bounded work scheduler (`internal/jobs`): queue classes A–I, hard lane ceilings, typed admission outcomes, job lifecycle/records, weighted fairness + aging, cancellation/containment/shutdown, job journal and crash reconciliation, studio routing map. |
+| [docs/security/file-access-and-privileges.md](security/file-access-and-privileges.md) | Selected-file/folder analysis (`internal/fileaccess`): asInvoker least-privilege model (no elevation, no helper), authorization summary + revocable grants, openat-anchored read-only bounded traversal, sensitive-location default-skip inventory, redacted audit trail. |
 | [docs/ci.md](ci.md) | Canonical build/CI reference: toolchain per platform, `goffi_static` tag policy, hands-on build instructions, gate ownership, the `--build-info-json` identity authority, the package-status contract (VERIFIED / TEST_ONLY / UNAVAILABLE) and the final-verdict gate. |
 | [docs/CI-DIAGNOSTICS.md](CI-DIAGNOSTICS.md) | The consolidated `SHEYTAN-Music-Visualizer-all-logs.txt` diagnostics artifact, log-part lifecycle and collector contract. |
 | [docs/GPU-RENDERING.md](GPU-RENDERING.md) | Renderer selection, honest device classes, the Go↔WGSL uniform contract and the dedicated GPU palette gate. |
 | [docs/PERFORMANCE.md](PERFORMANCE.md) | Performance methodology, current measured baselines and the honesty rules for claims. |
 | [docs/performance-baseline.md](performance-baseline.md) | Full measured baseline history with exact commands, host identity and caveats. |
 | [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Canonical user-facing diagnostics + troubleshooting: runtime log, capability states, startup metrics, common failures with actionable fixes. |
+| [docs/operations/runtime-diagnostics.md](operations/runtime-diagnostics.md) | Runtime operations evidence (`internal/jobs` + studio Job Center data model): queue/job metrics, pressure adaptation, job journal + crash reconciliation, truthfulness rules. |
 | [docs/REQUIREMENTS-TRACEABILITY.md](REQUIREMENTS-TRACEABILITY.md) | Every requirement mapped to implementation, tests, gates, user entry point and verification status. Includes the run-43767556517 R01–R24 zero-omission ledger (the canonical MV-REQUIREMENTS-TRACEABILITY mapping). |
 | [docs/MV-CONTENT-INTEGRITY.md](MV-CONTENT-INTEGRITY.md) | Project-content CRUD contract: stable typed IDs, revision/external-modification safety, transaction journal + recovery, Trash/restore/purge, undo/redo, import safety, scenario test matrix (`internal/content`). |
 

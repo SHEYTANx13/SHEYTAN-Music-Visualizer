@@ -1,5 +1,65 @@
 # Changelog
 
+## Run 44010666873 work order — bounded work orchestration, secure selected-file analysis (2026-11-17)
+
+- **`internal/jobs` (new)**: the single app-owned bounded work
+  scheduler. Queue classes A–I (real-time audio and UI deliberately
+  NOT scheduled); hard lane ceilings (waiting 12/4/2/2/1/4/1, active
+  2/2/1/1/1/1/1, total 26 waiting); typed admission outcomes
+  (`accepted`, `coalesced`, `rejected_full`, `rejected_shutdown`,
+  `rejected_unauthorized`, `rejected_budget`); job records with stable
+  IDs, idempotency + newest-wins coalescing, stage-based monotonic
+  progress, attempt/retry contracts (transient-only, bounded) and
+  correlation IDs; weighted fair sharing (4/2/1/1/1) with borrowable
+  shares and 30 s monotonic aging capped below the audio/UI classes;
+  shared CPU-heavy budget `max(1, min(3, GOMAXPROCS/3))` adapting DOWN
+  under pressure; per-lane memory ceilings and a global temporary-disk
+  budget; panic containment at the worker boundary; bounded
+  graceful/cancelling shutdown (never blocks forever on a
+  non-cooperative job; stall is observable, never claimed as drained);
+  a metadata-only JSONL job journal with atomic compaction and crash
+  reconciliation (orphaned running jobs are marked `interrupted`,
+  never implicitly successful, never resurrected). 24 tests, clean
+  under `-race`, including the mixed-workload stress scenario and
+  enqueue-storm accounting.
+- **`internal/studio/jobs.go` + studio routing**: media import (decode)
+  and DSP/Song-DNA analysis run on `audio_analysis`; first-play
+  preparation (device open + canonical cache open) on
+  `interactive_io`; offline export on `export` (1+1). All prior
+  single-flight semantics and events preserved (existing test suite
+  unchanged and green); queue-full paths return actionable messages.
+  The play-event sink now runs on ONE bounded dispatcher goroutine
+  (buffer 256) with inline delivery on overflow — previously one
+  goroutine per event with no bound. `JobsOverview()` /
+  `CancelJob()` / `SetSchedulerPressure()` expose the Job Center data
+  model and pressure governor. `Close()` drains the scheduler within
+  documented bounds.
+- **`internal/fileaccess` (new)**: user-authorized, read-only, scoped,
+  revocable selected-folder analysis. No elevation anywhere (asInvoker;
+  no helper — none is needed to read files the user can already read).
+  Authorization summary shown before any walk (roots, purpose, depth,
+  count/byte/time budgets); 10-minute confirmation window; root
+  identity (device+inode) re-checked at confirmation. Traversal is
+  anchored to `os.Root` (openat containment): path traversal and
+  symlink/junction escapes refused by the OS; symlinks/FIFOs/devices/
+  sockets counted, never opened; paged directory reads; depth, file
+  count, per-file, aggregate-byte and time caps with cancellation.
+  Well-known sensitive locations (credential stores, SSH/GPG keys,
+  wallets, browser logins/cookies, OS hives, dumps, `.env`/secrets,
+  key containers) skipped by default; a direct selection requires a
+  separate confirmation and still cannot bypass OS controls. Redacted
+  bounded audit trail (labels + opaque scope IDs, classified errors,
+  never full paths). 11 adversarial tests, clean under `-race`.
+- **Docs**: `docs/architecture/queue-orchestration.md`,
+  `docs/security/file-access-and-privileges.md`,
+  `docs/operations/runtime-diagnostics.md` (canonical, indexed in
+  `docs/INDEX.md`; docs-consistency gate green).
+- Verification on commit `5b306dd` (Linux, Go 1.27.4,
+  `goffi_static`): `go build ./...`, `go vet ./...` and the full test
+  suite (`go test -skip '^TestPaletteReachesGPUShader$' ./...`) pass;
+  `internal/jobs`, `internal/studio`, `internal/fileaccess` also pass
+  under `-race`.
+
 ## v3 work order — dependencies, playback confirmation contract, xz matrix (2026-11-16)
 
 - Dependencies (work-order item B, exact versions): `astral-sh/setup-uv`

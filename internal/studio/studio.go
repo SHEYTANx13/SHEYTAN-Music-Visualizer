@@ -27,6 +27,7 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/content"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/jobs"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
@@ -115,8 +116,16 @@ type Studio struct {
 	// pre-transport lifecycle events (play.no-track, play.validation,
 	// play.session.created, play.device.selected, play.failed) through
 	// the same sink so every Play request terminates in a logged
-	// outcome (V5 §3.6).
+	// outcome (V5 §3.6). Delivery runs on ONE bounded dispatcher
+	// goroutine (see jobs.go), never one goroutine per event.
 	playSink func(playback.PlayEvent)
+
+	// Bounded work orchestration (run-44010666873 §2): all long-running
+	// non-real-time work flows through the single app-owned scheduler.
+	sched        *jobs.Scheduler
+	playEvents   chan playback.PlayEvent
+	playSinkStop chan struct{}
+	playSinkDone chan struct{}
 
 	// preparingPlay marks an in-flight FIRST play (device open + PCM
 	// cache open run off the UI thread); a second click during
@@ -140,6 +149,12 @@ func New() (*Studio, error) {
 		return nil, err
 	}
 	s := &Studio{cacheDir: cacheDir, cache: cache}
+	// Bounded work orchestration (run-44010666873 §2): the single
+	// scheduler owns every long-running non-real-time lane. A journal
+	// failure degrades to an in-memory scheduler (work still bounded
+	// and cancellable) with the error surfaced to the caller later via
+	// diagnostics; it never blocks the launch.
+	_ = s.initScheduler()
 	// Device deferral (run 43090342995 startup contract): opening the
 	// audio device (WASAPI/ALSA/oto context) is deferred to the first
 	// playback attempt, so the first visual frame never waits on device
@@ -351,8 +366,10 @@ func clampRange(v, lo, hi, def float64) float64 {
 
 // Import --------------------------------------------------------------
 
-// ImportFile imports a track in a background goroutine and starts
-// analysis on success. Cancel via CancelImport.
+// ImportFile imports a track through the bounded AUDIO_ANALYSIS lane
+// (CPU-heavy decode) and starts analysis on success. Cancel via
+// CancelImport. Enqueue is non-blocking; a saturated lane returns an
+// actionable typed error instead of queueing without bound.
 func (s *Studio) ImportFile(path string) error {
 	s.mu.Lock()
 	if s.importing {
@@ -366,58 +383,37 @@ func (s *Studio) ImportFile(path string) error {
 	s.mu.Unlock()
 
 	s.emit(Event{Kind: EventImportStarted, Message: filepath.Base(path)})
-	go func() {
-		defer func() {
-			s.mu.Lock()
-			s.importing = false
-			s.importCancel = nil
-			s.mu.Unlock()
-			cancel() // release the context (and the ffmpeg watcher) promptly
+	if s.sched == nil {
+		// Defensive fallback (scheduler init failed): run the same body
+		// on one goroutine so an import is never silently impossible.
+		go func() {
+			defer cancel()
+			s.runImportJob(ctx, path, nil)
 		}()
-		start := time.Now()
-		track, err := audio.Import(ctx, path, s.cache, func(done, total uint64) {
-			p := 0.0
-			if total > 0 {
-				p = float64(done) / float64(total) * 100
-			}
-			s.emit(Event{Kind: EventImportProgress, Progress: p})
-		})
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				s.emit(Event{Kind: EventImportFailed, Message: "import cancelled"})
-				return
-			}
-			s.emit(Event{Kind: EventImportFailed, Message: err.Error()})
-			return
-		}
+		return nil
+	}
+	r := s.sched.Enqueue(jobs.Submit{
+		Type: "import", Lane: jobs.LaneAudioAnalysis,
+		IdempotencyKey: "studio:import", Priority: jobs.PriorityHigh,
+		SourceFP: path, Cancellable: true,
+		Run: func(jctx context.Context, h *jobs.JobHandle) error {
+			// Bridge the job context to the studio import-cancel path so
+			// CancelImport and scheduler cancellation stay equivalent.
+			s.runImportJob(jctx, path, h)
+			return nil
+		},
+	})
+	if !r.Accepted() {
+		cancel()
 		s.mu.Lock()
-		s.track = track
-		s.analysis = nil
-		s.dna = nil
-		// New track: the old transport's PCM source is stale. Drop it
-		// so the next Play creates a transport for the NEW fingerprint
-		// (stale-track playback fix, V5 §3.1 fixture I: track switch
-		// must never keep playing the previous track's cache).
-		stale := s.transport
-		s.transport = nil
-		// The import is DONE: clear the in-flight flag in the same
-		// critical section, BEFORE EventImportDone is emitted, so a
-		// Play request triggered by that event can never observe a
-		// stale "importing" state (race found by -race on the track
-		// switch test; the deferred cleanup stays as a backstop).
 		s.importing = false
 		s.importCancel = nil
 		s.mu.Unlock()
-		if stale != nil {
-			_ = stale.Close() // idempotent, thread-safe
+		if r.Outcome == jobs.OutcomeRejectedFull {
+			return errors.New("studio: the analysis queue is busy — cancel a running job or retry shortly")
 		}
-		s.emit(Event{
-			Kind:    EventImportDone,
-			Message: fmt.Sprintf("%s · %s · %s (imported in %s)", track.SourceName, track.Metadata.FormatText, track.Metadata.DurationText, time.Since(start).Round(time.Millisecond)),
-			Payload: track,
-		})
-		s.startAnalysis(track)
-	}()
+		return errors.New("studio: import was not accepted: " + string(r.Outcome))
+	}
 	return nil
 }
 
@@ -430,10 +426,10 @@ func (s *Studio) CancelImport() {
 	s.mu.Unlock()
 }
 
-// startAnalysis runs DSP analysis in a background goroutine with a
-// cancellation path (run 43541087097 lifecycle contract: every worker
-// has an owner and a cancel signal; Close cancels a running analysis
-// instead of orphaning it).
+// startAnalysis runs DSP analysis through the bounded AUDIO_ANALYSIS
+// lane with a cancellation path (run 43541087097 lifecycle contract:
+// every worker has an owner and a cancel signal; Close cancels a
+// running analysis instead of orphaning it).
 func (s *Studio) startAnalysis(track *audio.ImportedTrack) {
 	s.emit(Event{Kind: EventAnalysisStarted, Message: "analyzing"})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -445,42 +441,30 @@ func (s *Studio) startAnalysis(track *audio.ImportedTrack) {
 	}
 	s.analysisCancel = cancel
 	s.mu.Unlock()
-	go func() {
-		defer cancel()
-		start := time.Now()
-		res, err := s.analyzeTrack(ctx, track)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				s.emit(Event{Kind: EventAnalysisFailed, Message: "analysis cancelled"})
-			} else {
-				s.emit(Event{Kind: EventAnalysisFailed, Message: err.Error()})
-			}
-			return
+	if s.sched == nil {
+		go func() {
+			defer cancel()
+			s.runAnalysisJob(ctx, nil)
+		}()
+		return
+	}
+	r := s.sched.Enqueue(jobs.Submit{
+		Type: "analysis", Lane: jobs.LaneAudioAnalysis,
+		IdempotencyKey: "studio:analysis", Priority: jobs.PriorityNormal,
+		SourceFP: track.Fingerprint, Cancellable: true,
+		Run: func(jctx context.Context, h *jobs.JobHandle) error {
+			s.runAnalysisJob(jctx, h)
+			return nil
+		},
+	})
+	if !r.Accepted() {
+		cancel()
+		if r.Outcome == jobs.OutcomeCoalesced {
+			return // identical analysis already pending/running
 		}
-		s.mu.Lock()
-		s.analysis = res
-		cfg := s.vizConfig
-		seed := s.dnaSeedFor()
-		s.mu.Unlock()
-		dna := songdna.Derive(track.Fingerprint, res, seed)
-		s.mu.Lock()
-		s.dna = dna
-		// adopt DNA artistic defaults when the user has not customized
-		if !s.userCustomized {
-			cfg.Mode = visualizer.Mode(dna.DefaultMode)
-			cfg.ParticleDensity = dna.ParticleDensity
-			cfg.PulseResponse = dna.PulseResponse
-			cfg.Smoothing = dna.Smoothing
-			cfg.SpectrumTilt = dna.SpectrumTilt
-			if track.Metadata.TagTitle == "" {
-				cfg.TitleText = track.SourceName
-			}
-			s.vizConfig = cfg
-		}
-		s.mu.Unlock()
-		s.emit(Event{Kind: EventAnalysisDone, Message: fmt.Sprintf("analysis done in %s — %s", time.Since(start).Round(time.Millisecond), dna.Descriptor)})
-		s.emit(Event{Kind: EventPlaybackChanged})
-	}()
+		s.emit(Event{Kind: EventAnalysisFailed,
+			Message: "analysis queue is busy — cancel a running job or retry shortly"})
+	}
 }
 
 // dnaSeedFor reads the project seed preference.
@@ -538,22 +522,22 @@ var (
 )
 
 // emitPlayEvent delivers a studio-level play lifecycle event through
-// the play sink on a trampoline goroutine (the sink must never block
-// the caller — V5 §3.6).
+// the bounded dispatcher (the sink must never block the caller — V5
+// §3.6). The dispatcher is one goroutine with a bounded buffer; on
+// overflow the event is delivered inline with containment — never
+// dropped silently, never a fresh goroutine per event.
 func (s *Studio) emitPlayEvent(ev playback.PlayEvent) {
-	s.mu.RLock()
-	sink := s.playSink
-	s.mu.RUnlock()
-	if sink == nil {
-		return
-	}
 	if ev.At.IsZero() {
 		ev.At = time.Now()
 	}
-	go func() {
-		defer func() { _ = recover() }()
-		sink(ev)
-	}()
+	select {
+	case s.playEvents <- ev:
+		return
+	default:
+	}
+	// Buffer overflow: bounded inline delivery keeps the lifecycle
+	// contract (play events are never silently dropped).
+	s.deliverPlayEvent(ev)
 }
 
 // PlayPause toggles playback of the current track.
@@ -611,11 +595,12 @@ func (s *Studio) PlayPause() error {
 }
 
 // startPlaybackAsync opens the audio device and the canonical PCM
-// cache and starts the FIRST play on a worker goroutine, keeping the
-// UI thread free of device-open blocking. The goroutine reports every
-// outcome through the play event sink; a concurrent track import
-// supersedes the attempt cleanly (the transport is closed by the
-// import path and the play reports play.superseded instead of failing).
+// cache and starts the FIRST play on the bounded INTERACTIVE_IO lane,
+// keeping the UI thread free of device-open blocking. The worker
+// reports every outcome through the play event sink; a concurrent
+// track import supersedes the attempt cleanly (the transport is closed
+// by the import path and the play reports play.superseded instead of
+// failing).
 func (s *Studio) startPlaybackAsync() error {
 	s.mu.Lock()
 	if s.preparingPlay {
@@ -624,57 +609,27 @@ func (s *Studio) startPlaybackAsync() error {
 	}
 	s.preparingPlay = true
 	s.mu.Unlock()
-	go func() {
-		defer func() {
-			s.mu.Lock()
-			s.preparingPlay = false
-			s.mu.Unlock()
-			s.emit(Event{Kind: EventPlaybackChanged})
-		}()
-		// Open the audio device BEFORE taking the studio lock:
-		// ensureOutput locks s.mu inside sync.Once.Do, and Go
-		// mutexes are not reentrant — calling it while holding
-		// s.mu self-deadlocks the first play (the app(6).log
-		// silent-death root cause: the first Play froze the
-		// caller with the studio mutex held and nothing — no
-		// dialog, no event — ever followed play.requested).
-		s.ensureOutput()
+	if s.sched == nil {
+		go s.runFirstPlayJob(context.Background())
+		return nil
+	}
+	r := s.sched.Enqueue(jobs.Submit{
+		Type: "first-play", Lane: jobs.LaneInteractiveIO,
+		IdempotencyKey: "studio:first-play", Priority: jobs.PriorityHigh,
+		Cancellable: true,
+		Run: func(jctx context.Context, h *jobs.JobHandle) error {
+			s.runFirstPlayJob(jctx)
+			return nil
+		},
+	})
+	if !r.Accepted() && !r.WasCoalesced() {
 		s.mu.Lock()
-		tr, err := s.newTransportLocked()
-		var fp string
-		if s.track != nil {
-			fp = s.track.Fingerprint
-		}
+		s.preparingPlay = false
 		s.mu.Unlock()
-		if err != nil {
-			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvFailed, Err: err,
-				Detail: "stage=open-transport (audio device open or canonical PCM cache read)"})
-			return
-		}
-		if err := tr.Play(); err != nil {
-			if errors.Is(err, playback.ErrClosed) {
-				s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvSupersededPlay, Err: err,
-					Detail: "a concurrent track import superseded this play request"})
-				return
-			}
-			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvFailed, Err: err,
-				Detail: "stage=play (device pipeline start)"})
-			return
-		}
-		// Play entered Priming with the player spawned: the
-		// session/generation ID is now allocated and non-zero.
-		clock := tr.Clock()
-		s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvSessionCreated, Session: clock.Session,
-			Detail: "fingerprint=" + fp})
-		// Device truth (never claims a real device before one is proven).
-		if s.DeviceReal() {
-			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvDeviceSelected, Session: clock.Session,
-				Detail: "backend=oto;device=real"})
-		} else {
-			s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvDeviceSelected, Session: clock.Session,
-				Detail: "backend=silent(fallback);reason=" + s.OutputReason()})
-		}
-	}()
+		s.emitPlayEvent(playback.PlayEvent{Kind: playback.EvFailed,
+			Err:    errors.New("interactive queue busy"),
+			Detail: "stage=enqueue (interactive I/O lane saturated — cancel a running job or retry shortly)"})
+	}
 	return nil
 }
 
@@ -1101,7 +1056,10 @@ func (s *Studio) ProjectPath() string {
 
 // Export -------------------------------------------------------------
 
-// StartExport launches an export job in a background goroutine.
+// StartExport launches an export job through the bounded EXPORT lane
+// (1 waiting / 1 active globally). The lane bound replaces the old
+// ad-hoc single-flight flag as the hard ceiling; the flag stays as
+// the fast, user-actionable check.
 func (s *Studio) StartExport(req export.Request) error {
 	s.mu.Lock()
 	if s.exportJob != nil && s.exportJob.Running() {
@@ -1129,18 +1087,47 @@ func (s *Studio) StartExport(req export.Request) error {
 	s.exportJob = job
 	s.mu.Unlock()
 	s.emit(Event{Kind: EventExportProgress, Message: "export started", Progress: 0})
-	go func() {
-		res, err := job.Run(context.Background())
-		if err != nil {
-			s.emit(Event{Kind: EventExportFailed, Message: err.Error()})
-			return
-		}
-		s.emit(Event{Kind: EventExportDone,
-			Message: fmt.Sprintf("%s · %dx%d @%dfps · %.1fs · validated (%s)",
-				filepath.Base(res.OutputPath), res.Width, res.Height, res.FPS, res.Duration, res.Backend.Backend),
-			Payload: res})
-	}()
+	if s.sched == nil {
+		go func() {
+			res, err := job.Run(context.Background())
+			s.reportExportResult(res, err)
+		}()
+		return nil
+	}
+	r := s.sched.Enqueue(jobs.Submit{
+		Type: "export", Lane: jobs.LaneExport,
+		IdempotencyKey: "studio:export", Priority: jobs.PriorityNormal,
+		SourceFP: track.Fingerprint, Cancellable: true,
+		EstDiskMB: 2048, // conservative temporary-disk reservation
+		Run: func(jctx context.Context, h *jobs.JobHandle) error {
+			res, err := job.Run(jctx)
+			s.reportExportResult(res, err)
+			if err != nil {
+				return err
+			}
+			return nil
+		},
+	})
+	if !r.Accepted() && !r.WasCoalesced() {
+		s.mu.Lock()
+		s.exportJob = nil
+		s.mu.Unlock()
+		s.emit(Event{Kind: EventExportFailed,
+			Message: "the export queue is busy — cancel the running export or retry shortly"})
+	}
 	return nil
+}
+
+// reportExportResult emits the terminal export events.
+func (s *Studio) reportExportResult(res *export.Result, err error) {
+	if err != nil {
+		s.emit(Event{Kind: EventExportFailed, Message: err.Error()})
+		return
+	}
+	s.emit(Event{Kind: EventExportDone,
+		Message: fmt.Sprintf("%s · %dx%d @%dfps · %.1fs · validated (%s)",
+			filepath.Base(res.OutputPath), res.Width, res.Height, res.FPS, res.Duration, res.Backend.Backend),
+		Payload: res})
 }
 
 // ExportJob returns the current export job (nil when none).
@@ -1200,15 +1187,17 @@ func (s *Studio) Importing() bool {
 // Close releases every owned worker and resource in dependency-safe
 // order (run 43541087097 shutdown contract): cancel the running
 // import, cancel a running analysis, cancel and stop the export job
-// (reaping the FFmpeg child), then stop and close the transport.
-// Idempotent: every stage is guarded, so the appclose Release hook and
-// the defensive post-window close can both call it.
+// (reaping the FFmpeg child), then stop and close the transport, and
+// finally drain the bounded scheduler and stop the play-event
+// dispatcher. Idempotent: every stage is guarded, so the appclose
+// Release hook and the defensive post-window close can both call it.
 func (s *Studio) Close() {
 	s.mu.Lock()
 	importCancel := s.importCancel
 	analysisCancel := s.analysisCancel
 	job := s.exportJob
 	tr := s.transport
+	sched := s.sched
 	s.importCancel = nil
 	s.analysisCancel = nil
 	s.exportJob = nil
@@ -1226,4 +1215,10 @@ func (s *Studio) Close() {
 	if tr != nil {
 		_ = tr.Close()
 	}
+	// Bounded scheduler drain: cancellable stragglers are cancelled at
+	// the deadline; Shutdown returns within its documented bounds.
+	if sched != nil {
+		sched.Shutdown(3 * time.Second)
+	}
+	s.stopPlayEventLoop()
 }
