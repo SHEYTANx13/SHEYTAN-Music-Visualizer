@@ -87,6 +87,13 @@ type Studio struct {
 	outputState atomic.Pointer[outputState]
 
 	analysisCancel context.CancelFunc
+	// analysisDone is the explicit terminal-state signal of the analysis
+	// worker (closed exactly when its Run body returns and every cache
+	// file handle it owned is closed). It is pre-armed by the import
+	// worker BEFORE the import-done event fires, so an observer that
+	// awaits cache-file quiescence after an import can never miss the
+	// window (deterministic close acknowledgement, never a timing sleep).
+	analysisDone   chan struct{}
 	exportJob      *export.Job
 	projectPath    string
 	projectDoc     *project.Project
@@ -428,8 +435,16 @@ func (s *Studio) CancelImport() {
 
 // startAnalysis runs DSP analysis through the bounded AUDIO_ANALYSIS
 // lane with a cancellation path (run 43541087097 lifecycle contract:
-// every worker has an owner and a cancel signal; Close cancels a
-// running analysis instead of orphaning it).
+// every worker has an owner, a cancel signal and an EXPLICIT terminal
+// acknowledgement; Close cancels a running analysis and then JOINS it
+// instead of orphaning it). Single-flight is enforced by cancelling the
+// previous analysis before enqueueing — the scheduler-level
+// idempotency key was removed deliberately: a constant key folded a
+// just-cancelled-but-still-pending prior analysis into the new
+// request, silently dropping the new analysis (and, across track
+// switches, analyzing the WRONG track). The worker closes the
+// adopted terminal-state channel exactly once, after every cache file
+// handle it owns is closed.
 func (s *Studio) startAnalysis(track *audio.ImportedTrack) {
 	s.emit(Event{Kind: EventAnalysisStarted, Message: "analyzing"})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -440,30 +455,70 @@ func (s *Studio) startAnalysis(track *audio.ImportedTrack) {
 		s.analysisCancel()
 	}
 	s.analysisCancel = cancel
+	// Adopt the pre-armed terminal-state channel when one is live
+	// (the import worker arms it before the import-done event so
+	// quiescence awaiters can never miss the window); never close a
+	// channel a previous worker already closed.
+	done := s.analysisDone
+	if done == nil {
+		done = make(chan struct{})
+	} else {
+		select {
+		case <-done:
+			done = make(chan struct{})
+		default:
+		}
+	}
+	s.analysisDone = done
 	s.mu.Unlock()
 	if s.sched == nil {
 		go func() {
 			defer cancel()
+			defer close(done)
 			s.runAnalysisJob(ctx, nil)
 		}()
 		return
 	}
 	r := s.sched.Enqueue(jobs.Submit{
 		Type: "analysis", Lane: jobs.LaneAudioAnalysis,
-		IdempotencyKey: "studio:analysis", Priority: jobs.PriorityNormal,
+		Priority: jobs.PriorityNormal,
 		SourceFP: track.Fingerprint, Cancellable: true,
 		Run: func(jctx context.Context, h *jobs.JobHandle) error {
+			defer close(done)
 			s.runAnalysisJob(jctx, h)
 			return nil
 		},
 	})
 	if !r.Accepted() {
 		cancel()
-		if r.Outcome == jobs.OutcomeCoalesced {
-			return // identical analysis already pending/running
-		}
+		// No worker will ever own this channel: close it so
+		// awaiters observe the rejected analysis as terminal.
+		close(done)
 		s.emit(Event{Kind: EventAnalysisFailed,
 			Message: "analysis queue is busy — cancel a running job or retry shortly"})
+	}
+}
+
+// WaitForAnalysisIdle awaits the terminal state of the analysis worker
+// that owns the current terminal-state signal. It returns nil once
+// that worker returned and every cache file handle it owned is closed;
+// an armed-but-never-started signal (rejected enqueue) resolves
+// immediately because the rejection closes it. nil signal = no analysis
+// was ever armed (idle). This is the explicit close acknowledgement the
+// lifecycle contract requires — callers must NEVER replace it with a
+// timing sleep.
+func (s *Studio) WaitForAnalysisIdle(ctx context.Context) error {
+	s.mu.RLock()
+	done := s.analysisDone
+	s.mu.RUnlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -1208,6 +1263,24 @@ func (s *Studio) Close() {
 	}
 	if analysisCancel != nil {
 		analysisCancel()
+	}
+	// Deterministic join of the analysis worker (bounded): cancellation
+	// stops the reader between chunks and its deferred file close runs
+	// before the terminal-state channel closes, so when this join
+	// returns the worker owns NO cache file handle. This replaces the
+	// old hope-based sequencing that left an open .f32 handle behind on
+	// Windows (where an unjoined handle blocks cache-file removal).
+	s.mu.RLock()
+	analysisDone := s.analysisDone
+	s.mu.RUnlock()
+	if analysisDone != nil {
+		select {
+		case <-analysisDone:
+		case <-time.After(5 * time.Second):
+			// Never reachable while the scheduler is healthy: the
+			// cancelled worker closes the channel promptly. Surfaced
+			// through diagnostics rather than hanging Close.
+		}
 	}
 	if job != nil && job.Running() {
 		job.Cancel()

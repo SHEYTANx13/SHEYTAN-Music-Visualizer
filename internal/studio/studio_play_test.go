@@ -12,6 +12,7 @@ package studio
 // assumed.
 
 import (
+	"context"
 	"encoding/binary"
 	"math"
 	"os"
@@ -148,6 +149,21 @@ func importAndWait(t *testing.T, s *Studio, path string) {
 	}
 	if s.Track() == nil {
 		t.Fatal("import failed (no track after EventImportFailed)")
+	}
+	// Deterministic handle quiescence (run 44298066730 failure C): the
+	// follow-up analysis worker holds the canonical PCM (.f32) reader
+	// open until it reaches terminal state, and the import worker arms
+	// its terminal-state signal BEFORE the import-done event fires. An
+	// explicit await here guarantees the test never races an owned
+	// worker for a cache file — no sleeps, no taskkill, no TempDir
+	// cleanup failures on Windows where an unjoined handle blocks
+	// removal. Await BOTH the analysis-done event (worker body finished
+	// its terminal branch) and the explicit close acknowledgement (the
+	// goroutine returned and every owned handle is closed).
+	anaCtx, anaCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer anaCancel()
+	if err := s.WaitForAnalysisIdle(anaCtx); err != nil {
+		t.Fatalf("analysis never reached terminal state after import: %v", err)
 	}
 }
 

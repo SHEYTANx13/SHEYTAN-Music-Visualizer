@@ -278,6 +278,11 @@ func TestRootIdentityChangeRequiresReconfirmation(t *testing.T) {
 	dir := filepath.Join(base, "sel")
 	write(t, filepath.Join(dir, "a.wav"), "x")
 	m := NewManager()
+	// Deterministic handle lifecycle: the fresh grant holds an os.Root
+	// open until revoked; on Windows an unjoined open directory handle
+	// makes t.TempDir cleanup fail ("being used by another process").
+	// RevokeAll closes every root handle before the test returns.
+	defer m.RevokeAll()
 
 	// 1) prepare for the current identity
 	req, err := m.PrepareAuthorization(dir, "test", "proj-1", "local-user", Limits{SkipSensitive: true})
@@ -304,6 +309,98 @@ func TestRootIdentityChangeRequiresReconfirmation(t *testing.T) {
 	}
 	if _, err := g2.Analyze(context.Background(), nil); err != nil {
 		t.Fatalf("fresh grant walk failed: %v", err)
+	}
+}
+
+// TestSameInodeReplacementRequiresReconfirmation is the deterministic
+// regression test for run 44298066730 failure A (Linux: "stale
+// confirmation accepted: <nil>"). The CI runner's ext4 reused the
+// freed directory inode, so dev+ino were IDENTICAL across the
+// delete+recreate and the old dev+ino-only comparison accepted the
+// stale confirmation. Replaying that exact condition through the real
+// filesystem is impossible to force deterministically, so the test
+// drives the statRoot seam: the confirm-time identity reports the SAME
+// dev+ino but a different creation timestamp — the signature of a
+// same-inode recreation — and the confirmation must fail.
+func TestSameInodeReplacementRequiresReconfirmation(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "sel")
+	write(t, filepath.Join(dir, "a.wav"), "x")
+	m := NewManager()
+	defer m.RevokeAll()
+
+	orig := statRoot
+	t.Cleanup(func() { statRoot = orig })
+	realStat := orig
+	var calls int
+	statRoot = func(p string) (RootIdentity, error) {
+		id, err := realStat(p)
+		if err == nil {
+			calls++
+			if calls == 2 { // confirm-time revalidation
+				// Same dev+ino (inode reuse), different directory
+				// instance: the birth time changed.
+				id.BtimeSec += 1
+				id.CtimeNsec += 1
+			}
+		}
+		return id, err
+	}
+
+	req, err := m.PrepareAuthorization(dir, "test", "proj-1", "local-user", Limits{SkipSensitive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ConfirmAuthorization(req); !errors.Is(err, ErrIdentityChanged) {
+		t.Fatalf("same-(dev,ino) replacement accepted: %v", err)
+	}
+	if calls < 2 {
+		t.Fatalf("confirm-time identity revalidation never ran (calls=%d)", calls)
+	}
+
+	// Platforms whose primitive carries mtime as the discriminator
+	// (Windows file identity with MFT-record reuse) reject through the
+	// same comparison: identical primary components on BOTH sides, a
+	// different mtime. The seam simulates that primitive deterministically
+	// (a real FileInfo-based identity on Linux carries no mtime, so the
+	// fixture must provide both sides).
+	m2 := NewManager()
+	defer m2.RevokeAll()
+	const baseMtimeSec = int64(1750000000)
+	var calls2 int
+	statRoot = func(p string) (RootIdentity, error) {
+		id, err := realStat(p)
+		if err == nil {
+			calls2++
+			if calls2 == 1 {
+				id.MtimeSec = baseMtimeSec
+				id.MtimeNsec = 1
+			} else {
+				id.MtimeSec = baseMtimeSec + 1 // recreated: newer mtime
+				id.MtimeNsec = 1
+			}
+		}
+		return id, err
+	}
+	req2, err := m2.PrepareAuthorization(dir, "test", "proj-1", "local-user", Limits{SkipSensitive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m2.ConfirmAuthorization(req2); !errors.Is(err, ErrIdentityChanged) {
+		t.Fatalf("same-primary-different-mtime replacement accepted: %v", err)
+	}
+
+	// An UNCHANGED identity still confirms normally (the seam now
+	// returns identical values for prepare and confirm).
+	m3 := NewManager()
+	defer m3.RevokeAll()
+	statRoot = realStat
+	req3, err := m3.PrepareAuthorization(dir, "test", "proj-1", "local-user", Limits{SkipSensitive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m3.ConfirmAuthorization(req3); err != nil {
+		t.Fatalf("unchanged identity rejected: %v", err)
 	}
 }
 

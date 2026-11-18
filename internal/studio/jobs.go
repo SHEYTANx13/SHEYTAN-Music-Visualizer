@@ -145,6 +145,14 @@ func (s *Studio) runImportJob(ctx context.Context, path string, h *jobs.JobHandl
 	if stale != nil {
 		_ = stale.Close() // idempotent, thread-safe
 	}
+	// Pre-arm the analysis terminal-state signal BEFORE the import-done
+	// event fires: observers that await cache-file quiescence after an
+	// import (tests touching cache files, Close) see a live signal they
+	// can await — startAnalysis adopts it and the analysis worker closes
+	// it exactly once, after every cache file handle it owns is closed.
+	s.mu.Lock()
+	s.analysisDone = make(chan struct{})
+	s.mu.Unlock()
 	s.emit(Event{
 		Kind:    EventImportDone,
 		Message: fmt.Sprintf("%s · %s · %s (imported in %s)", track.SourceName, track.Metadata.FormatText, track.Metadata.DurationText, time.Since(start).Round(time.Millisecond)),

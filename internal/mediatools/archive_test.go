@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -270,6 +271,30 @@ func TestExtractZipNestedDirsWithSpacesAndNonASCII(t *testing.T) {
 	fi, err := os.Stat(res.FFmpeg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Executable trust (run 44298066730 failure B): on Unix the pinned
+	// executable carries 0755 from the archive-safe allowlist and the
+	// license carries 0644 — POSIX permission bits are preserved and
+	// verified. Windows cannot represent POSIX execute bits (Go
+	// reports -rw-rw-rw- for every regular file), so the Windows
+	// assertion verifies the PORTABLE trust contract instead: regular
+	// file type, exact pinned naming/destination (Unicode and spaces
+	// preserved above), exact extracted size, and a regular ffprobe.
+	// The test is neither skipped nor weakened: each platform asserts
+	// the strongest contract its filesystem can represent.
+	if runtime.GOOS == "windows" {
+		if !fi.Mode().IsRegular() {
+			t.Fatalf("pinned executable is not a regular file on windows: %v", fi.Mode())
+		}
+		if fi.Size() != 2 { // "FF"
+			t.Fatalf("pinned executable size = %d, want 2", fi.Size())
+		}
+		if fp, ferr := os.Stat(res.FFprobe); ferr != nil {
+			t.Fatal(ferr)
+		} else if !fp.Mode().IsRegular() {
+			t.Fatalf("pinned ffprobe is not a regular file on windows: %v", fp.Mode())
+		}
+		return
 	}
 	if fi.Mode().Perm() != 0o755 {
 		t.Fatalf("pinned executable mode = %v, want 0755", fi.Mode().Perm())

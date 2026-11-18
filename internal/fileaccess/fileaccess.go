@@ -75,9 +75,54 @@ const (
 // authorization time. A root that resolves to a different identity
 // (replaced directory, remounted volume, changed network share)
 // requires fresh confirmation.
+//
+// Dev+Ino are the primary components (device/inode on Unix; volume
+// serial/file index on Windows). The remaining fields are OPTIONAL
+// platform discriminators: a zero pair means "absent on this platform"
+// and the comparison skips it. They exist because a delete+recreate can
+// REUSE the same device+inode pair (observed on CI ext4 runners), so
+// the birth/modification/status-change timestamps pin the identity to
+// the specific directory instance (identity_linux.go statx btime,
+// identity_windows.go mtime).
 type RootIdentity struct {
 	Dev uint64
 	Ino uint64
+
+	Size      int64
+	CtimeSec  int64
+	CtimeNsec int64
+	BtimeSec  int64
+	BtimeNsec int64
+	MtimeSec  int64
+	MtimeNsec int64
+}
+
+// tsPresent reports whether a timestamp component carries a value.
+func tsPresent(sec, nsec int64) bool { return sec != 0 || nsec != 0 }
+
+// sameRootIdentity reports whether two identities describe the SAME
+// directory instance. Primary components must always match; an optional
+// component is compared only when BOTH sides carry it (zero = absent).
+// A recreation that reuses dev+ino but was created at a different time
+// is therefore rejected deterministically.
+func sameRootIdentity(a, b RootIdentity) bool {
+	if a.Dev != b.Dev || a.Ino != b.Ino {
+		return false
+	}
+	if a.Size != 0 && b.Size != 0 && a.Size != b.Size {
+		return false
+	}
+	for _, c := range [3][4]int64{
+		{a.CtimeSec, a.CtimeNsec, b.CtimeSec, b.CtimeNsec},
+		{a.BtimeSec, a.BtimeNsec, b.BtimeSec, b.BtimeNsec},
+		{a.MtimeSec, a.MtimeNsec, b.MtimeSec, b.MtimeNsec},
+	} {
+		if tsPresent(c[0], c[1]) && tsPresent(c[2], c[3]) &&
+			(c[0] != c[2] || c[1] != c[3]) {
+			return false
+		}
+	}
+	return true
 }
 
 // Limits are the traversal bounds shown to the user in the
@@ -214,6 +259,27 @@ var (
 	ErrReadOnly = errors.New("fileaccess: grants are read-only")
 )
 
+// statRoot resolves the canonical filesystem identity of a root path.
+// The platform primitive (Linux statx birth time, Windows file ID) is
+// preferred; a primitive failure falls back to the FileInfo-based
+// identityOf so exotic filesystems never hard-block authorization.
+// Package-level seam: tests override it to simulate same-inode
+// replacement deterministically instead of hoping the filesystem
+// reuses an inode.
+var statRoot = defaultStatRoot
+
+func defaultStatRoot(path string) (RootIdentity, error) {
+	id, err := identityFromPath(path)
+	if err == nil {
+		return id, nil
+	}
+	fi, serr := os.Stat(path)
+	if serr != nil {
+		return RootIdentity{}, serr
+	}
+	return identityOf(fi), nil
+}
+
 // PrepareAuthorization validates the user-selected root and produces
 // the confirmation request the UI must show. No traversal happens
 // here; nothing is granted yet.
@@ -233,16 +299,27 @@ func (m *Manager) PrepareAuthorization(rootPath, purpose, projectID, actor strin
 	if !fi.IsDir() {
 		return nil, errors.New("fileaccess: the selected root must be a folder (single files are analyzed per-file with a grant on their directory)")
 	}
+	id, err := statRoot(abs)
+	if err != nil {
+		return nil, fmt.Errorf("fileaccess: inspect selected root: %w", err)
+	}
 	return &AuthorizationRequest{
 		RootPath:  abs,
 		RootLabel: filepath.Base(strings.TrimRight(abs, string(os.PathSeparator))),
 		Limits:    limits, Purpose: purpose, ProjectID: projectID, Actor: actor,
-		createdAt: time.Now(), identity: identityOf(fi),
+		createdAt: time.Now(), identity: id,
 	}, nil
 }
 
 // ConfirmAuthorization creates the revocable grant after the user
 // confirmed the summary. The os.Root handle anchors all later access.
+// Revalidation sequence (run 44298066730 failure A): (1) path identity
+// compared against the request — a delete+recreate that reuses the
+// dev+ino pair is caught by the platform timestamp components; (2) the
+// identity of the OPENED root handle is compared again, so the grant is
+// anchored to the exact directory instance whose identity matched and
+// no stat->open TOCTOU window survives. On any mismatch the handle is
+// closed deterministically before returning.
 func (m *Manager) ConfirmAuthorization(req *AuthorizationRequest) (*Grant, error) {
 	if req == nil {
 		return nil, errors.New("fileaccess: nil authorization request")
@@ -256,12 +333,31 @@ func (m *Manager) ConfirmAuthorization(req *AuthorizationRequest) (*Grant, error
 	if err != nil {
 		return nil, fmt.Errorf("fileaccess: re-inspect selected root: %w", err)
 	}
-	if id := identityOf(fi); id != req.identity {
+	if id, ierr := statRoot(req.RootPath); ierr == nil {
+		if !sameRootIdentity(id, req.identity) {
+			return nil, ErrIdentityChanged
+		}
+	} else if !sameRootIdentity(identityOf(fi), req.identity) {
+		// The identity primitive failed but the path still exists:
+		// fail closed on whatever the weaker comparison can see.
 		return nil, ErrIdentityChanged
 	}
 	root, err := os.OpenRoot(req.RootPath)
 	if err != nil {
 		return nil, fmt.Errorf("fileaccess: open root: %w", err)
+	}
+	if hfi, herr := root.Stat("."); herr == nil {
+		// The handle-level re-check runs only where FileInfo carries
+		// the primary identity (Linux/darwin); on Windows the opened
+		// FileInfo has no file identity, and identityFromPath above
+		// already verified the real volume/file identity.
+		if infoIdentityIsPrimary() && !sameRootIdentity(identityOf(hfi), req.identity) {
+			_ = root.Close()
+			return nil, ErrIdentityChanged
+		}
+	} else {
+		_ = root.Close()
+		return nil, fmt.Errorf("fileaccess: inspect opened root: %w", herr)
 	}
 	g := &Grant{
 		ScopeID:   newScopeID(req.RootPath, req.identity),
@@ -644,8 +740,13 @@ func extensionAllowed(rel string, exts []string) bool {
 }
 
 // newScopeID derives a stable opaque scope ID from the root identity.
+// Every identity component participates so two different directory
+// instances (same path, replaced content) never share a scope ID.
 func newScopeID(root string, id RootIdentity) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d", root, id.Dev, id.Ino)))
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%d|%d|%d|%d|%d|%d|%d",
+		root, id.Dev, id.Ino, id.Size,
+		id.CtimeSec, id.CtimeNsec, id.BtimeSec, id.BtimeNsec,
+		id.MtimeSec, id.MtimeNsec)))
 	return "scope-" + hex.EncodeToString(h[:8])
 }
 
