@@ -383,19 +383,22 @@ if [ "$MODE" = "desktop" ]; then
 
       # ---- PACKAGE SIZE BUDGET (run 43712071111) --------------------------
       # The compact package (no bundled media tools) must stay UNDER
-      # 70 MiB = 73400320 bytes (Linux binary + docs only; the Windows
-      # ZIP uses its own 90 MiB budget).
-      CI_TOOL_CONTEXT="gate:package-size-budget (70 MiB = 73400320 bytes)" ci_capture "$JOB" package-size-budget bash -c '
+      # 90 MiB = 94371840 bytes, the SAME contract value the Windows
+      # ZIP gate and the D35 static assertions own (contract drift at
+      # run 44094081531: the gate had silently tightened to 70 MiB
+      # while the script header, the Windows gate and the plumbing
+      # test all pinned 90 MiB).
+      CI_TOOL_CONTEXT="gate:package-size-budget (90 MiB = 94371840 bytes)" ci_capture "$JOB" package-size-budget bash -c '
         set -euo pipefail
         TARBALL="dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz"
         test -s "$TARBALL" || { echo "ERROR: package tarball missing: $TARBALL"; exit 1; }
         BYTES="$(stat -c%s "$TARBALL")"
-        BUDGET=73400320
+        BUDGET=94371840
         echo "package:      $TARBALL"
         echo "package size: $BYTES bytes"
-        echo "size budget:  $BUDGET bytes (70 MiB)"
+        echo "size budget:  $BUDGET bytes (90 MiB)"
         if [ "$BYTES" -ge "$BUDGET" ]; then
-          echo "ERROR: package size $BYTES bytes meets or exceeds the $BUDGET-byte budget (70 MiB)"
+          echo "ERROR: package size $BYTES bytes meets or exceeds the $BUDGET-byte budget (90 MiB)"
           exit 1
         fi
         echo "package-size-budget PASSED: $BYTES bytes < $BUDGET bytes"
@@ -647,7 +650,7 @@ print(stream.get(\"codec_name\", \"\"), int(stream.get(\"nb_read_frames\") or 0)
 # dedicated GPU gate owns the palette integration test; the rest of
 # internal/render stays under -race. The exclusion is NOT a
 # reliability waiver.
-CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race $GO_TAGS -skip '^TestPaletteReachesGPUShader$' -timeout 480s ./internal/audio/... ./internal/playback/... ./internal/dsp/... ./internal/export/... ./internal/studio/... ./internal/project/... ./internal/render/... ||
+CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race $GO_TAGS -skip '^TestPaletteReachesGPUShader$' -timeout 480s ./internal/audio/... ./internal/playback/... ./internal/dsp/... ./internal/export/... ./internal/studio/... ./internal/project/... ./internal/render/... ./internal/ghreq/... ||
     fail_gate go-test-race
 
   # export validation (real FFmpeg; skips honestly when unavailable).

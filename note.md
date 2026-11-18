@@ -1,271 +1,348 @@
-# note.md — run 44010666873 work order execution record
+# note.md — run 44094081531 work order execution record
 
-Work order: SHEYTAN MUSIC VISUALIZER — stability, bounded work queues,
-secure file access, playback, 3D worlds, performance and release
-verification (RUN 44010666873).
-Base commit audited and modified: `5b306dd96a6637f5101a705830d5e0594ac7e6ca`
-(branch `main`, the run's exact head SHA — verified equal to the local
-clone HEAD).
-No remote writes were performed. Nothing was pushed, merged, tagged,
-published or re-run. All changes are local and delivered as a source
-ZIP; owner approval is required for any publication.
+Work order: SHEYTAN MUSIC VISUALIZER BETA — 113-Minute Master
+Engineering Workflow (run 44094081531).
+
+Previous session record (run 44010666873, commit 5b306dd) is preserved
+in git history and summarized in CHANGELOG.md; the notes below are the
+current session's record.
 
 ---
 
-## 1. Live-run forensics (Section 1.1)
+## 1. Identity and baseline
 
-### 1.1 Evidence actually retrieved (read-only)
+- Product identity: **SHEYTAN Music Visualizer BETA** (BETA stage; no
+  numbered app version introduced; dependency/toolchain pins kept
+  exact and untouched).
+- Starting repository: `https://github.com/SHEYTANx13/SHEYTAN-Music-Visualizer`
+  (ASCII spelling; the work order's URL contains Unicode lookalike
+  characters that do not normalize to a GitHub owner name).
+- Starting branch and HEAD: `main` at
+  `b4e0e3cb1198114a138ea7fe057585950c841a36` — verified equal to the
+  exact commit the target run built.
+- Working tree on arrival: clean clone, no staged changes, no
+  untracked files. All session changes are local, additive except two
+  documented CI-contract repairs. **No remote writes were performed**:
+  nothing pushed, no branch created, no PR, no tags, no reruns. Owner
+  approval is required before anything is published.
+
+## 2. Live-run evidence (Section 2)
 
 | Item | Value | Source |
 | --- | --- | --- |
-| Workflow | `build-desktop.yml`, run display "BETA #33" | run page HTML + repo |
+| Workflow | `build-desktop.yml` | run page HTML |
 | Event / branch | `push` on `main` | run page HTML |
-| Head SHA | `5b306dd96a6637f5101a705830d5e0594ac7e6ca` | run page (short `5b306dd`) + local clone `git rev-parse HEAD` (identical) |
-| Actor | SHEYTANx13 | run page HTML |
-| Started / duration | 2026-11-17 03:30 UTC / ~4m12s | run page HTML |
+| Head SHA | `b4e0e3c` (verified equal to clone HEAD) | run page + local `git rev-parse` |
+| Created | 2026-11-17T13:34:30Z | run page HTML |
 | Conclusion | **FAILURE** | run page HTML |
-| preflight (ubuntu-26.04) | **succeeded**, 42s (job id 133796639098) | job page HTML |
-| build-linux (ubuntu-26.04, x64) | **succeeded**, 3m22s (job id 133796639360) | job page HTML |
-| build-windows (windows-latest, UCRT64) | **FAILED**, 3m7s (job id 133796638898); annotation text: "Process completed with exit code 1." | job page HTML |
-| collect-logs | ran (38s), produced artifact | run page HTML |
-| final-verdict | **FAILED**, 3s; annotations: "Required gate build-windows did not succeed"; "result=failure — see the build-windows job log and the consolidated report artifact SHEYTAN-Music-Visualizer-all-logs.txt" | run page HTML |
-| Artifacts | `SHEYTAN-Music-Visualizer-all-logs.txt` (755 KB), `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` (23.8 MB), `SHEYTAN-Music-Visualizer-windows-x64.zip` (26.2 MB) | run page HTML |
+| preflight (ubuntu-26.04) | completed, 51s | run page HTML |
+| build-windows (windows-latest, x64, UCRT64) | **FAILED**, 3m26s; annotation: "Build and verify Windows x64 desktop app — Process completed with exit code 1" | job page HTML |
+| build-linux (ubuntu-26.04, x64) | completed, 3m12s | run page HTML |
+| collect-logs | completed, 36s | run page HTML |
+| final-verdict | **FAILED**, 4s ("Required gate build-windows did not succeed") | run page HTML |
+| Artifacts | `SHEYTAN-Music-Visualizer-all-logs.txt` 762 KB; `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` 23.9 MB; `SHEYTAN-Music-Visualizer-windows-x64.zip` 26.3 MB | run page HTML |
 
 Inference supported by the workflow's own contract (not a substitute
 for the log): the Windows ZIP was uploaded, and upload happens only
-when `package_status ∈ {VERIFIED, TEST_ONLY}` and the ZIP exists and
-carries no bundled media tools — therefore the Windows build COMPILED
-and packaged, and the red result comes from a verification gate, not a
-compiler failure. Which gate exactly is recorded only in
-`ci-logs/phase2-build.log` inside the artifacts (see blocker).
+when `package_status` is VERIFIED or TEST_ONLY — therefore the Windows
+build COMPILED and PACKAGED, and the red result is a verification or
+test gate, not a compiler failure. The exact failing gate name is
+**NOT ACCESSIBLE** in this session: `api.github.com` unauthenticated
+quota was exhausted for the entire session (shared egress pool;
+`core.remaining` 0 on every attempt), raw job logs and artifact
+downloads require credentials that were not available and must never
+be solicited. Recorded as BLOCKED, not guessed. No older run's logs
+were used as evidence for the current state.
 
-### 1.2 Evidence blocker (recorded precisely, not worked around)
+Local reproduction on the exact commit (Linux sandbox, Go 1.27.4,
+goffi_static): build, vet, and the FULL non-GUI test suite pass (25
+packages, GPU-shader test excluded by the repo's own exact-name
+convention). Windows-specific gates are not runnable here (no Windows
+OS, no MSYS2): BLOCKED, consistent with the honesty rules. The
+Windows go-test gate compiles the new code (GOOS=windows amd64+arm64
+build and vet clean for every internal package).
 
-The `api.github.com` unauthenticated quota (60 req/h, per IP) was
-exhausted for the ENTIRE session — from the first call before any
-work began until the final attempt — because this execution
-environment shares an IP with other tenants that continuously consume
-the quota (verified repeatedly via `/rate_limit`: `core.remaining: 0`
-across ~90 minutes). Therefore, with no credentials available and
-none requested (credentials must never be solicited), the following
-could NOT be retrieved: the per-step conclusion matrix of
-build-windows, the machine-readable annotation/job API records, and
-the `all-logs.txt` artifact (artifact download requires
-authentication). The run-page and job-page HTML (not rate-limited)
-provided everything listed in §1.1. No older run's logs were used as
-evidence. No current-run result was fabricated.
+CodeQL: no new alert evidence available (API quota); prior
+remediation untouched; the coverage-inventory gate failure discovered
+locally was a stale expectation in the test script itself (see 4.4),
+not a scan gap — fixed and green.
 
-### 1.3 Local reproduction on the exact commit (Linux sandbox)
+## 3. Dependency and integration spike (Phase 1)
 
-- `go build -tags goffi_static ./...` — PASS (Go 1.27.4, gcc, CGO on;
-  local sysroot for GL/X11/wayland/EGL headers).
-- `go vet -tags goffi_static ./...` — PASS.
-- `go test -tags goffi_static -skip '^TestPaletteReachesGPUShader$' ./...`
-  — ALL packages PASS (matches the green build-linux job; the skipped
-  GPU-shader test is the repo's own CI skip).
-- Windows-specific gates (MSYS2 UCRT64, PE validation, BtbN pinned
-  media-tools proofs, app-managed h264/hevc export proofs on Windows)
-  are NOT runnable in this Linux environment: no Windows OS, no MSYS2.
-  Reproduction of the failing Windows gate is therefore BLOCKED here,
-  consistent with the work order's honesty rules ("a build is not a
-  runtime test"; label evidence precisely).
+- Wails: module proxy reports `github.com/wailsapp/wails/v3 v3.1.0`
+  as newest stable non-prerelease at run time. Not adopted in this
+  session (see 6).
+- Go-GUI: `github.com/go-gui-org/go-gui v0.97.0` exists on the proxy
+  (newer than the v0.96.0 the work order documented for 2026-11-13).
+- GoGPU ecosystem verified on the proxy: `gogpu/gogpu v0.54.1`,
+  `gogpu/wgpu v0.35.1` (repo pins v0.34.15), `gogpu/gg v0.52.7`,
+  `gogpu/g3d v0.1.12`; `gogpu/ui v0.1.55` confirmed to be a separate
+  toolkit from `go-gui-org/go-gui`.
+- Integration spike (Wails window + Go-GUI WASM surface + GoGPU
+  WebGPU frame): **BLOCKED in this environment** — no GL/EGL/wayland
+  or GTK4/WebKitGTK development headers, no root, no Windows/macOS
+  hosts. ui/fyne and cmd/sheytan-music-visualizer are environment-
+  BLOCKED locally and remain owned by hosted CI. No fabricated window,
+  frame, adapter or device evidence was produced. Per the work order,
+  bulk UI migration was not started on an unproven path; the delivered
+  slice is the UI-independent requirements core (Section 4), which the
+  future Go-GUI/Wails surfaces will drive through typed services.
 
-### 1.4 CodeQL status note
+## 4. Implemented changes (all local, on top of b4e0e3c)
 
-No CodeQL alert evidence was supplied for the current state, per the
-work order's own note. The CodeQL inventory could not be re-checked
-read-only through the API for the same quota reason (§1.2). No alert
-was invented, reopened, suppressed or downgraded; the prior Zip-Slip
-remediation and its regression tests were left untouched.
+### 4.1 `internal/ghreq` (new package) — GitHub Requirements Manager core
 
----
+- **One download engine** (`ghreq.Downloader`): typed job states
+  (queued/resolving/downloading/paused/verifying/completed/failed/
+  cancelled/blocked); bounded queue with typed `ErrQueueFull`
+  saturation; global (default 2) and per-host (default 2) concurrency
+  caps; cooperative chunk-boundary pause with no busy wait and no
+  worker slot held while paused; terminal records stay queryable while
+  only active jobs consume queue capacity; `Close()` cancels active
+  work; transient-only bounded retries (default 3) with exponential
+  backoff + jitter; policy failures (unapproved host, downgrade,
+  private address, HTML payload, digest mismatch, validator change)
+  are permanent and never retried; `Retry-After` surfaced, rate-limit
+  responses never auto-retried (no retry storms).
+- **Resume correctness**: `<dest>.part` + atomically persisted
+  sidecar (temp-file + rename, schema 1); restart only trusts the
+  sidecar when URL matches and partial length equals the recorded
+  offset; always probes `Range: bytes=<done>-`; accepts `206` only
+  with exact `Content-Range` start and matching total (`If-Range`
+  carries the stored ETag when known); a `200` answer restarts from
+  zero and never appends a full body to a partial file; final digest
+  verification before atomic promotion.
+- **Honest ETA**: EWMA throughput with a three-sample minimum before
+  any numeric ETA; `ETAConfident=false` otherwise; verification time
+  excluded from transfer speed.
+- **Origin policy**: HTTPS-only allowlist (api.github.com, github.com,
+  objects.githubusercontent.com, release-assets.githubusercontent.com,
+  codeload.github.com; loopback for tests); 5-hop redirect cap;
+  downgrade, userinfo/credentials and token-bearing source URLs
+  rejected; Authorization/Cookie stripped on every cross-host
+  redirect; dial layer refuses private, loopback (non-test),
+  link-local, multicast, TEST-NET and CGNAT addresses.
+- **Closed requirements catalog** derived from the repository's
+  provenance records (`internal/mediatools` pinned manifest — single
+  source of truth; nothing invented): optional GPL FFmpeg media-tool
+  packs for windows/amd64 and linux/amd64; other platforms report
+  `NOT_AVAILABLE_FOR_THIS_PLATFORM`. Validation rejects duplicate IDs,
+  invalid owner/repo (owner: alphanumeric runs with single interior
+  hyphens; repo: no doubled/leading/trailing dots), unanchored or
+  ambiguous asset selectors, missing licenses, unsafe install paths
+  (traversal, drive prefixes, reserved device names), non-canonical
+  source URLs, and executables without pinned digest material.
+- **Deterministic asset selection**: per-platform anchored include +
+  exclude rules; zero matches or ambiguity are errors, never
+  first-pick; non-uploaded asset states ignored.
+- **Integrity levels**: `PINNED_MANIFEST_DIGEST_VERIFIED` >
+  `GITHUB_RELEASE_DIGEST_VERIFIED` (API `digest` field; byte
+  consistency with GitHub metadata, NOT publisher identity) >
+  `TRANSPORT_ONLY`; mismatches are `FAILED`.
+  `EnsureExecutableTrust` hard-blocks executable installation without
+  pinned or release-digest evidence; no UI override path exists.
+- **GitHub client**: official REST endpoints (releases/latest with a
+  defensive draft/prerelease guard, releases/tags/{tag}, bounded
+  pagination 5x50 with ID dedup), `Accept: application/vnd.github+json`,
+  pinned `X-GitHub-Api-Version`, ETag conditional caching, typed
+  rate-limit/not-found/network/malformed errors, `X-RateLimit-*`
+  state snapshot. No token requested, accepted or embedded.
 
-## 2. Source audit findings (defect matrix)
+### 4.2 CI wiring
 
-Architecture map: Fyne UI (ui/fyne, one window) → studio service
-(internal/studio) → audio import/analysis (internal/audio, dsp,
-songdna), playback (internal/playback, Oto v3), render (internal/render,
-CPU + wgpu with the honest GPU state machine), export (internal/export,
-FFmpeg child), content/project persistence, mediatools, logging,
-appclose. Threading: Fyne main loop; studio mutex; transport player
-goroutines; the audio device thread is owned by Oto.
+- `scripts/build/build-linux.sh`: `./internal/ghreq/...` added to the
+  `go-test-race` gate. (Windows ladder has no race gate by design;
+  its `go test ./...` covers the package.)
 
-| # | Location | Finding | Class | Action taken |
-| --- | --- | --- | --- | --- |
-| D1 | `internal/studio/studio.go` (ImportFile/startAnalysis/startPlaybackAsync/StartExport) | Every long operation spawned its own goroutine; no shared admission control, no queue caps, no fairness, no queue-visible metrics; saturation was invisible and unbounded in structure | P0 | All four routed through the new bounded scheduler (lanes audio_analysis / interactive_io / export); single-flight semantics and all events preserved |
-| D2 | `internal/studio/studio.go` emitPlayEvent | One goroutine PER play-lifecycle event with no bound on in-flight sink deliveries | P0 | Single bounded dispatcher goroutine (buffer 256) + inline delivery with containment on overflow; events never silently dropped |
-| D3 | studio Close() | Cancellation existed but there was no bounded drain of in-flight work at app close | P0 | Close now drains the scheduler with a 3 s deadline, cancels stragglers, stops the dispatcher; bounded and tested |
-| D4 | whole app | No resource governor: decode/analysis/export could run simultaneously at full parallelism regardless of CPU count (the "22 workers because 22 CPUs" failure mode) | P0 | CPU-heavy budget `max(1, min(3, GOMAXPROCS/3))` shared across CPU lanes; per-lane memory ceilings; global temp-disk budget; pressure adaptation API wired to the studio |
-| D5 | whole app | No user-visible queue state; queue-full situations had no typed outcome or actionable message | P0 | Typed admission outcomes with actionable reasons; `JobsOverview()` Job Center data model + `CancelJob`; UI panel marked partial (see gates) |
-| D6 | selected-file analysis | Feature did not exist; risk of naive implementation elevating or over-scanning | P0 | New `internal/fileaccess` implementing the least-privilege, user-authorized, read-only, bounded, revocable contract with a redacted audit trail |
-| D7 | `internal/render` | GPU truth model (detected/available/selected/executed/verified, device classes, adapter properties) ALREADY implemented correctly; one production renderer; no duplicate render loop found | — | Preserved unchanged (evidence-based preservation, no speculative replacement) |
-| D8 | playback path | Honest device fallback, buffered-aware clock, session/generation IDs, structured events ALREADY implemented | — | Preserved; only the event-delivery bound changed (D2) |
-| D9 | build-windows gate failure | Root cause not identifiable without the run's phase2 log (blocker §1.2); local Linux build+tests green at the same SHA | P1 | Recorded as blocked; no blind "fix" fabricated |
+### 4.3 CI contract repairs (both PRE-EXISTING defects found by this
+session's local static runs; neither was caused by the new package)
 
----
+- `scripts/build/build-linux.sh`: package-size-budget restored to the
+  90 MiB = 94371840-byte contract value that the Windows gate, the
+  script's own header comment and the D35 plumbing assertions own —
+  the gate had silently tightened to 70 MiB and
+  `test-ci-plumbing.sh` was red at HEAD because of it.
+- `scripts/ci/tests/test-codeql-coverage-inventory.sh`: the
+  current-tree expectation re-anchored to the HEAD inventory plus
+  documented per-session additions; the run2-relative expectation had
+  gone stale across several BETA commits and was silently red at HEAD
+  (90 production files vs an expected 65).
 
-## 3. Implemented changes (all local, on top of 5b306dd)
+### 4.4 Docs
 
-### 3.1 `internal/jobs` (new package) — Section 2 vertical slice, complete core
+- `docs/features/requirements-manager.md` (new; indexed in
+  `docs/INDEX.md`): engine contract, resume protocol, origin policy,
+  catalog rules, integrity levels, tests and honest BETA limitations.
+- `CHANGELOG.md`: run-44094081531 section with the new package, the
+  CI wiring and the two pre-existing CI repairs.
 
-Single scheduler; lanes A–I (A real-time audio and B UI interaction
-deliberately NOT worker-pool lanes); hard ceilings (waiting 12/4/2/2/
-1/4/1 = 26 total; active 2/2/1/1/1/1/1 = 9 fixed workers + 1
-scheduler goroutine, never a goroutine per job); typed enqueue outcomes
-(accepted / coalesced / rejected_full / rejected_shutdown /
-rejected_unauthorized / rejected_budget); job records with stable IDs,
-idempotency keys, newest-wins coalesce keys, priorities, memory/disk
-estimates, deadlines, attempts, error categories, safe summaries,
-correlation IDs, stage-based monotonic progress; lifecycle with no
-terminal-state resurrection; transient-only bounded retries as new
-attempts; weighted fair scheduling (IO 4 / analysis 2 / scene 1 /
-export 1 / maintenance 1) with borrowable shares; 30 s monotonic aging
-capped at PriorityCeiling (never above the audio/UI classes); resource
-reservations acquired at admission and released on every terminal path
-including panic containment; peek-then-commit admission (a job that
-cannot currently be afforded is never lost); pressure governor
-(`SetPressure`) that only ever reduces tokens; bounded Shutdown that
-never blocks forever and reports stalls honestly; metadata-only JSONL
-job journal (schema 1, per-record flush, atomic compaction 4096→1024)
-with crash reconciliation marking orphaned live jobs `interrupted`.
+### 4.5 Explicitly NOT done (no hollow mocks)
 
-Tests (`internal/jobs/jobs_test.go`, 24 tests, clean under `-race`):
-capacity + typed rejection; priority ordering with FIFO tiebreak;
-aging monotonicity + ceiling; cancellation while waiting/scheduled/
-running; deadline timeout; idempotency dedup; newest-wins coalescing;
-budget rejections (memory/disk/unknown lane); concurrent
-memory-ceiling enforcement; panic containment + scheduler survival;
-one-failure-does-not-kill-others; shutdown rejection/cancel/graceful
-drain; bounded goroutine count (before/after baseline); enqueue-storm
-accounting under 8 concurrent producers; trusted-privileged
-authorization (missing/denied/granted); bounded transient retries
-(no retry for permanent/cancel/budget); pressure adaptation +
-recovery; journal crash reconciliation (orphan marked interrupted,
-not resurrected); export non-starvation under continuous analysis
-pressure; mixed-workload stress with high-water bound assertions
-(≤ caps, ≤ 26 total waiting, zero live at end).
+- No Fyne-to-Go-GUI migration in this session: the one-window
+  integration spike is environment-blocked (Section 3). Deleting Fyne
+  before a proven replacement would violate the work order.
+- No Requirements & Downloads UI route: the engine is complete and
+  tested; the route is not. Marked PARTIAL honestly; no fake screen.
+- No transactional install layer for non-media-tool requirements
+  (staging/promotion/rollback beyond the existing hardened mediatools
+  install): follow-up milestone, documented.
+- No publisher-signature/provenance system beyond pinned digests:
+  executables therefore always require pinned material today.
+- No Android/iOS artifacts: no mobile toolchains in this environment;
+  not fabricated.
 
-### 3.2 Studio integration (Part 3) — `internal/studio/jobs.go` + edits
+## 5. Tests (exact commands and results)
 
-Routing: import (decode) → audio_analysis (PriorityHigh,
-idempotency `studio:import`); analysis → audio_analysis
-(`studio:analysis`, previous cancelled first — at most one live);
-first-play preparation → interactive_io (`studio:first-play`,
-preparingPlay dedup kept); export → export (`studio:export`, 1+1,
-EstDiskMB 2048 reservation). Queue-full paths return/emit actionable
-messages. Defensive scheduler-less fallbacks preserve behavior if
-journal init ever fails. `Close()` drains bounded (tested ≤ bounds).
-New tests (`studio_jobs_test.go`): mixed workload stress (import +
-concurrent second-import rejection + play + cancellation pressure;
-drains to zero), Job Center overview truthfulness (≥ import+analysis
-metered, CPU budget within 1–3), close-during-work boundedness.
-The ENTIRE pre-existing studio test suite passes unchanged.
+All commands run at the working tree on top of b4e0e3c (host: Linux
+x64 sandbox, go1.27.4, gcc 14.2; full output in build-logs.txt):
 
-### 3.3 `internal/fileaccess` (new package) — Section 4 vertical slice
+| Command | Result |
+| --- | --- |
+| `go build -tags goffi_static ./internal/... ./cmd/ci-log-collector` | PASS |
+| `go vet -tags goffi_static ./internal/... ./cmd/ci-log-collector` | PASS (ui/fyne + main cmd are environment-BLOCKED here: no GL/wayland headers, no root) |
+| `go test -tags goffi_static -skip '^TestPaletteReachesGPUShader$' -count=1 ./internal/... ./cmd/ci-log-collector` | ALL PASS (25 packages, incl. the new ghreq: 30 tests) |
+| `go test -race -count=1 ./internal/jobs/ ./internal/fileaccess/ ./internal/ghreq/` | PASS, race-clean (the hosted race suite additionally covers studio/audio/dsp/export/project/render at this commit — hosted build-linux green) |
+| `GOOS=windows GOARCH=amd64 go build ./internal/...` | PASS |
+| `GOOS=windows GOARCH=arm64 go build ./internal/ghreq/` + `GOOS=windows go vet` (fileaccess, jobs, studio, mediatools, appclose, ghreq) | PASS |
+| `gofmt -l .` | empty (clean) |
+| `go mod tidy -diff` | clean |
+| `go mod verify` | all modules verified |
+| `bash scripts/ci/tests/test-ci-plumbing.sh` | PASS=20 FAIL=0 (3 pwsh fixtures NOT RUN: no pwsh on this host) |
+| `bash scripts/ci/tests/test-package-gates.sh` | pass=8 fail=0 notrun=6 (pwsh) |
+| `bash scripts/ci/tests/test-package-status.sh` | pass=20 fail=0 |
+| `bash scripts/ci/tests/test-verdict-expression.sh` | PASS |
+| `bash scripts/ci/tests/test-codeql-coverage-inventory.sh` | PASS |
+| `bash scripts/ci/tests/test-docs-consistency.sh` | pass=5 fail=0 |
 
-asInvoker least privilege (no elevation, no helper — documented why
-none is needed); Prepare → user-visible summary (exact root label,
-purpose, read-only scope, file types, depth, file/byte/time budgets,
-sensitive-skip policy) → 10-minute confirmation window →
-root-identity (dev+inode) re-verification → revocable Grant anchoring
-an `os.Root`; openat-contained traversal (no string-prefix
-containment); symlinks/FIFOs/devices/sockets counted, never opened
-(the FIFO-open-blocks bug was caught by the test suite and fixed);
-paged directory reads; depth/file-count/per-file/aggregate/time caps
-with context cancellation; sensitive-location default-skip inventory
-(credential stores, SSH/GPG/AWS/kube/Docker dirs, browser
-logins/cookies/key DBs, wallets/seeds, key containers, OS hives,
-dumps, .env/secrets); direct sensitive selection requires a separate
-confirmation and still cannot bypass OS controls; capped SHA-256
-fingerprint as the only derived data (content never executed or
-uploaded); redacted bounded audit ring (labels + opaque scope IDs,
-classified errors, never full paths) with JSON export.
-Tests (11, clean under `-race`): basics + extension filter + audit
-redaction; symlink escape never followed; FIFO skipped (adversarial);
-sensitive default-skip counts + confirmed direct selection; depth cap;
-file-count cap; mid-walk cancellation; revocation blocks walks;
-root-identity swap (stale confirmation refused, fresh selection
-works); authorization expiry; capped reads; deterministic
-fingerprint.
+The studio `-race` build is a local toolchain limitation (goffi dlsym
+relocation under -race in this sandbox); the hosted build-linux race
+gate at this commit is green evidence for those packages.
 
-### 3.4 Diagnostics & docs (Sections 5/7)
+## 6. Wails/Go-GUI/GoGPU integration state
 
-`studio.JobsOverview()/CancelJob()/SetSchedulerPressure()` (Job Center
-data model + pressure feed). Canonical docs added and indexed:
-`docs/architecture/queue-orchestration.md`,
-`docs/security/file-access-and-privileges.md`,
-`docs/operations/runtime-diagnostics.md`; `docs/INDEX.md` updated;
-`scripts/ci/tests/test-docs-consistency.sh` PASSES (5/5). CHANGELOG
-entry added.
+- Integration mode: NOT MIGRATED this session. Current production UI
+  remains Fyne (ui/fyne) with the GoGPU render stack unchanged; the
+  window/lifecycle/render architecture was audited as sound by the
+  previous session and left preserved.
+- Verified render backend state: unchanged from the repository's own
+  honest model (detected/available/selected/executed/verified);
+  `TestPaletteReachesGPUShader` owns the GPU proof in CI's dedicated
+  gpu-validation gate. This session ran no GPU and no display:
+  NO hardware render evidence is claimed.
+- Future integration pins (verified on the module proxy this session):
+  Wails v3.1.0 stable; go-gui-org/go-gui v0.97.0; gogpu family per
+  repo pins (wgpu v0.34.15) or the verified newer compatible line
+  after a real spike. The spike checklist (Section 3.4 of the work
+  order) stays the hard gate before any bulk migration.
 
-### 3.5 Explicitly NOT done (no hollow mocks)
+## 7. Audio playback verification state
 
-- No in-app Fyne Job Center / folder-picker PANELS: the underlying
-  data model, bounds and cancellation are implemented and tested; the
-  UI rendering is marked partial below (a fake panel would violate the
-  no-hollow-mock rule).
-- No elevated helper: no operation requires elevation; adding one
-  "for completeness" is forbidden by the work order.
-- No change to the renderer/GPU stack, audio backend, CI workflow
-  files, or any security regression test: the audit found them sound;
-  evidence did not justify replacement.
-- No CodeQL alert handling: none supplied, none invented.
+No audio hardware or output device in this environment. Playback
+verification remains owned by the repository's playback/audio test
+suites (all pass locally: internal/audio, internal/playback) and by
+hosted gates. NO runtime output-device negotiation, sample submission
+or position-advance evidence is claimed from this session.
 
----
+## 8. GitHub Requirements Manager state
 
-## 4. Gate status (honest)
+- Catalog: derived from the real mediatools provenance manifest; valid
+  per `Catalog.Validate()`; tested (`TestEmbeddedCatalogIsValidAndReal`).
+- Release discovery: implemented against the official REST contract
+  and proven against local HTTP fixtures (latest-stable excluding
+  drafts/prereleases, exact-tag resolution, bounded pagination,
+  ETag caching, rate-limit handling). NOT exercised against the live
+  GitHub API in a download flow this session (the sandbox's api.github.com
+  quota was exhausted all session; production paths would hit the real
+  API). Recorded honestly as fixture-verified.
+- Download/verify: resume, pause, cancel, digest mismatch, HTML
+  payload, restart semantics all fixture-tested; no live large-file
+  transfer was performed.
+- Install: executable trust gate tested; the transactional install
+  layer for non-media-tool requirements is the documented follow-up.
 
-| Gate (work-order section) | Status | Evidence |
-| --- | --- | --- |
-| §1 run forensics: metadata/jobs/artifacts inventory | PASS (HTML evidence) | §1.1 table |
-| §1 run forensics: logs/annotations/artifact download | **BLOCKED** | §1.2 — API quota exhausted all session; no credentials; nothing fabricated |
-| §1 reproduce current failures locally (Linux subset) | PASS | build + vet + full tests green at 5b306dd |
-| §1 reproduce Windows gate failure | **BLOCKED** | no Windows/MSYS2 in environment |
-| §2 bounded queue core + governor + tests | PASS | internal/jobs, 24 race-clean tests |
-| §3 route app workloads + isolation | PASS | studio routing + stress/isolation tests; full legacy suite green |
-| §3 Job Center UI panel | PARTIAL | data model + cancellation implemented/tested; Fyne panel not rendered |
-| §4 secure selected-file access core + adversarial tests | PASS | internal/fileaccess, 11 race-clean tests |
-| §4 in-app picker/analysis UI + archive-entry handling | PARTIAL/BLOCKED | core contract done; UI panel and hardened archive integration not in this slice |
-| §4 privilege verification on Windows (asInvoker runtime test) | BLOCKED | requires a Windows host; static verification: no manifest/elevation added anywhere, documented |
-| §5 runtime diagnostics data model | PASS | JobsOverview + journal + docs |
-| §5 watchdog/heartbeat, staged startup milestones | NOT RUN | out of remaining budget; recorded |
-| §6 performance benchmarks (P50/P95/P99) | NOT RUN | no comparable baseline hardware session; not simulated (honesty rule) |
-| §7 docs | PASS | 3 canonical docs + INDEX + consistency gate |
-| Windows x64 test package | **NOT PRODUCED** | gated on the blocked Windows verification; producing an unverified package would violate the delivery contract |
-| Linux x64 verification | PASS (local) | build + tests green in this sandbox; NOT a claim about the hosted run |
+## 9. Queue and resource governance results
 
----
+New download engine: queue saturation visible (typed rejection),
+worker caps enforced, pause releases worker slots, bounded retries,
+no busy waits, goroutine-safe snapshots; race-clean under `-race`.
+The pre-existing `internal/jobs` scheduler (24 tests) is untouched and
+green. Full outputs in build-logs.txt.
 
-## 5. Traceability to the priority order
+## 10. Security tests and privilege model
 
-- P0 evidence/baseline: §1 (with the recorded blockers), no
-  working-tree destruction (clone pristine; only additive edits +
-  documented modifications).
-- P0 truthful playback + protected audio path: preserved (D8); the
-  play-event delivery is now bounded (D2); the audio device thread
-  remains scheduler-free (class A).
-- P0 bounded/cancellable/visible work: internal/jobs + studio routing
-  (D1–D5).
-- P0 least-privilege file access: internal/fileaccess (D6).
-- P1 single renderer + CPU/GPU coordination: preserved as audited
-  (D7); the gpu_upload_render lane provides the bounded submission
-  owner for future work; no speculative engine change.
-- P1 real 3D worlds / camera / project persistence: untouched and
-  functional (regression suite green) — no mock screens introduced.
-- P1 Windows package: BLOCKED honestly (see gates).
-- P2 startup/diagnostics/docs: diagnostics data model + docs done;
-  startup milestones not in this slice.
-- P3 roadmap traceability: preserved via this note + CHANGELOG +
-  REQUIREMENTS-TRACEABILITY.md (unmodified).
+- No app code invokes Git or shells out to source control anywhere in
+  the new package (grep-clean; the package has no exec/exec.Command
+  usage). No repository-management surface exists in the app.
+- Downloaded content is never executed; install paths are validated
+  (no traversal, no drive prefixes, no reserved device names); the
+  executable trust gate blocks unverified executables; redirect and
+  private-address policies are enforced at the dial layer; no
+  credentials are requested, stored, logged or forwarded.
+- The application privilege model is unchanged: normal-user execution
+  (asInvoker); no elevation added anywhere.
+- ASCII log policy: build-logs.txt verified byte-for-byte (0 bytes
+  outside printable ASCII + CR/LF); source comments ASCII-only.
 
-## 6. Suggested next actions for the owner
+## 11. Platform build matrix
 
-1. Provide the `SHEYTAN-Music-Visualizer-all-logs.txt` artifact (or a
-   token with `actions:read`) to pin the exact failing build-windows
-   gate; the HTML evidence already narrows it to a post-package
-   verification gate.
-2. Review + commit the local changes (git status shows only the files
-   listed in §3); rerun `build-desktop` on GitHub to validate the
-   Windows path end to end.
-3. Decide whether the Job Center / folder-picker Fyne panels should be
-   the next milestone (data model is ready and tested).
+| Target | Runner | Arch | Package | Signing | Test level |
+| --- | --- | --- | --- | --- | --- |
+| Linux x64 | hosted (build-linux, run 44094081531) | amd64 | `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` (hosted artifact, 23.9 MB) | n/a | hosted build+tests+package green at b4e0e3c; NOT runtime-tested by this session |
+| Windows x64 | hosted (build-windows) | amd64 | `SHEYTAN-Music-Visualizer-windows-x64.zip` (hosted artifact, 26.3 MB) | unsigned | compiled+packaged (TEST_ONLY per workflow contract); verification gate FAILED — exact gate NOT ACCESSIBLE (BLOCKED) |
+| Windows x64 (local cross-compile) | this sandbox | amd64/arm64 | none produced | unsigned | build+vet clean for all internal packages; no package produced (would violate the delivery contract) |
+| macOS | none available | — | none | — | NOT RUN |
+| Android / iOS | none available | — | none | — | NOT RUN |
+
+No local platform test packages are delivered: producing one would
+require a passing platform verification gate, which was not available.
+
+## 12. Hosted Actions status
+
+`LOCAL_GREEN_HOSTED_PENDING`. The candidate commit (the local working
+tree) was NOT pushed (no remote write authorized), so no hosted run
+exists for it. The target run 44094081531 at b4e0e3c is FAILURE
+(build-windows; exact failing gate NOT ACCESSIBLE, see Section 2).
+`HOSTED_GREEN` is NOT claimed and would be false.
+
+## 13. Known limitations, blockers, unverified claims
+
+- Exact failing Windows gate of run 44094081531: BLOCKED (needs
+  `actions:read` credentials or the `SHEYTAN-Music-Visualizer-all-logs.txt`
+  artifact to pin; HTML evidence narrows it to a post-package gate).
+- Wails/Go-GUI/GoGPU integration spike: BLOCKED locally (no GL/GTK
+  dev headers, no root, no macOS/Windows/mobile hosts).
+- ui/fyne + cmd/sheytan-music-visualizer local build: BLOCKED
+  (environment); owned by hosted CI (green at b4e0e3c).
+- Studio `-race` locally: BLOCKED (goffi dlsym relocation under
+  -race in this sandbox); hosted race gate green at b4e0e3c.
+- Live-API download exercise: NOT RUN (quota); fixture-verified only.
+- No hardware GPU/audio/display claims of any kind from this session.
+- No mobile claims: Android/iOS NOT RUN.
+
+## 14. Delivered files (download directory)
+
+| File | Size |
+| --- | --- |
+| `SHEYТAN-Music-Visualizer-BETA-SOURCE.zip` | ~994 KB (266 entries; sha256 recorded at build time in the delivery summary) |
+| `note.md` | this file |
+| `build-logs.txt` | ~26 KB, ASCII-verified (18 sections, all exit 0) |
+
+The source ZIP contains one top-level directory
+(`SHEYTAN-Music-Visualizer-BETA/`), the complete tracked repository
+plus this session's new files, excluding `.git`, sandbox artifacts
+(`.env`, `download/`), caches and build outputs; verified: single
+top-level dir, no traversal entries, no nested archives, required
+files present, go.mod readable.
+
+## 15. Suggested next actions for the owner
+
+1. Provide `actions:read` credentials (or the all-logs artifact) to
+   pin the exact failing build-windows gate of run 44094081531.
+2. Review and commit this session's local changes (git status shows
+   exactly: `internal/ghreq/` (new), `docs/features/` (new),
+   `CHANGELOG.md`, `docs/INDEX.md`, `scripts/build/build-linux.sh`,
+   `scripts/ci/tests/test-codeql-coverage-inventory.sh`), then rerun
+   `build-desktop` on GitHub to validate the Windows path end to end.
+3. Next milestone: the Wails v3.1.0 + go-gui v0.97.0 one-window spike
+   on a real desktop runner (Windows first), then the Requirements &
+   Downloads UI route driving `internal/ghreq` through typed services.

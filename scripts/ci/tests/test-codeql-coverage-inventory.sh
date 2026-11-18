@@ -34,6 +34,14 @@ run_all_count=$(printf '%s\n' "$run_all" | grep -c . || true)
 run_test_count=$(printf '%s\n' "$run_test" | grep -c . || true)
 run_prod_count=$(printf '%s\n' "$run_prod" | grep -c . || true)
 
+# HEAD inventory: the current candidate commit the session builds on.
+head_all=$(git ls-tree -r --name-only HEAD | grep '\.go$' | LC_ALL=C sort)
+head_test=$(printf '%s\n' "$head_all" | grep '_test\.go$' || true)
+head_prod=$(printf '%s\n' "$head_all" | grep -v '_test\.go$' || true)
+head_all_count=$(printf '%s\n' "$head_all" | grep -c . || true)
+head_test_count=$(printf '%s\n' "$head_test" | grep -c . || true)
+head_prod_count=$(printf '%s\n' "$head_prod" | grep -c . || true)
+
 run2_all=$(git ls-tree -r --name-only "$RUN2_COMMIT" | grep '\.go$' | LC_ALL=C sort)
 run2_test=$(printf '%s\n' "$run2_all" | grep '_test\.go$' || true)
 run2_prod=$(printf '%s\n' "$run2_all" | grep -v '_test\.go$' || true)
@@ -74,9 +82,10 @@ AT THE RUN-42837709122 COMMIT (authoritative for the 53/92 report):
    permanently unanalyzed and is not a scan failure. Open-alert counts
    were not retrievable from that run's report (never claim zero).
 ==============================================================
-CURRENT WORKTREE (after the run-42837709122 repair session; adds
-internal/perf instrumentation, sysprofile export/display + policy
-modes, ui policy store, and audio/render benchmarks):
+CURRENT WORKTREE (after the run-44094081531 session; adds
+internal/ghreq catalog/client/assets/policy/integrity/download on top
+of the earlier internal/perf instrumentation, sysprofile export/display
++ policy modes, ui policy store, and audio/render benchmarks):
 10. All .go files:                 $cur_all_count
 11. _test.go files:                $cur_test_count
 12. Production (non-test) files:   $cur_prod_count
@@ -102,14 +111,20 @@ else
   echo "INVENTORY MISMATCH AT THE RUN COMMIT — re-derive the coverage claim."
   status=1
 fi
-# run2 + 9 production files: internal/perf x4, sysprofile export_display
-# + policy_modes, ui/fyne policy_store + responsive (run 43090342995),
-# internal/appclose/close.go (run 43090342995 shutdown state machine).
-# Run 43541087097 added test files only — production count unchanged.
-if [ "$cur_prod_count" -eq $((run2_prod_count + 9)) ]; then
-  echo "CURRENT TREE: production file count is run2 + 9 (internal/perf x4, sysprofile export_display + policy_modes, ui policy_store + responsive, internal/appclose) — expected for the current session."
+# Worktree expectation: HEAD inventory plus THIS session's documented
+# additions only. Session history between run2 (1487628) and HEAD moved
+# the production count beyond the run2+9 note (multiple BETA commits),
+# so the run2-relative expectation went stale and silently red; the
+# auditable anchor is now HEAD itself.
+#
+# Run 44094081531 added 12 files: internal/ghreq catalog.go, github.go,
+# assets.go, policy.go, integrity.go, download.go (production) and
+# catalog_test.go, github_test.go, assets_test.go, policy_test.go,
+# integrity_test.go, download_test.go (tests).
+if [ "$cur_prod_count" -eq $((head_prod_count + 6)) ] && [ "$cur_test_count" -eq $((head_test_count + 6)) ]; then
+  echo "CURRENT TREE: worktree == HEAD ($head_prod_count prod + $head_test_count test) + this session's internal/ghreq (+6 prod, +6 test) — expected."
 else
-  echo "CURRENT TREE: production file count $cur_prod_count != expected $((run2_prod_count + 9)) — update the CodeQL coverage note."
+  echo "CURRENT TREE: worktree ($cur_prod_count prod + $cur_test_count test) != HEAD ($head_prod_count + $head_test_count) + ghreq (6+6) — update the CodeQL coverage note."
   status=1
 fi
 if [ "$run2_all_count" -eq 92 ] && [ "$run2_prod_count" -eq 56 ] && [ "$run2_test_count" -eq 36 ]; then

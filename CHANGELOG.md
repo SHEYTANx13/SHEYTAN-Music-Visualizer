@@ -1,5 +1,40 @@
 # Changelog
 
+## Run 44094081531 work order - GitHub Requirements Manager core (2026-11-18)
+
+- **`internal/ghreq` (new)**: the package-acquisition core for the
+  GitHub Requirements Manager and Download Center. One resumable
+  download engine (typed job states, bounded queue with typed
+  saturation, global/per-host concurrency caps, cooperative pause,
+  transient-only bounded retries with jitter, `Retry-After` surfaced
+  without auto-retry); strict 206/Content-Range/If-Range resume
+  validation with atomic sidecar persistence and safe 200-restart;
+  EWMA throughput with a minimum-sample rule before any numeric ETA;
+  closed validated requirements catalog derived from the mediatools
+  provenance manifest; official GitHub REST discovery (latest stable,
+  exact tag, bounded pagination, ETag caching, rate-limit state);
+  deterministic platform asset selection (no first-pick, no source
+  archives); HTTPS-only allowlisted origin policy with redirect
+  validation, credential stripping and private-address dial refusal;
+  integrity classification (pinned manifest digest / GitHub release
+  digest / transport only) with a hard executable trust gate. 30
+  tests, race-clean; wired into the platform go-test gates and the
+  Linux race gate. No UI route yet (documented PARTIAL); no Git or
+  source-control surface anywhere in the package.
+- **Docs**: `docs/features/requirements-manager.md` added and indexed.
+- **CI**: `./internal/ghreq/...` added to the `go-test-race` gate in
+  `scripts/build/build-linux.sh`.
+- **CI repairs (both pre-existing defects found by this session's
+  local static runs, not caused by the new package)**:
+  `scripts/build/build-linux.sh` package-size-budget restored to the
+  90 MiB = 94371840-byte contract value the Windows gate, the script
+  header comment and the D35 plumbing assertions own (the gate had
+  silently tightened to 70 MiB; `test-ci-plumbing.sh` was red at HEAD
+  because of it); `scripts/ci/tests/test-codeql-coverage-inventory.sh`
+  current-tree expectation re-anchored to the HEAD inventory plus
+  documented per-session additions (the run2-relative expectation had
+  gone stale across several BETA commits and was silently red at HEAD).
+
 ## Run 44010666873 work order — bounded work orchestration, secure selected-file analysis (2026-11-17)
 
 - **`internal/jobs` (new)**: the single app-owned bounded work
