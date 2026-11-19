@@ -466,7 +466,7 @@ jobs:
           SHEYTAN_BUILD_COMMIT: ${{ github.sha }}
           SHEYTAN_BUILD_DATE: ${{ steps.meta.outputs.build_date }}
           SHEYTAN_BUILT_BY: github-actions
-          SHEYTAN_BUILD_VERSION: ${{ github.ref_name }}
+          SHEYTAN_BUILD_VERSION: BETA
         run: |
           ./scripts/build/build-windows.ps1
           exit $LASTEXITCODE
@@ -662,6 +662,17 @@ jobs:
           Add-Content -Path ci-logs/setup-blocked.log -Value $lines -Encoding utf8NoBOM
           Get-Content ci-logs/setup-blocked.log
 
+      - name: Validate ASCII log contract (byte-level gate)
+        if: always()
+        shell: pwsh
+        run: |
+          $logs = @(Get-ChildItem ci-logs -Filter *.log | ForEach-Object { $_.FullName })
+          if ($logs.Count -eq 0) { Write-Error "no log files under ci-logs"; exit 1 }
+          $lastExit = 0
+          go run ./cmd/civalidate @logs
+          $lastExit = $LASTEXITCODE
+          exit $lastExit
+
       - name: Upload Windows log part
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -777,7 +788,7 @@ jobs:
           SHEYTAN_BUILD_COMMIT: ${{ github.sha }}
           SHEYTAN_BUILD_DATE: ${{ steps.meta.outputs.build_date }}
           SHEYTAN_BUILT_BY: github-actions
-          SHEYTAN_BUILD_VERSION: ${{ github.ref_name }}
+          SHEYTAN_BUILD_VERSION: BETA
         run: |
           set -o pipefail
           bash scripts/build/build-linux.sh --mode desktop 2>&1 | tee ci-logs/linux-build.log
@@ -913,6 +924,12 @@ jobs:
             date -u '+blocked_utc=%Y-%m-%dT%H:%M:%SZ'
           } | tee ci-logs/setup-blocked.log
 
+      - name: Validate ASCII log contract (byte-level gate)
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          go run ./cmd/civalidate ci-logs/*.log
+
       - name: Upload Linux log part
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -928,6 +945,146 @@ jobs:
   # workflow's own jobs, and this workflow's verdict can never depend on
   # CodeQL completion or success.
 
+  build-macos:
+    # INDEPENDENT evidence job for the macOS desktop target (run
+    # 44330231458 update). Required. The macOS gate contract is a REAL
+    # but REDUCED subset of the Linux contract; the not-yet-ported
+    # parity gates are recorded BLOCKED inside the job (never PASS) and
+    # the produced package is TEST_ONLY until they are ported and pass
+    # on a hosted macOS runner.
+    name: build-macos (arm64 desktop, reduced parity set)
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Bootstrap CI log directories (guaranteed evidence)
+        run: bash scripts/ci/bootstrap-logs.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build and verify macOS arm64 desktop app
+        env:
+          SHEYTAN_BUILD_COMMIT: ${{ github.sha }}
+          SHEYTAN_BUILD_VERSION: BETA
+          SHEYTAN_BUILT_BY: github-actions
+        run: |
+          set -Eeuo pipefail
+          bash scripts/build/build-macos.sh
+
+      - name: Validate ASCII log contract (byte-level gate)
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          go run ./cmd/civalidate ci-logs/*.log
+
+      - name: Upload macOS log part
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-logs-part-attempt${{ github.run_attempt }}
+          path: ci-logs
+          if-no-files-found: error
+
+  build-android:
+    # EXPERIMENTAL (run 44330231458 update): compile smoke only. Wails
+    # mobile is experimental and the GoGPU native ANativeWindow backend
+    # is documented as planned, not shipped. No APK, no emulator or
+    # device validation, no GPU claim. Not a required gate; failures
+    # keep the run red (honest) without blocking desktop evidence.
+    name: build-android (EXPERIMENTAL compile smoke)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Bootstrap CI log directories (guaranteed evidence)
+        run: bash scripts/ci/bootstrap-logs.sh
+
+      - name: Setup Android NDK (experimental compile smoke)
+        run: |
+          set -Eeuo pipefail
+          echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
+          ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "ndk: NOT PRE-INSTALLED"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Android compile smoke (no APK claim)
+        run: |
+          set -Eeuo pipefail
+          bash scripts/build/build-android.sh
+
+      - name: Validate ASCII log contract (byte-level gate)
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          go run ./cmd/civalidate ci-logs/*.log
+
+      - name: Upload Android log part
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-logs-part-attempt${{ github.run_attempt }}
+          path: ci-logs
+          if-no-files-found: error
+
+  build-ios:
+    # EXPERIMENTAL (run 44330231458 update): compile smoke only. iOS
+    # requires macOS and full Xcode; Wails classifies iOS as
+    # experimental and the GoGPU native CAMetalLayer backend is
+    # documented as planned, not shipped. No simulator validation, no
+    # signing, no GPU claim. Not a required gate.
+    name: build-ios (EXPERIMENTAL compile smoke)
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Bootstrap CI log directories (guaranteed evidence)
+        run: bash scripts/ci/bootstrap-logs.sh
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: iOS compile smoke (no simulator or signing claim)
+        run: |
+          set -Eeuo pipefail
+          bash scripts/build/build-ios.sh
+
+      - name: Validate ASCII log contract (byte-level gate)
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          go run ./cmd/civalidate ci-logs/*.log
+
+      - name: Upload iOS log part
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ios-logs-part-attempt${{ github.run_attempt }}
+          path: ci-logs
+          if-no-files-found: error
+
   collect-logs:
     name: collect-logs (single consolidated report evidence)
     # always() so a failed build job still yields its report;
@@ -936,7 +1093,7 @@ jobs:
     # reached a TERMINAL state before this job starts — the collector
     # never observes an in_progress/pending job conclusion (a defensive
     # IN_PROGRESS classification still exists in the collector).
-    needs: [preflight, build-windows, build-linux]
+    needs: [preflight, build-windows, build-linux, build-macos, build-android, build-ios]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -992,6 +1149,33 @@ jobs:
           name: linux-logs-part-attempt${{ github.run_attempt }}
           path: ci-parts/linux-logs-part-attempt${{ github.run_attempt }}
 
+      - name: Download macOS log part
+        id: download_macos
+        if: ${ always() && !cancelled() }
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-logs-part-attempt${{ github.run_attempt }}
+          path: ci-parts/macos-logs-part-attempt${{ github.run_attempt }}
+
+      - name: Download Android log part
+        id: download_android
+        if: ${ always() && !cancelled() }
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-logs-part-attempt${{ github.run_attempt }}
+          path: ci-parts/android-logs-part-attempt${{ github.run_attempt }}
+
+      - name: Download iOS log part
+        id: download_ios
+        if: ${ always() && !cancelled() }
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ios-logs-part-attempt${{ github.run_attempt }}
+          path: ci-parts/ios-logs-part-attempt${{ github.run_attempt }}
+
       - name: Write run manifest
         if: ${{ always() && !cancelled() }}
         env:
@@ -1006,9 +1190,15 @@ jobs:
           RESULT_PREFLIGHT: ${{ needs.preflight.result }}
           RESULT_WINDOWS: ${{ needs.build-windows.result }}
           RESULT_LINUX: ${{ needs.build-linux.result }}
+          RESULT_MACOS: ${{ needs.build-macos.result }}
+          RESULT_ANDROID: ${{ needs.build-android.result }}
+          RESULT_IOS: ${{ needs.build-ios.result }}
           DOWNLOAD_PREFLIGHT: ${{ steps.download_preflight.outcome }}
           DOWNLOAD_WINDOWS: ${{ steps.download_windows.outcome }}
           DOWNLOAD_LINUX: ${{ steps.download_linux.outcome }}
+          DOWNLOAD_MACOS: ${{ steps.download_macos.outcome }}
+          DOWNLOAD_ANDROID: ${{ steps.download_android.outcome }}
+          DOWNLOAD_IOS: ${{ steps.download_ios.outcome }}
         run: |
           set -Eeuo pipefail
           mkdir -p ci-parts
@@ -1017,6 +1207,9 @@ jobs:
             echo "preflight=${DOWNLOAD_PREFLIGHT:-not-run}"
             echo "windows=${DOWNLOAD_WINDOWS:-not-run}"
             echo "linux=${DOWNLOAD_LINUX:-not-run}"
+            echo "macos=${DOWNLOAD_MACOS:-not-run}"
+            echo "android=${DOWNLOAD_ANDROID:-not-run}"
+            echo "ios=${DOWNLOAD_IOS:-not-run}"
             echo "(CodeQL is an independent workflow; its artifacts are neither downloaded nor consolidated here)"
             echo "=== downloaded evidence tree ==="
             find ci-parts -maxdepth 4 -type f -printf '%P\n' | sort || true
@@ -1301,7 +1494,7 @@ jobs:
   # failure (reported by the failing job itself and here).
   final-verdict:
     name: final-verdict (all required gates must be green)
-    needs: [preflight, build-windows, build-linux, collect-logs]
+    needs: [preflight, build-windows, build-linux, build-macos, build-android, build-ios, collect-logs]
     if: ${{ always() && !cancelled() }}
     timeout-minutes: 5
     permissions:
@@ -1326,15 +1519,30 @@ jobs:
           # cannot shadow any Actions context name.
           # scripts/ci/tests/test-verdict-expression.sh asserts this
           # shape statically for every workflow file in preflight.
-          for gate in preflight build-windows build-linux collect-logs; do
+          # build-macos is REQUIRED (desktop parity target, reduced
+          # parity set documented in-job). build-android and build-ios
+          # are EXPERIMENTAL compile-smoke evidence jobs: their results
+          # are reported truthfully here and in the consolidated report,
+          # but they do not turn the final verdict red (they claim no
+          # runtime parity; see the job headers).
+          for gate in preflight build-windows build-linux build-macos build-android build-ios collect-logs; do
             case "$gate" in
               preflight)     result="${{ needs.preflight.result }}" ;;
               build-windows) result="${{ needs.build-windows.result }}" ;;
               build-linux)   result="${{ needs.build-linux.result }}" ;;
+              build-macos)   result="${{ needs.build-macos.result }}" ;;
+              build-android) result="${{ needs.build-android.result }}" ;;
+              build-ios)     result="${{ needs.build-ios.result }}" ;;
               collect-logs)  result="${{ needs.collect-logs.result }}" ;;
               *)             result="unknown" ;;
             esac
             echo "${gate}: ${result}"
+            if [ "$gate" = "build-android" ] || [ "$gate" = "build-ios" ]; then
+              if [ "$result" != "success" ]; then
+                echo "::warning title=EXPERIMENTAL gate ${gate} did not succeed::result=${result} — experimental compile smoke is non-required; the result is reported truthfully in the consolidated report"
+              fi
+              continue
+            fi
             if [ "$result" != "success" ]; then
               echo "::error title=Required gate ${gate} did not succeed::result=${result} — see the ${gate} job log and the consolidated report artifact SHEYTAN-Music-Visualizer-all-logs.txt"
               failed=1

@@ -1,6 +1,7 @@
 package cilog
 
 import (
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/asciilog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,7 @@ func TestAllJobsHaveLogsReportComplete(t *testing.T) {
 	if res.Coverage != CoverageComplete {
 		t.Fatalf("coverage = %s, want COMPLETE", res.Coverage)
 	}
-	if !strings.Contains(report, "COMPLETE — every job that ran contributed its expected log part.") {
+	if !strings.Contains(report, "COMPLETE - every job that ran contributed its expected log part.") {
 		t.Fatal("report lacks COMPLETE coverage statement")
 	}
 	if strings.Contains(report, "MISSING LOG SOURCE: ") {
@@ -155,7 +156,7 @@ func TestMissingArtifactNamedAndIncomplete(t *testing.T) {
 	if !strings.Contains(report, "MISSING LOG SOURCE: build-windows (expected artifact directory \"windows-logs-part\" under parts root)") {
 		t.Fatal("report must name the job with the missing artifact")
 	}
-	if !strings.Contains(report, "Evidence coverage: INCOMPLETE — log sources are missing") {
+	if !strings.Contains(report, "Evidence coverage: INCOMPLETE - log sources are missing") {
 		t.Fatal("report must state INCOMPLETE coverage")
 	}
 	if !strings.Contains(report, "ARTIFACT: preflight-logs-part | FILE: p.log") {
@@ -255,7 +256,7 @@ func TestRedRunRecordsAllThreeFacts(t *testing.T) {
 		!strings.Contains(report, "MISSING LOG SOURCE: build-windows") {
 		t.Fatal("report must keep skipped and missing facts distinct")
 	}
-	if strings.Contains(report, "COMPLETE — every job") {
+	if strings.Contains(report, "COMPLETE - every job") {
 		t.Fatal("red run with missing source must not claim COMPLETE")
 	}
 }
@@ -263,6 +264,10 @@ func TestRedRunRecordsAllThreeFacts(t *testing.T) {
 // Fixture 10: unicode characters and filenames with spaces are
 // preserved.
 func TestUnicodeAndSpacedFilenamesPreserved(t *testing.T) {
+	// ASCII LOG CONTRACT (run 44330231458 remediation): the consolidated
+	// report is English ASCII only. Structure (including filenames with
+	// spaces) is preserved; non-ASCII filenames and content degrade
+	// deterministically to '?' instead of leaking non-ASCII bytes.
 	content := "ünïcodé π-content ✓\n"
 	opts, _ := fixture(t, []tJob{
 		{"preflight", ResultSuccess, "preflight-logs-part", false, map[string]string{
@@ -277,11 +282,16 @@ func TestUnicodeAndSpacedFilenamesPreserved(t *testing.T) {
 	if !strings.Contains(report, "FILE: build log with spaces.log") {
 		t.Fatal("spaced filename not preserved")
 	}
-	if !strings.Contains(report, "FILE: ünïcodé-π.log") {
-		t.Fatal("unicode filename not preserved")
+	if !strings.Contains(report, "FILE: ") || !strings.Contains(report, ".log") {
+		t.Fatal("filename section missing")
 	}
 	if !strings.Contains(report, "ünïcodé π-content ✓") {
-		t.Fatal("unicode content not preserved")
+		// degraded by contract: expected
+	} else {
+		t.Fatal("non-ASCII content must not survive into the consolidated report")
+	}
+	if rep := asciilog.Validate([]byte(report)); rep.Violations() > 0 {
+		t.Fatalf("consolidated report violates the ASCII contract: %+v", rep)
 	}
 }
 
@@ -322,7 +332,7 @@ func TestEmptyArtifactDirectoryIsMissingSource(t *testing.T) {
 
 // Fixture 11: a required job fails WITHOUT any textual error marker in
 // its captured logs. The failure index must derive the failure from the
-// job conclusion, and the overall result must be FAIL — the collector
+// job conclusion, and the overall result must be FAIL - the collector
 // must never convert a failed build job into a green report.
 func TestFailedJobWithoutErrorMarkerIsReportedAsFailure(t *testing.T) {
 	opts, _ := fixture(t, []tJob{
@@ -336,7 +346,7 @@ func TestFailedJobWithoutErrorMarkerIsReportedAsFailure(t *testing.T) {
 	if len(res.FailedJobs) != 1 || !strings.Contains(res.FailedJobs[0], "build-windows") {
 		t.Fatalf("failed jobs = %v, want exactly build-windows", res.FailedJobs)
 	}
-	if !strings.Contains(report, "JOB FAILURE: build-windows — workflow conclusion: failure") {
+	if !strings.Contains(report, "JOB FAILURE: build-windows - workflow conclusion: failure") {
 		t.Fatal("report must list the authoritative job conclusion failure")
 	}
 	if !strings.Contains(report, "failed WITHOUT any textual error marker") {
@@ -402,12 +412,26 @@ func TestDuplicateArtifactNamesAreHardError(t *testing.T) {
 // Fixture 15: multiline output (stderr interleaved) and unicode are
 // preserved verbatim in the raw section.
 func TestMultilineAndUnicodeRawPreserved(t *testing.T) {
+	// ASCII LOG CONTRACT: structure (lines, tabs, CRLF normalization) is
+	// preserved; non-ASCII characters degrade to '?' byte-for-byte.
 	content := "line1 stderr\nлиния-2 ✓\r\nline3\ttab\n"
 	opts, _ := fixture(t, []tJob{
 		{"build", ResultSuccess, "linux-logs-part", false, map[string]string{"m.log": content}},
 	})
 	_, report := mustCollect(t, opts)
-	if !strings.Contains(report, content) {
-		t.Fatal("multiline/unicode raw content not preserved verbatim")
+	if !strings.Contains(report, "line1 stderr") {
+		t.Fatal("first line not preserved")
+	}
+	if !strings.Contains(report, "line3\ttab") {
+		t.Fatal("tabbed line not preserved")
+	}
+	if strings.Contains(report, "линия-2 ✓") {
+		t.Fatal("non-ASCII raw content must not survive verbatim")
+	}
+	if strings.Contains(report, "\r\n") && !strings.Contains(report, "line1 stderr\n") {
+		t.Fatal("CRLF not normalized")
+	}
+	if rep := asciilog.Validate([]byte(report)); rep.Violations() > 0 {
+		t.Fatalf("consolidated report violates the ASCII contract: %+v", rep)
 	}
 }

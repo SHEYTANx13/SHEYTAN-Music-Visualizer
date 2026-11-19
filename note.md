@@ -1,348 +1,90 @@
-# note.md — run 44094081531 work order execution record
+# Execution note — run 44330231458 update
 
-Work order: SHEYTAN MUSIC VISUALIZER BETA — 113-Minute Master
-Engineering Workflow (run 44094081531).
+- Product: SHEYTAN Music Visualizer BETA
+- Execution start: 2026-11-18T20:05:19Z, execution end: 2026-11-18T20:24:00Z (elapsed within the 113-minute budget; ~19 minutes wall clock in the Linux implementation sandbox, all of it logged below)
+- Base (verified): `main` at `5395d8b9cdd04d50d5d56225be58b7c03cc6a664` — exactly the SHA of the failed Windows gate in the supplied report; remote slug verified ASCII `SHEYTANx13/SHEYTAN-Music-Visualizer` from the actual `origin` remote.
+- Work policy honored: local edits only. No push, no branch creation, no PR, no release, no repository settings change, no user data touched (worktree was clean at inspection).
 
-Previous session record (run 44010666873, commit 5b306dd) is preserved
-in git history and summarized in CHANGELOG.md; the notes below are the
-current session's record.
+## 1. What this update delivered
 
----
+### 1.1 Windows red gate repaired (the only failed gate, `build-windows/go-test`)
 
-## 1. Identity and baseline
+`TestSameInodeReplacementRequiresReconfirmation` failed on Windows with `same-(dev,ino) replacement accepted: <nil>`.
 
-- Product identity: **SHEYTAN Music Visualizer BETA** (BETA stage; no
-  numbered app version introduced; dependency/toolchain pins kept
-  exact and untouched).
-- Starting repository: `https://github.com/SHEYTANx13/SHEYTAN-Music-Visualizer`
-  (ASCII spelling; the work order's URL contains Unicode lookalike
-  characters that do not normalize to a GitHub owner name).
-- Starting branch and HEAD: `main` at
-  `b4e0e3cb1198114a138ea7fe057585950c841a36` — verified equal to the
-  exact commit the target run built.
-- Working tree on arrival: clean clone, no staged changes, no
-  untracked files. All session changes are local, additive except two
-  documented CI-contract repairs. **No remote writes were performed**:
-  nothing pushed, no branch created, no PR, no tags, no reruns. Owner
-  approval is required before anything is published.
+Root cause (measured from the actual source at the run SHA): the Windows identity primitive `identityFromPath` (internal/fileaccess/identity_windows.go) captured only volume serial + file index + mtime + size. A delete+recreate that reuses the same MFT record (volume serial + file index) while the recreated directory's mtime coincides is invisible to that tuple, so the stale confirmation was accepted. The Linux primitive (statx) carries a birth-time discriminator; Windows did not.
 
-## 2. Live-run evidence (Section 2)
+Fix: the Windows primitive now also captures the handle's `CreationTime` (per-instance discriminator) into the identity's birth-time fields via a new `filetimeUnixNanos` conversion (1601 epoch to Unix nanoseconds, 100 ns ticks). The comparison contract (`sameRootIdentity`) needed no change: birth time present on both sides now rejects the simulated same-file-id replacement deterministically, and mtime remains a second discriminator.
 
-| Item | Value | Source |
-| --- | --- | --- |
-| Workflow | `build-desktop.yml` | run page HTML |
-| Event / branch | `push` on `main` | run page HTML |
-| Head SHA | `b4e0e3c` (verified equal to clone HEAD) | run page + local `git rev-parse` |
-| Created | 2026-11-17T13:34:30Z | run page HTML |
-| Conclusion | **FAILURE** | run page HTML |
-| preflight (ubuntu-26.04) | completed, 51s | run page HTML |
-| build-windows (windows-latest, x64, UCRT64) | **FAILED**, 3m26s; annotation: "Build and verify Windows x64 desktop app — Process completed with exit code 1" | job page HTML |
-| build-linux (ubuntu-26.04, x64) | completed, 3m12s | run page HTML |
-| collect-logs | completed, 36s | run page HTML |
-| final-verdict | **FAILED**, 4s ("Required gate build-windows did not succeed") | run page HTML |
-| Artifacts | `SHEYTAN-Music-Visualizer-all-logs.txt` 762 KB; `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` 23.9 MB; `SHEYTAN-Music-Visualizer-windows-x64.zip` 26.3 MB | run page HTML |
+New regression tests: internal/fileaccess/identity_windows_test.go (Windows-only, compile-verified for windows/amd64, EXECUTION NOT VERIFIED locally — see section 3):
+- `TestWindowsIdentityCarriesCreationTime` — the primitive must carry a usable creation time and be stable across stats of the same instance.
+- `TestWindowsRecreatedDirectoryRejected` — a real delete+recreate must be rejected through the creation-time or file-id discriminator.
 
-Inference supported by the workflow's own contract (not a substitute
-for the log): the Windows ZIP was uploaded, and upload happens only
-when `package_status` is VERIFIED or TEST_ONLY — therefore the Windows
-build COMPILED and PACKAGED, and the red result is a verification or
-test gate, not a compiler failure. The exact failing gate name is
-**NOT ACCESSIBLE** in this session: `api.github.com` unauthenticated
-quota was exhausted for the entire session (shared egress pool;
-`core.remaining` 0 on every attempt), raw job logs and artifact
-downloads require credentials that were not available and must never
-be solicited. Recorded as BLOCKED, not guessed. No older run's logs
-were used as evidence for the current state.
+### 1.2 Build-log ASCII contract implemented end to end (Section 2.5 violations)
 
-Local reproduction on the exact commit (Linux sandbox, Go 1.27.4,
-goffi_static): build, vet, and the FULL non-GUI test suite pass (25
-packages, GPU-shader test excluded by the repo's own exact-name
-convention). Windows-specific gates are not runnable here (no Windows
-OS, no MSYS2): BLOCKED, consistent with the honesty rules. The
-Windows go-test gate compiles the new code (GOOS=windows amd64+arm64
-build and vet clean for every internal package).
+Measured violations on the attached run log (1,383 `===`, 640 `---`, 242 non-ASCII chars / 699 bytes >= 0x80, 4,354 ANSI escape bytes, 3 BOMs) are addressed at the SOURCE, plus a byte-level validator gate:
 
-CodeQL: no new alert evidence available (API quota); prior
-remediation untouched; the coverage-inventory gate failure discovered
-locally was a stale expectation in the test script itself (see 4.4),
-not a scan gap — fixed and green.
+- internal/asciilog — new canonical implementation: `Sanitize` (BOM strip, ANSI CSI/OSC/two-char escape strip, stray-ESC neutralization, CRLF to LF, non-ASCII to '?', C0/DEL to '?', `=`/`-` runs clamped to two) and `Validate` (exact byte-class counts, same metrics as the evidence scan). Unit tested.
+- scripts/ci/capture.sh (Linux producer): new record markers `:: COMMAND BEGIN :: / :: OUTPUT ... :: / :: END OUTPUT :: / :: COMMAND END ::` (no `===`/`---`), streaming `ci_sanitize` (sed implementation of the same byte rules) piped between every captured command and the log/console, and sanitized record header values. PIPESTATUS[0] semantics preserved — original exit codes are never masked.
+- scripts/ci/Capture-Step.ps1 (Windows producer): same markers, `ConvertTo-AsciiLogLine` sanitizer applied to every captured line before Tee-Object, sanitized header values.
+- internal/cilog/gate.go: record-marker regexes and the `--- FAIL:` root-cause signature updated in lockstep (`-- FAIL:` matches sanitized output).
+- internal/cilog/collect.go: the consolidated report passes through the canonical sanitizer immediately before write, and the written bytes are validated — a validator violation fails the collector (fail closed). The report's own `heavySeparator` and 41 em-dashes in emitted strings are now ASCII. Corresponding test assertions updated (collect_test.go, githubapi_test.go, gate_test.go, classification_test.go).
+- cmd/civalidate — new byte-level validator CLI; added as a `Validate ASCII log contract` gate step in every platform job (windows/linux/macos/android/ios) before artifact upload; exit 1 on any violation.
+- scripts/ci/emergency-report.sh: separators and em-dashes ASCII-cleaned.
+- internal/logging: the RUNTIME log (app.log and the stderr fallback) now enforces the same contract via an `asciiHandler` wrapper plus `ReplaceAttr` value sanitization; pinned by `TestASCIIContractEnforced`.
 
-## 3. Dependency and integration spike (Phase 1)
+Divergence note: the sed streaming variant normalizes a lone CR to LF (matching the canonical Go semantics); CRLF handling is identical. The validator is the authority; the collector sanitizes the final artifact regardless of producer behavior.
 
-- Wails: module proxy reports `github.com/wailsapp/wails/v3 v3.1.0`
-  as newest stable non-prerelease at run time. Not adopted in this
-  session (see 6).
-- Go-GUI: `github.com/go-gui-org/go-gui v0.97.0` exists on the proxy
-  (newer than the v0.96.0 the work order documented for 2026-11-13).
-- GoGPU ecosystem verified on the proxy: `gogpu/gogpu v0.54.1`,
-  `gogpu/wgpu v0.35.1` (repo pins v0.34.15), `gogpu/gg v0.52.7`,
-  `gogpu/g3d v0.1.12`; `gogpu/ui v0.1.55` confirmed to be a separate
-  toolkit from `go-gui-org/go-gui`.
-- Integration spike (Wails window + Go-GUI WASM surface + GoGPU
-  WebGPU frame): **BLOCKED in this environment** — no GL/EGL/wayland
-  or GTK4/WebKitGTK development headers, no root, no Windows/macOS
-  hosts. ui/fyne and cmd/sheytan-music-visualizer are environment-
-  BLOCKED locally and remain owned by hosted CI. No fabricated window,
-  frame, adapter or device evidence was produced. Per the work order,
-  bulk UI migration was not started on an unproven path; the delivered
-  slice is the UI-independent requirements core (Section 4), which the
-  future Go-GUI/Wails surfaces will drive through typed services.
+### 1.3 Product-facing BETA metadata
 
-## 4. Implemented changes (all local, on top of b4e0e3c)
+- internal/buildinfo: default version and fallback are now `BETA` (product label until fully functional; no numbered app release labels in this phase). `--version` no longer depends on the git ref name.
+- .github/workflows/build-desktop.yml: `SHEYTAN_BUILD_VERSION: BETA` in both platform build jobs (previously `${{ github.ref_name }}` = `main`).
 
-### 4.1 `internal/ghreq` (new package) — GitHub Requirements Manager core
+### 1.4 Workflow repair and five-target expansion
 
-- **One download engine** (`ghreq.Downloader`): typed job states
-  (queued/resolving/downloading/paused/verifying/completed/failed/
-  cancelled/blocked); bounded queue with typed `ErrQueueFull`
-  saturation; global (default 2) and per-host (default 2) concurrency
-  caps; cooperative chunk-boundary pause with no busy wait and no
-  worker slot held while paused; terminal records stay queryable while
-  only active jobs consume queue capacity; `Close()` cancels active
-  work; transient-only bounded retries (default 3) with exponential
-  backoff + jitter; policy failures (unapproved host, downgrade,
-  private address, HTML payload, digest mismatch, validator change)
-  are permanent and never retried; `Retry-After` surfaced, rate-limit
-  responses never auto-retried (no retry storms).
-- **Resume correctness**: `<dest>.part` + atomically persisted
-  sidecar (temp-file + rename, schema 1); restart only trusts the
-  sidecar when URL matches and partial length equals the recorded
-  offset; always probes `Range: bytes=<done>-`; accepts `206` only
-  with exact `Content-Range` start and matching total (`If-Range`
-  carries the stored ETag when known); a `200` answer restarts from
-  zero and never appends a full body to a partial file; final digest
-  verification before atomic promotion.
-- **Honest ETA**: EWMA throughput with a three-sample minimum before
-  any numeric ETA; `ETAConfident=false` otherwise; verification time
-  excluded from transfer speed.
-- **Origin policy**: HTTPS-only allowlist (api.github.com, github.com,
-  objects.githubusercontent.com, release-assets.githubusercontent.com,
-  codeload.github.com; loopback for tests); 5-hop redirect cap;
-  downgrade, userinfo/credentials and token-bearing source URLs
-  rejected; Authorization/Cookie stripped on every cross-host
-  redirect; dial layer refuses private, loopback (non-test),
-  link-local, multicast, TEST-NET and CGNAT addresses.
-- **Closed requirements catalog** derived from the repository's
-  provenance records (`internal/mediatools` pinned manifest — single
-  source of truth; nothing invented): optional GPL FFmpeg media-tool
-  packs for windows/amd64 and linux/amd64; other platforms report
-  `NOT_AVAILABLE_FOR_THIS_PLATFORM`. Validation rejects duplicate IDs,
-  invalid owner/repo (owner: alphanumeric runs with single interior
-  hyphens; repo: no doubled/leading/trailing dots), unanchored or
-  ambiguous asset selectors, missing licenses, unsafe install paths
-  (traversal, drive prefixes, reserved device names), non-canonical
-  source URLs, and executables without pinned digest material.
-- **Deterministic asset selection**: per-platform anchored include +
-  exclude rules; zero matches or ambiguity are errors, never
-  first-pick; non-uploaded asset states ignored.
-- **Integrity levels**: `PINNED_MANIFEST_DIGEST_VERIFIED` >
-  `GITHUB_RELEASE_DIGEST_VERIFIED` (API `digest` field; byte
-  consistency with GitHub metadata, NOT publisher identity) >
-  `TRANSPORT_ONLY`; mismatches are `FAILED`.
-  `EnsureExecutableTrust` hard-blocks executable installation without
-  pinned or release-digest evidence; no UI override path exists.
-- **GitHub client**: official REST endpoints (releases/latest with a
-  defensive draft/prerelease guard, releases/tags/{tag}, bounded
-  pagination 5x50 with ID dedup), `Accept: application/vnd.github+json`,
-  pinned `X-GitHub-Api-Version`, ETag conditional caching, typed
-  rate-limit/not-found/network/malformed errors, `X-RateLimit-*`
-  state snapshot. No token requested, accepted or embedded.
+- REPAIRED a real pre-existing defect: the workflow triggers contained `branches: ain]` — the byte-level remnant of a previous malformed ANSI-strip pass that consumed the `[m` of `branches: [main]`. Restored to `branches: [main]` for push and pull_request. (This also explains the corruption class seen elsewhere in tooling displays; the alert-summary fixture in githubapi_test.go LOOKED corrupted in text views but its bytes are intact — verified with od.)
+- build-macos job ADDED (macos-26, REQUIRED): toolchain report, gofmt, `go mod verify`, full `go test ./...`, vet, package build, BETA version check, tar.gz package, civalidate gate. Its gate contract is a documented REDUCED subset: not-yet-ported parity gates (race, export/audio/GPU validation, GUI smoke) are recorded BLOCKED inside the job — never PASS — and the package is TEST_ONLY until they are ported and pass on a hosted runner.
+- build-android job ADDED (EXPERIMENTAL, non-required): toolchain report incl. NDK identity, CGO cross-compile smoke of the pure product packages for android/arm64 against the NDK clang wrapper, civalidate gate. NO APK claim, no emulator/device claim, no GoGPU native-backend claim.
+- build-ios job ADDED (EXPERIMENTAL, non-required, macos runner): toolchain report incl. Xcode identity, CGO compile smoke for ios/arm64, civalidate gate. NO simulator-validation claim, NO signing claim.
+- collect-logs and final-verdict wired for the three new jobs (needs, artifact downloads, manifest results, aggregate verdict; macos required, android/ios reported truthfully as experimental non-required).
+- scripts/ci/write-manifest.py extended accordingly (results, downloads, artifacts, jobs with required flags).
+- New build scripts: scripts/build/build-macos.sh, build-android.sh, build-ios.sh (all `bash -n` clean; they dot-source the canonical capture.sh so every gate produces structured records through the new contract).
 
-### 4.2 CI wiring
+### 1.5 Verified integration pins (recorded for the migration work)
 
-- `scripts/build/build-linux.sh`: `./internal/ghreq/...` added to the
-  `go-test-race` gate. (Windows ladder has no race gate by design;
-  its `go test ./...` covers the package.)
+Queried live from the Go module proxy during this execution:
+- github.com/go-gui-org/go-gui v0.97.0 (2026-11-17T22:28:30Z, tag hash 11be524688a2d3a366716083085ec91d935d1418)
+- github.com/wailsapp/wails/v3 v3.1.0 (2026-11-01, tag hash 4b454e443f6f11ccb64679c5c3d3f3bf5e6fb440)
+- github.com/gogpu/gogpu v0.54.1 (2026-11-08, tag hash 01b7d29ce5678a034483bcaee6c6b5822110a08a); the repository already pins gogpu/wgpu v0.34.15 and gogpu/gputypes v0.8.2.
 
-### 4.3 CI contract repairs (both PRE-EXISTING defects found by this
-session's local static runs; neither was caused by the new package)
+## 2. Local verification evidence (Linux sandbox, Go 1.27.4)
 
-- `scripts/build/build-linux.sh`: package-size-budget restored to the
-  90 MiB = 94371840-byte contract value that the Windows gate, the
-  script's own header comment and the D35 plumbing assertions own —
-  the gate had silently tightened to 70 MiB and
-  `test-ci-plumbing.sh` was red at HEAD because of it.
-- `scripts/ci/tests/test-codeql-coverage-inventory.sh`: the
-  current-tree expectation re-anchored to the HEAD inventory plus
-  documented per-session additions; the run2-relative expectation had
-  gone stale across several BETA commits and was silently red at HEAD
-  (90 production files vs an expected 65).
+- `go build ./internal/... ./cmd/civalidate` — PASS
+- `go vet ./internal/... ./cmd/civalidate` — PASS
+- `go test ./internal/...` — ALL PASS, including the exact classes the prompt requires to stay fixed: internal/mediatools (archive/space/Unicode coverage), internal/studio (cold-cache actionable event; passes with the canonical `-tags goffi_static` tag used by the Linux build script; without that tag the sandbox linker cannot link the goffi test binary — a sandbox limitation, not a source defect), internal/ghreq, internal/fileaccess (Linux identity semantics unchanged), internal/cilog, internal/asciilog, internal/logging, internal/buildinfo.
+- `GOOS=windows GOARCH=amd64`: build + vet of the touched packages PASS; the Windows fileaccess test binary COMPILES (`go test -c`). Windows test EXECUTION requires a hosted windows runner — NOT VERIFIED locally (no Windows OS in this sandbox; no wine available).
+- `GOOS=darwin GOARCH=arm64`: touched packages build — PASS.
+- `cmd/civalidate` self-check: a fixture with BOM + ANSI + non-ASCII + `===` + `---` is detected with exact counts and exits 1; a clean fixture exits 0.
+- `ui/fyne` and `cmd/sheytan-music-visualizer` were NOT compiled locally: the sandbox lacks OpenGL/Wayland/pkg-config GL development headers (go-gl/glfw cgo requirements). The hosted Linux runner provides them (run 44330231458 built them successfully); no source change touches those packages.
+- gofmt: repository-wide clean (0 files listed).
+- YAML: build-desktop.yml parses; job graph verified (preflight, build-windows, build-linux, build-macos, build-android, build-ios, collect-logs, final-verdict); `bash -n` clean on all touched/new shell scripts.
 
-### 4.4 Docs
+## 3. Explicitly NOT VERIFIED / BLOCKED / NOT STARTED (no fabrication)
 
-- `docs/features/requirements-manager.md` (new; indexed in
-  `docs/INDEX.md`): engine contract, resume protocol, origin policy,
-  catalog rules, integrity levels, tests and honest BETA limitations.
-- `CHANGELOG.md`: run-44094081531 section with the new package, the
-  CI wiring and the two pre-existing CI repairs.
+- Windows test execution of the repaired gate: NOT VERIFIED. Evidence exists only that the fixed code and tests compile for windows/amd64 and that the comparison logic rejects the simulated same-file-id replacement by construction. A hosted windows-latest `go-test` run is required before calling the red gate green.
+- Hosted CI runs of the expanded workflow (macos/android/ios jobs, civalidate gates, collector with six artifacts): NOT RUN. Unauthenticated GitHub API access was rate-limited from this sandbox, and no run was triggered, no branch pushed. The supplied report remains the authoritative evidence for run 44330231458's current state.
+- CodeQL: NOT RETRIEVED for the run SHA (no authenticated API access). Preserved codeql.yml unchanged; no alert claims made.
+- Fyne to Go-GUI production migration: NOT STARTED in this update. The full route-parity migration (Section 4 of the work order) requires the integration spike first (Wails v3.1.0 shell, Go-GUI v0.97.0 browser/WASM surface inside the WebView, GoGPU v0.54.1 WebGPU frame path, one-window/one-lifecycle proof on each host WebView). This sandbox is Linux-only, has no WebView host for Windows/macOS probes, no Android emulator, no iOS simulator, and the remaining budget after the red-gate, log-contract, and workflow work was insufficient for a production-shaped spike with real rendering evidence. No partial or mock migration was committed: the production app still runs the existing Fyne UI (ui/fyne untouched), and no fake Go-GUI surface was added.
+- Requirements & Downloads screen: internal/ghreq (existing engine) is unchanged and fully tested locally; the Go-GUI screen was not built (same reasons as above; the work order forbids a disconnected demo screen, and none was fabricated).
+- Platform test packages: NONE shipped with this update. The only local build environment (Linux sandbox) could not execute the full Linux gate contract (race/export/audio/GPU validation, GUI smoke need Xvfb/ffmpeg/GPU runners), so no package status `VERIFIED` is claimable from this execution, and per the delivery rule (only packages whose build AND verification gates actually pass) no binaries are included. The workflow now produces the package targets on hosted runners when it runs.
 
-### 4.5 Explicitly NOT done (no hollow mocks)
+## 4. Files changed / added
 
-- No Fyne-to-Go-GUI migration in this session: the one-window
-  integration spike is environment-blocked (Section 3). Deleting Fyne
-  before a proven replacement would violate the work order.
-- No Requirements & Downloads UI route: the engine is complete and
-  tested; the route is not. Marked PARTIAL honestly; no fake screen.
-- No transactional install layer for non-media-tool requirements
-  (staging/promotion/rollback beyond the existing hardened mediatools
-  install): follow-up milestone, documented.
-- No publisher-signature/provenance system beyond pinned digests:
-  executables therefore always require pinned material today.
-- No Android/iOS artifacts: no mobile toolchains in this environment;
-  not fabricated.
+Modified: .github/workflows/build-desktop.yml, scripts/ci/write-manifest.py, scripts/ci/capture.sh, scripts/ci/Capture-Step.ps1, scripts/ci/emergency-report.sh, internal/fileaccess/identity_windows.go, internal/buildinfo/buildinfo.go, internal/cilog/{collect.go,gate.go,collect_test.go,gate_test.go,classification_test.go,githubapi_test.go}, internal/logging/{logging.go,logging_test.go}.
+Added: internal/asciilog/{asciilog.go,asciilog_test.go}, cmd/civalidate/main.go, internal/fileaccess/identity_windows_test.go, scripts/build/{build-macos.sh,build-android.sh,build-ios.sh}.
 
-## 5. Tests (exact commands and results)
+## 5. Recommended next execution order
 
-All commands run at the working tree on top of b4e0e3c (host: Linux
-x64 sandbox, go1.27.4, gcc 14.2; full output in build-logs.txt):
-
-| Command | Result |
-| --- | --- |
-| `go build -tags goffi_static ./internal/... ./cmd/ci-log-collector` | PASS |
-| `go vet -tags goffi_static ./internal/... ./cmd/ci-log-collector` | PASS (ui/fyne + main cmd are environment-BLOCKED here: no GL/wayland headers, no root) |
-| `go test -tags goffi_static -skip '^TestPaletteReachesGPUShader$' -count=1 ./internal/... ./cmd/ci-log-collector` | ALL PASS (25 packages, incl. the new ghreq: 30 tests) |
-| `go test -race -count=1 ./internal/jobs/ ./internal/fileaccess/ ./internal/ghreq/` | PASS, race-clean (the hosted race suite additionally covers studio/audio/dsp/export/project/render at this commit — hosted build-linux green) |
-| `GOOS=windows GOARCH=amd64 go build ./internal/...` | PASS |
-| `GOOS=windows GOARCH=arm64 go build ./internal/ghreq/` + `GOOS=windows go vet` (fileaccess, jobs, studio, mediatools, appclose, ghreq) | PASS |
-| `gofmt -l .` | empty (clean) |
-| `go mod tidy -diff` | clean |
-| `go mod verify` | all modules verified |
-| `bash scripts/ci/tests/test-ci-plumbing.sh` | PASS=20 FAIL=0 (3 pwsh fixtures NOT RUN: no pwsh on this host) |
-| `bash scripts/ci/tests/test-package-gates.sh` | pass=8 fail=0 notrun=6 (pwsh) |
-| `bash scripts/ci/tests/test-package-status.sh` | pass=20 fail=0 |
-| `bash scripts/ci/tests/test-verdict-expression.sh` | PASS |
-| `bash scripts/ci/tests/test-codeql-coverage-inventory.sh` | PASS |
-| `bash scripts/ci/tests/test-docs-consistency.sh` | pass=5 fail=0 |
-
-The studio `-race` build is a local toolchain limitation (goffi dlsym
-relocation under -race in this sandbox); the hosted build-linux race
-gate at this commit is green evidence for those packages.
-
-## 6. Wails/Go-GUI/GoGPU integration state
-
-- Integration mode: NOT MIGRATED this session. Current production UI
-  remains Fyne (ui/fyne) with the GoGPU render stack unchanged; the
-  window/lifecycle/render architecture was audited as sound by the
-  previous session and left preserved.
-- Verified render backend state: unchanged from the repository's own
-  honest model (detected/available/selected/executed/verified);
-  `TestPaletteReachesGPUShader` owns the GPU proof in CI's dedicated
-  gpu-validation gate. This session ran no GPU and no display:
-  NO hardware render evidence is claimed.
-- Future integration pins (verified on the module proxy this session):
-  Wails v3.1.0 stable; go-gui-org/go-gui v0.97.0; gogpu family per
-  repo pins (wgpu v0.34.15) or the verified newer compatible line
-  after a real spike. The spike checklist (Section 3.4 of the work
-  order) stays the hard gate before any bulk migration.
-
-## 7. Audio playback verification state
-
-No audio hardware or output device in this environment. Playback
-verification remains owned by the repository's playback/audio test
-suites (all pass locally: internal/audio, internal/playback) and by
-hosted gates. NO runtime output-device negotiation, sample submission
-or position-advance evidence is claimed from this session.
-
-## 8. GitHub Requirements Manager state
-
-- Catalog: derived from the real mediatools provenance manifest; valid
-  per `Catalog.Validate()`; tested (`TestEmbeddedCatalogIsValidAndReal`).
-- Release discovery: implemented against the official REST contract
-  and proven against local HTTP fixtures (latest-stable excluding
-  drafts/prereleases, exact-tag resolution, bounded pagination,
-  ETag caching, rate-limit handling). NOT exercised against the live
-  GitHub API in a download flow this session (the sandbox's api.github.com
-  quota was exhausted all session; production paths would hit the real
-  API). Recorded honestly as fixture-verified.
-- Download/verify: resume, pause, cancel, digest mismatch, HTML
-  payload, restart semantics all fixture-tested; no live large-file
-  transfer was performed.
-- Install: executable trust gate tested; the transactional install
-  layer for non-media-tool requirements is the documented follow-up.
-
-## 9. Queue and resource governance results
-
-New download engine: queue saturation visible (typed rejection),
-worker caps enforced, pause releases worker slots, bounded retries,
-no busy waits, goroutine-safe snapshots; race-clean under `-race`.
-The pre-existing `internal/jobs` scheduler (24 tests) is untouched and
-green. Full outputs in build-logs.txt.
-
-## 10. Security tests and privilege model
-
-- No app code invokes Git or shells out to source control anywhere in
-  the new package (grep-clean; the package has no exec/exec.Command
-  usage). No repository-management surface exists in the app.
-- Downloaded content is never executed; install paths are validated
-  (no traversal, no drive prefixes, no reserved device names); the
-  executable trust gate blocks unverified executables; redirect and
-  private-address policies are enforced at the dial layer; no
-  credentials are requested, stored, logged or forwarded.
-- The application privilege model is unchanged: normal-user execution
-  (asInvoker); no elevation added anywhere.
-- ASCII log policy: build-logs.txt verified byte-for-byte (0 bytes
-  outside printable ASCII + CR/LF); source comments ASCII-only.
-
-## 11. Platform build matrix
-
-| Target | Runner | Arch | Package | Signing | Test level |
-| --- | --- | --- | --- | --- | --- |
-| Linux x64 | hosted (build-linux, run 44094081531) | amd64 | `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` (hosted artifact, 23.9 MB) | n/a | hosted build+tests+package green at b4e0e3c; NOT runtime-tested by this session |
-| Windows x64 | hosted (build-windows) | amd64 | `SHEYTAN-Music-Visualizer-windows-x64.zip` (hosted artifact, 26.3 MB) | unsigned | compiled+packaged (TEST_ONLY per workflow contract); verification gate FAILED — exact gate NOT ACCESSIBLE (BLOCKED) |
-| Windows x64 (local cross-compile) | this sandbox | amd64/arm64 | none produced | unsigned | build+vet clean for all internal packages; no package produced (would violate the delivery contract) |
-| macOS | none available | — | none | — | NOT RUN |
-| Android / iOS | none available | — | none | — | NOT RUN |
-
-No local platform test packages are delivered: producing one would
-require a passing platform verification gate, which was not available.
-
-## 12. Hosted Actions status
-
-`LOCAL_GREEN_HOSTED_PENDING`. The candidate commit (the local working
-tree) was NOT pushed (no remote write authorized), so no hosted run
-exists for it. The target run 44094081531 at b4e0e3c is FAILURE
-(build-windows; exact failing gate NOT ACCESSIBLE, see Section 2).
-`HOSTED_GREEN` is NOT claimed and would be false.
-
-## 13. Known limitations, blockers, unverified claims
-
-- Exact failing Windows gate of run 44094081531: BLOCKED (needs
-  `actions:read` credentials or the `SHEYTAN-Music-Visualizer-all-logs.txt`
-  artifact to pin; HTML evidence narrows it to a post-package gate).
-- Wails/Go-GUI/GoGPU integration spike: BLOCKED locally (no GL/GTK
-  dev headers, no root, no macOS/Windows/mobile hosts).
-- ui/fyne + cmd/sheytan-music-visualizer local build: BLOCKED
-  (environment); owned by hosted CI (green at b4e0e3c).
-- Studio `-race` locally: BLOCKED (goffi dlsym relocation under
-  -race in this sandbox); hosted race gate green at b4e0e3c.
-- Live-API download exercise: NOT RUN (quota); fixture-verified only.
-- No hardware GPU/audio/display claims of any kind from this session.
-- No mobile claims: Android/iOS NOT RUN.
-
-## 14. Delivered files (download directory)
-
-| File | Size |
-| --- | --- |
-| `SHEYТAN-Music-Visualizer-BETA-SOURCE.zip` | ~994 KB (266 entries; sha256 recorded at build time in the delivery summary) |
-| `note.md` | this file |
-| `build-logs.txt` | ~26 KB, ASCII-verified (18 sections, all exit 0) |
-
-The source ZIP contains one top-level directory
-(`SHEYTAN-Music-Visualizer-BETA/`), the complete tracked repository
-plus this session's new files, excluding `.git`, sandbox artifacts
-(`.env`, `download/`), caches and build outputs; verified: single
-top-level dir, no traversal entries, no nested archives, required
-files present, go.mod readable.
-
-## 15. Suggested next actions for the owner
-
-1. Provide `actions:read` credentials (or the all-logs artifact) to
-   pin the exact failing build-windows gate of run 44094081531.
-2. Review and commit this session's local changes (git status shows
-   exactly: `internal/ghreq/` (new), `docs/features/` (new),
-   `CHANGELOG.md`, `docs/INDEX.md`, `scripts/build/build-linux.sh`,
-   `scripts/ci/tests/test-codeql-coverage-inventory.sh`), then rerun
-   `build-desktop` on GitHub to validate the Windows path end to end.
-3. Next milestone: the Wails v3.1.0 + go-gui v0.97.0 one-window spike
-   on a real desktop runner (Windows first), then the Requirements &
-   Downloads UI route driving `internal/ghreq` through typed services.
+1. Push this work to a feature branch (user-authorized remote write required) and let build-desktop.yml run: the Windows go-test gate decides 1.1, the civalidate gates decide 1.2, the macOS job decides 1.4.
+2. Port the reduced-parity macOS gates (race, export/audio/GPU validation, GUI smoke) so build-macos becomes full-parity and its package can earn VERIFIED.
+3. Execute the Wails v3.1.0 + Go-GUI v0.97.0 + GoGPU v0.54.1 integration spike on a real desktop runner (Windows first), per the one-window/one-lifecycle contract, before any bulk UI migration.
+4. Only after the spike proves per-WebView rendering: begin the route-by-route Fyne parity migration with the parity inventory, keeping Fyne until parity and tests are complete.

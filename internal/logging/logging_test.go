@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"bytes"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/asciilog"
 )
 
 func TestOpenCreatesFileAndWritesReadableRecord(t *testing.T) {
@@ -283,5 +285,36 @@ func TestMigrateLegacyNoopWhenActiveLogExists(t *testing.T) {
 	got, err := MigrateLegacy(apppaths.Layout{Logs: newLogs}, env)
 	if err != nil || got != "" {
 		t.Fatalf("migration must be a no-op when an active log exists: got=%q err=%v", got, err)
+	}
+}
+
+// TestASCIIContractEnforced pins the run 44330231458 remediation: the
+// runtime log is an English ASCII log. Non-ASCII message content and
+// attribute values degrade to '?' instead of leaking non-ASCII bytes.
+func TestASCIIContractEnforced(t *testing.T) {
+	dir := t.TempDir()
+	l, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer l.Close()
+	logger := l.Logger()
+	if logger == nil {
+		t.Fatal("nil logger")
+	}
+	logger.Info("caf\u00e9 \u4e2d\u6587 message", slog.String("path", "\u00fcber/file.wav"))
+	logger.Warn("=== decorative ===", slog.String("note", "--- dashes ---"))
+	raw, err := os.ReadFile(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if rep := asciilog.Validate(raw); rep.Violations() != 0 {
+		t.Fatalf("runtime log violates the ASCII contract: %+v\n%s", rep, raw)
+	}
+	if !bytes.Contains(raw, []byte("caf?? ?????? message")) || !bytes.Contains(raw, []byte("??ber/file.wav")) {
+		t.Fatalf("message not ASCII-degraded as expected:\n%s", raw)
+	}
+	if !bytes.Contains(raw, []byte("== decorative ==")) {
+		t.Fatalf("separator clamp not applied:\n%s", raw)
 	}
 }

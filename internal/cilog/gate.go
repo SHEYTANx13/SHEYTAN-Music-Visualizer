@@ -13,7 +13,7 @@ package cilog
 //
 //      A gate's status comes ONLY from its own structured command
 //      record's `EXIT_CODE: <n> PASS|FAIL` line, parsed strictly inside
-//      one `===== COMMAND BEGIN =====` … `===== COMMAND END =====` block.
+//      one `:: COMMAND BEGIN ::` ... `:: COMMAND END ::` block.
 //      A gate with an explicit `EXIT_CODE: 0 PASS` can never be listed as
 //      failed. A gate blocked by a prerequisite and recorded as
 //      `SKIPPED: gate <name> (<reason>)` is SKIPPED, never a failed
@@ -24,19 +24,19 @@ package cilog
 // Structured records (written by scripts/ci/capture.sh and
 // scripts/ci/Capture-Step.ps1) look like:
 //
-//      ===== COMMAND BEGIN =====
+//      :: COMMAND BEGIN ::
 //      JOB: phase2-windows-build
 //      STEP: go-test
 //      STARTED: ...
 //      WORKDIR: ...
 //      COMMAND: ...
 //      TOOL_CONTEXT: ...
-//      --- OUTPUT (stdout+stderr from first byte) ---
+//      :: OUTPUT (stdout+stderr from first byte) ::
 //      <command output, any content>
-//      --- END OUTPUT ---
+//      :: END OUTPUT ::
 //      EXIT_CODE: 1 FAIL
 //      ENDED: ...
-//      ===== COMMAND END =====
+//      :: COMMAND END ::
 //
 // The EXIT_CODE line is only authoritative INSIDE such a block; the
 // same text appearing in a run-summary or failure-index section is a
@@ -106,7 +106,7 @@ var rootCauseSignatures = []struct {
 }{
 	{
 		label:     "GPU palette uniform not reaching shader",
-		signature: "--- FAIL: TestPaletteReachesGPUShader",
+		signature: "-- FAIL: TestPaletteReachesGPUShader",
 	},
 	{
 		label:     "zizmor invocation uses interpreter without installed module",
@@ -115,10 +115,10 @@ var rootCauseSignatures = []struct {
 }
 
 var (
-	reRecordBegin = regexp.MustCompile(`^===== COMMAND BEGIN =====\s*$`)
-	reRecordEnd   = regexp.MustCompile(`^===== COMMAND END =====\s*$`)
-	reOutputBegin = regexp.MustCompile(`^--- OUTPUT \(stdout\+stderr from first byte\) ---\s*$`)
-	reOutputEnd   = regexp.MustCompile(`^--- END OUTPUT ---\s*$`)
+	reRecordBegin = regexp.MustCompile(`^:: COMMAND BEGIN ::\s*$`)
+	reRecordEnd   = regexp.MustCompile(`^:: COMMAND END ::\s*$`)
+	reOutputBegin = regexp.MustCompile(`^:: OUTPUT \(stdout\+stderr from first byte\) ::\s*$`)
+	reOutputEnd   = regexp.MustCompile(`^:: END OUTPUT ::\s*$`)
 	reStepField   = regexp.MustCompile(`^STEP: (.*)$`)
 	reExitCode    = regexp.MustCompile(`^EXIT_CODE: (\d+) (PASS|FAIL)\b`)
 	reSkippedGate = regexp.MustCompile(`^SKIPPED: gate (\S+) \((.*)\)\s*$`)

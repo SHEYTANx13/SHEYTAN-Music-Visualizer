@@ -1,6 +1,6 @@
 package cilog
 
-// githubapi_test.go — deterministic httptest fixtures proving that the
+// githubapi_test.go - deterministic httptest fixtures proving that the
 // collector uses GitHub job/step conclusions as the authoritative status
 // layer: a failed job and a failed step with NO textual error marker in
 // any log still appears in the failure index, the step table is written,
@@ -150,8 +150,8 @@ func TestAPIConclusionsAreAuthoritativeWithoutErrorMarkers(t *testing.T) {
 	for _, want := range []string{
 		"STEP FAILURE: build-windows / step 3 \"Build and verify Windows x64 desktop app\": failure",
 		// Deduplicated by stable job id: ONE entry that shows BOTH sources
-		// (run 42026322748 brief §1.J) — never two rows for one failure.
-		"JOB FAILURE: build-windows — workflow conclusion: failure; API job conclusion: failure",
+		// (run 42026322748 brief §1.J) - never two rows for one failure.
+		"JOB FAILURE: build-windows - workflow conclusion: failure; API job conclusion: failure",
 		"3. STEP STATUS TABLE",
 		"5. FAILURE INDEX",
 		"OVERALL RESULT: FAIL",
@@ -185,7 +185,7 @@ func TestAlertsFetchedForSameCommit(t *testing.T) {
 		t.Fatalf("alerts fetched = %d, want 1", res.AlertsFetched)
 	}
 	raw := readFile(t, opts.ReportPath)
-	if !strings.Contains(raw, "alert #7 [medium] go/insecure-landing — cmd/x/main.go:42") {
+	if !strings.Contains(raw, "alert #7 [medium] go/insecure-landing - cmd/x/main.go:42") {
 		t.Fatalf("alert summary not rendered: %s", raw)
 	}
 }

@@ -47,11 +47,17 @@ REQUIRED_CALLER_RESULTS = (
     "RESULT_PREFLIGHT",
     "RESULT_WINDOWS",
     "RESULT_LINUX",
+    "RESULT_MACOS",
+    "RESULT_ANDROID",
+    "RESULT_IOS",
 )
 REQUIRED_CALLER_DOWNLOADS = (
     "DOWNLOAD_PREFLIGHT",
     "DOWNLOAD_WINDOWS",
     "DOWNLOAD_LINUX",
+    "DOWNLOAD_MACOS",
+    "DOWNLOAD_ANDROID",
+    "DOWNLOAD_IOS",
 )
 
 
@@ -111,6 +117,9 @@ def build_caller_manifest() -> dict:
         "preflight": f"preflight-logs-part-attempt{attempt}",
         "windows": f"windows-logs-part-attempt{attempt}",
         "linux": f"linux-logs-part-attempt{attempt}",
+        "macos": f"macos-logs-part-attempt{attempt}",
+        "android": f"android-logs-part-attempt{attempt}",
+        "ios": f"ios-logs-part-attempt{attempt}",
     }
 
     return {
@@ -141,6 +150,9 @@ def build_caller_manifest() -> dict:
             {"artifact": artifacts["preflight"], "outcome": downloads["DOWNLOAD_PREFLIGHT"]},
             {"artifact": artifacts["windows"], "outcome": downloads["DOWNLOAD_WINDOWS"]},
             {"artifact": artifacts["linux"], "outcome": downloads["DOWNLOAD_LINUX"]},
+            {"artifact": artifacts["macos"], "outcome": downloads["DOWNLOAD_MACOS"]},
+            {"artifact": artifacts["android"], "outcome": downloads["DOWNLOAD_ANDROID"]},
+            {"artifact": artifacts["ios"], "outcome": downloads["DOWNLOAD_IOS"]},
         ],
         "jobs": [
             {
@@ -166,6 +178,38 @@ def build_caller_manifest() -> dict:
                 "result_basis": "needs.build-linux.result (workflow conclusion)",
                 "artifact": artifacts["linux"],
                 "required": True,
+            },
+            {
+                "name": "build-macos",
+                "kind": "workflow-job",
+                "result": results["RESULT_MACOS"],
+                "result_basis": "needs.build-macos.result (workflow conclusion)",
+                "artifact": artifacts["macos"],
+                # Required: macOS is a desktop parity target. The job's
+                # gate contract is a documented reduced subset of the
+                # Linux contract; not-yet-ported parity gates are
+                # recorded BLOCKED inside the job, never passed.
+                "required": True,
+            },
+            {
+                "name": "build-android",
+                "kind": "workflow-job",
+                "result": results["RESULT_ANDROID"],
+                "result_basis": "needs.build-android.result (workflow conclusion)",
+                "artifact": artifacts["android"],
+                # EXPERIMENTAL compile smoke only: no APK, no emulator
+                # or device validation, no GoGPU native backend claim.
+                "required": False,
+            },
+            {
+                "name": "build-ios",
+                "kind": "workflow-job",
+                "result": results["RESULT_IOS"],
+                "result_basis": "needs.build-ios.result (workflow conclusion)",
+                "artifact": artifacts["ios"],
+                # EXPERIMENTAL compile smoke only: no simulator
+                # validation, no signing, no GoGPU native claim.
+                "required": False,
             },
         ],
     }

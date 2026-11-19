@@ -23,6 +23,7 @@
 package logging
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,6 +33,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/asciilog"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
@@ -117,18 +120,14 @@ func Open(dir string, opts Options) (*Log, error) {
 		level = slog.LevelInfo
 	}
 	handler := slog.NewTextHandler(f, &slog.HandlerOptions{
-		Level: level,
-		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
-			// UTC timestamps for every record (contract: UTC + severity).
-			if a.Key == slog.TimeKey {
-				if t, ok := a.Value.Any().(time.Time); ok {
-					return slog.Attr{Key: slog.TimeKey, Value: slog.TimeValue(t.UTC())}
-				}
-			}
-			return a
-		},
+		Level:       level,
+		ReplaceAttr: sanitizeAttr,
 	})
-	logger := slog.New(handler).With(slog.String("product", brand.ProductName))
+	// ASCII LOG CONTRACT (run 44330231458 remediation): the runtime log
+	// is an English ASCII log. Every record message passes through the
+	// canonical byte-level sanitizer; attribute string values are
+	// sanitized through ReplaceAttr.
+	logger := slog.New(asciiHandler{inner: handler}).With(slog.String("product", brand.ProductName))
 	return &Log{logger: logger, file: f, path: path}, nil
 }
 
@@ -170,8 +169,53 @@ func stderrLog(level slog.Level) *Log {
 	if level == 0 {
 		level = slog.LevelInfo
 	}
-	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
-	return &Log{logger: slog.New(h).With(slog.String("product", brand.ProductName)), fallback: true}
+	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level, ReplaceAttr: sanitizeAttr})
+	return &Log{logger: slog.New(asciiHandler{inner: h}).With(slog.String("product", brand.ProductName)), fallback: true}
+}
+
+// asciiHandler wraps a slog.Handler so every record message is
+// sanitized to the ASCII log contract (internal/asciilog). Attribute
+// values are sanitized through ReplaceAttr at handler construction.
+type asciiHandler struct {
+	inner slog.Handler
+}
+
+func (h asciiHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return h.inner.Enabled(ctx, l)
+}
+
+func (h asciiHandler) Handle(ctx context.Context, r slog.Record) error {
+	r.Message = sanitizeString(r.Message)
+	return h.inner.Handle(ctx, r)
+}
+
+func (h asciiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return asciiHandler{inner: h.inner.WithAttrs(attrs)}
+}
+
+func (h asciiHandler) WithGroup(name string) slog.Handler {
+	return asciiHandler{inner: h.inner.WithGroup(name)}
+}
+
+// sanitizeString degrades one string to the ASCII contract: ANSI
+// escapes removed, non-ASCII and control bytes mapped to '?',
+// separator runs clamped. Lossy by contract, not by accident.
+func sanitizeString(s string) string {
+	return string(asciilog.Sanitize([]byte(s)))
+}
+
+// sanitizeAttr is the ReplaceAttr hook for the runtime log handlers:
+// UTC timestamps plus ASCII-safe string attribute values.
+func sanitizeAttr(_ []string, a slog.Attr) slog.Attr {
+	if a.Key == slog.TimeKey {
+		if t, ok := a.Value.Any().(time.Time); ok {
+			return slog.Attr{Key: slog.TimeKey, Value: slog.TimeValue(t.UTC())}
+		}
+	}
+	if a.Value.Kind() == slog.KindString {
+		a.Value = slog.StringValue(sanitizeString(a.Value.String()))
+	}
+	return a
 }
 
 // LogStartupBanner records the process and build identity, the data

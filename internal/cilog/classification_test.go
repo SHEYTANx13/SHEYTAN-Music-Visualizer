@@ -349,18 +349,18 @@ func TestSilentCodeQLBuildRecordIsPass(t *testing.T) {
 	if err := mkdirAll(dir); err != nil {
 		t.Fatal(err)
 	}
-	record := "===== COMMAND BEGIN =====\n" +
+	record := ":: COMMAND BEGIN ::\n" +
 		"JOB: analyze (go)\n" +
 		"STEP: codeql-go-build-traced\n" +
 		"STARTED: 2026-11-05T12:30:00Z\n" +
 		"WORKDIR: /home/runner/work/repo/repo\n" +
 		"COMMAND: go build -tags goffi_static ./...\n" +
 		"TOOL_CONTEXT: gate:codeql-traced-build (INSIDE CodeQL tracing)\n" +
-		"--- OUTPUT (stdout+stderr from first byte) ---\n" +
-		"--- END OUTPUT ---\n" +
+		":: OUTPUT (stdout+stderr from first byte) ::\n" +
+		":: END OUTPUT ::\n" +
 		"EXIT_CODE: 0 PASS\n" +
 		"ENDED: 2026-11-05T12:30:41Z\n" +
-		"===== COMMAND END =====\n"
+		":: COMMAND END ::\n"
 	if err := writeFile(dir+"/codeql-go-build.log", record); err != nil {
 		t.Fatal(err)
 	}

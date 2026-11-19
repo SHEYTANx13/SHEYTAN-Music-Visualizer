@@ -29,19 +29,19 @@ import (
 // (scripts/ci/capture.sh / Capture-Step.ps1) write them.
 func record(step string, exitCode int, verdict string, output string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n===== COMMAND BEGIN =====\n")
+	fmt.Fprintf(&b, "\n:: COMMAND BEGIN ::\n")
 	fmt.Fprintf(&b, "JOB: phase2-windows-build\n")
 	fmt.Fprintf(&b, "STEP: %s\n", step)
 	fmt.Fprintf(&b, "STARTED: 2026-11-04T21:20:00Z\n")
 	fmt.Fprintf(&b, "WORKDIR: D:\\a\\SHEYTAN-Music-Visualizer\\SHEYTAN-Music-Visualizer\n")
 	fmt.Fprintf(&b, "COMMAND: go test -tags goffi_static ./...\n")
 	fmt.Fprintf(&b, "TOOL_CONTEXT: gate:%s\n", step)
-	fmt.Fprintf(&b, "--- OUTPUT (stdout+stderr from first byte) ---\n")
+	fmt.Fprintf(&b, ":: OUTPUT (stdout+stderr from first byte) ::\n")
 	b.WriteString(output)
-	fmt.Fprintf(&b, "--- END OUTPUT ---\n")
+	fmt.Fprintf(&b, ":: END OUTPUT ::\n")
 	fmt.Fprintf(&b, "EXIT_CODE: %d %s\n", exitCode, verdict)
 	fmt.Fprintf(&b, "ENDED: 2026-11-04T21:20:05Z\n")
-	fmt.Fprintf(&b, "===== COMMAND END =====\n")
+	fmt.Fprintf(&b, ":: COMMAND END ::\n")
 	return b.String()
 }
 
@@ -157,7 +157,7 @@ func TestFourFailuresWhileFiveGatesPassRegression(t *testing.T) {
 // One failing Windows command: minimal red path with complete evidence.
 func TestOneWindowsCommandFails(t *testing.T) {
 	var b strings.Builder
-	b.WriteString(record("go-test", 2, "FAIL", "--- FAIL: TestX (0.00s)\nFAIL\texample.com/pkg\t0.5s\n"))
+	b.WriteString(record("go-test", 2, "FAIL", "-- FAIL: TestX (0.00s)\nFAIL\texample.com/pkg\t0.5s\n"))
 	b.WriteString("RUN RESULT: FAIL\n")
 	opts, _ := fixture(t, []tJob{
 		{"build-windows", ResultFailure, "windows-logs-part", true, map[string]string{"phase2-build.log": b.String()}},

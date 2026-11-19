@@ -68,6 +68,41 @@
 # Encoding: UTF-8 without BOM is used consistently for the log
 # (PowerShell 7 default for Add-Content / Tee-Object).
 
+# ASCII LOG CONTRACT (run 44330231458 remediation): every line that
+# enters the log passes through ConvertTo-AsciiLogLine, the PowerShell
+# streaming counterpart of internal/asciilog.Sanitize: ANSI CSI and
+# stray ESC bytes removed, CR/CRLF normalized to LF, non-ASCII and C0
+# control characters mapped to '?', runs of '=' or '-' clamped to two
+# so the sequences "===" and "---" can never appear.
+
+function ConvertTo-AsciiLogLine {
+    # Sanitizes one line of captured output. Lossy by contract: the log
+    # is English ASCII only; nothing outside that contract survives.
+    param([AllowEmptyString()][string]$Text)
+    $s = $Text
+    # ANSI CSI sequences (ESC [ params final), then any leftover ESC.
+    $s = $s -replace "\x1b\[[0-9;?]*[A-Za-z]", ""
+    $s = $s -replace "\x1b", "?"
+    # CR and CRLF normalize to LF.
+    $s = $s -replace "\r\n?", "`n"
+    # Non-ASCII and C0/DEL control characters map to '?' (LF and TAB
+    # survive; the line-based stream never carries a raw LF here).
+    $sb = [System.Text.StringBuilder]::new($s.Length)
+    foreach ($ch in $s.ToCharArray()) {
+        $code = [int]$ch
+        if ($code -ge 128 -or ($code -lt 32 -and $code -ne 10 -and $code -ne 9) -or $code -eq 127) {
+            [void]$sb.Append("?")
+        }
+        else {
+            [void]$sb.Append($ch)
+        }
+    }
+    $s = $sb.ToString()
+    # Separator-run clamp: no "===" and no "---" sequence survives.
+    $s = $s -replace "={3,}", "=="
+    $s = $s -replace "-{3,}", "--"
+    return $s
+}
 function Capture-Step {
     [CmdletBinding()]
     param(
@@ -95,14 +130,14 @@ function Capture-Step {
 
     Add-Content -Path $env:CI_LOG_FILE -Value @(
         ""
-        "===== COMMAND BEGIN ====="
-        "JOB: $Job"
-        "STEP: $Step"
+        ":: COMMAND BEGIN ::"
+        "JOB: $(ConvertTo-AsciiLogLine $Job)"
+        "STEP: $(ConvertTo-AsciiLogLine $Step)"
         "STARTED: $started"
-        "WORKDIR: $workdir"
-        "COMMAND: $($Command.ToString().Trim())"
-        "TOOL_CONTEXT: $ToolContext"
-        "--- OUTPUT (stdout+stderr from first byte) ---"
+        "WORKDIR: $(ConvertTo-AsciiLogLine $workdir)"
+        "COMMAND: $(ConvertTo-AsciiLogLine $Command.ToString().Trim())"
+        "TOOL_CONTEXT: $(ConvertTo-AsciiLogLine $ToolContext)"
+        ":: OUTPUT (stdout+stderr from first byte) ::"
     )
 
     # Serialize the gate into a standalone script so it runs in a child
@@ -217,7 +252,7 @@ foreach ($tagToken in $goTags) {
         # would become an array filter that is truthy for ANY passing
         # gate with output.
         $gateExecuted = $true
-        & $pwsh.Source -NoProfile -NonInteractive -File $scriptFile 2>&1 | Tee-Object -FilePath $env:CI_LOG_FILE -Append | ForEach-Object { Write-Host $_ }
+        & $pwsh.Source -NoProfile -NonInteractive -File $scriptFile 2>&1 | ForEach-Object { ConvertTo-AsciiLogLine $_.ToString() } | Tee-Object -FilePath $env:CI_LOG_FILE -Append | ForEach-Object { Write-Host $_ }
         # Save the child's exit code immediately, before anything else
         # can overwrite $LASTEXITCODE.
         if ($null -ne $LASTEXITCODE) {
@@ -233,10 +268,10 @@ foreach ($tagToken in $goTags) {
     $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     $verdict = if ($rc -eq 0) { "PASS" } else { "FAIL" }
     Add-Content -Path $env:CI_LOG_FILE -Value @(
-        "--- END OUTPUT ---"
+        ":: END OUTPUT ::"
         "EXIT_CODE: $rc $verdict"
         "ENDED: $ended"
-        "===== COMMAND END ====="
+        ":: COMMAND END ::"
     )
 
     # Machine-readable per-gate record (run-42921967187 diagnostics

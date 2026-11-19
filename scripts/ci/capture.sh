@@ -33,6 +33,31 @@ _ci_json_str() {
   printf '"'
 }
 
+# ci_sanitize — streaming implementation of the build-log ASCII
+# contract (canonical Go implementation: internal/asciilog). Byte
+# rules, in order: strip UTF-8 BOM; strip ANSI CSI sequences and
+# leftover ESC bytes; normalize CR/CRLF to LF; map bytes at or above
+# 0x80 to '?'; map C0 controls (except LF/TAB) and DEL to '?'; clamp
+# runs of '=' or '-' to two so the sequences "===" and "---" can never
+# appear. LC_ALL=C keeps every class byte-precise.
+ci_sanitize() {
+  LC_ALL=C sed -e 's/\xef\xbb\xbf//g' \
+    -e 's/\x1b\[[ -?]*[@-~]//g' \
+    -e 's/\x1b/?/g' \
+    -e 's/\r$//' \
+    -e 's/\r/\n/g' \
+    -e 's/[^\x00-\x7f]/?/g' \
+    -e 's/[\x00-\x08\x0b-\x1f\x7f]/?/g' \
+    -e 's/=\{3,\}/==/g' \
+    -e 's/-\{3,\}/--/g'
+}
+
+# ci_sanitize_str — one-line string variant for record header values
+# and JSON gate-record fields.
+ci_sanitize_str() {
+  printf '%s' "$1" | ci_sanitize | tr -d '\n'
+}
+
 ci_capture() {
   if [ "$#" -lt 3 ]; then
     echo "ci_capture: usage: ci_capture <JOB> <STEP> <command> [args...]" >&2
@@ -44,24 +69,26 @@ ci_capture() {
     CI_CAPTURE_EXIT=2
     return 2
   fi
-  local job="$1" step="$2"
+  local job step
+  job="$(ci_sanitize_str "$1")"
+  step="$(ci_sanitize_str "$2")"
   shift 2
   local workdir started ended rc verdict
   workdir="$(pwd)"
   started="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   {
-    printf '\n===== COMMAND BEGIN =====\n'
+    printf '\n:: COMMAND BEGIN ::\n'
     printf 'JOB: %s\n' "$job"
     printf 'STEP: %s\n' "$step"
     printf 'STARTED: %s\n' "$started"
     printf 'WORKDIR: %s\n' "$workdir"
-    printf 'COMMAND: %s\n' "$*"
-    printf 'TOOL_CONTEXT: %s\n' "${CI_TOOL_CONTEXT:--}"
-    printf -- '--- OUTPUT (stdout+stderr from first byte) ---\n'
+    printf 'COMMAND: %s\n' "$(printf '%s' "$*" | ci_sanitize_str)"
+    printf 'TOOL_CONTEXT: %s\n' "$(ci_sanitize_str "${CI_TOOL_CONTEXT:--}")"
+    printf ':: OUTPUT (stdout+stderr from first byte) ::\n'
   } >>"$CI_LOG_FILE"
 
   set -o pipefail
-  "$@" 2>&1 | tee -a "$CI_LOG_FILE"
+  "$@" 2>&1 | ci_sanitize | tee -a "$CI_LOG_FILE"
   rc=${PIPESTATUS[0]}
   set +o pipefail
 
@@ -72,10 +99,10 @@ ci_capture() {
   elapsed_ms=$(( $(date -u '+%s') - $(date -u -d "$started" '+%s' 2>/dev/null || date -u '+%s') * 1 ))
   [ "$elapsed_ms" -lt 0 ] && elapsed_ms=0
   {
-    printf -- '--- END OUTPUT ---\n'
+    printf ':: END OUTPUT ::\n'
     printf 'EXIT_CODE: %d %s\n' "$rc" "$verdict"
     printf 'ENDED: %s\n' "$ended"
-    printf '===== COMMAND END =====\n'
+    printf ':: COMMAND END ::\n'
   } >>"$CI_LOG_FILE"
 
   # Machine-readable per-gate record (run-42921967187 contract). A

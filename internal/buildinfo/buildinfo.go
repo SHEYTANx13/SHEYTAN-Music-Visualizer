@@ -17,8 +17,13 @@ import (
 
 // Linker-injected variables. Keep this the only competing version
 // authority in the repository.
+//
+// Product-facing policy: every product build carries the single label
+// "BETA" until the product is fully functional. There are no numbered
+// app release labels in this phase; dependency and toolchain versions
+// stay exact and numeric where reproducible builds require them.
 var (
-	version = "0.1.0-dev"
+	version = "BETA"
 	commit  = "unknown"
 	date    = "unknown"
 	builtBy = "local"
@@ -55,7 +60,7 @@ func orDefault(s, def string) string {
 // fall back to development defaults; control characters are collapsed.
 func Normalized() Info {
 	return Info{
-		Version:   orDefault(sanitize(version), "0.1.0-dev"),
+		Version:   orDefault(sanitize(version), "BETA"),
 		Commit:    orDefault(sanitize(commit), "unknown"),
 		Date:      orDefault(sanitize(date), "unknown"),
 		BuiltBy:   orDefault(sanitize(builtBy), "local"),
