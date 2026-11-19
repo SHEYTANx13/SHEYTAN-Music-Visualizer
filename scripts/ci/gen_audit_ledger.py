@@ -51,7 +51,7 @@ FINDINGS = {
     "internal/export/export_test.go": "F-EX-05 low fixed (fixture double-write)",
     "scripts/bench/startup-bench.sh": "F-BN-01 medium fixed (absolute path); F-BN-02 low open (rotation offset)",
     "scripts/build/build-linux.sh": "F-CI-01 medium fixed (observer exit code)",
-    ".github/workflows/build-desktop.yml": "F-CI-02 medium fixed (verdict separation)",
+    ".github/workflows/build.yml": "F-CI-02 medium fixed (verdict separation)",
     "scripts/ci/tests/test-codeql-coverage-inventory.sh": "F-CI-03 low fixed (stale production count)",
 }
 

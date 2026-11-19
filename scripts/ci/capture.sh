@@ -82,7 +82,11 @@ ci_capture() {
     printf 'STEP: %s\n' "$step"
     printf 'STARTED: %s\n' "$started"
     printf 'WORKDIR: %s\n' "$workdir"
-    printf 'COMMAND: %s\n' "$(printf '%s' "$*" | ci_sanitize_str)"
+    # Run 44449832903 repair (A5 fixture): ci_sanitize_str takes its
+    # input as a PARAMETER, not stdin. The former pipe form
+    # `printf '%s' "$*" | ci_sanitize_str` called it with no argument,
+    # so the COMMAND record line rendered empty on every host.
+    printf 'COMMAND: %s\n' "$(ci_sanitize_str "$*")"
     printf 'TOOL_CONTEXT: %s\n' "$(ci_sanitize_str "${CI_TOOL_CONTEXT:--}")"
     printf ':: OUTPUT (stdout+stderr from first byte) ::\n'
   } >>"$CI_LOG_FILE"

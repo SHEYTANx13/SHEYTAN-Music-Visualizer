@@ -1,8 +1,25 @@
-name: build-desktop
+name: build
 
-# Desktop build/verification workflow — NOT a release pipeline.
-# Triggers: push to main, pull requests to main, manual dispatch.
-# No automatic release/tag publication.
+# Canonical application build/verification workflow - NOT a release
+# pipeline. This file is the ONE source-of-truth build workflow,
+# consolidated from the retired .github/workflows/build-desktop.yml (that
+# file no longer exists; the latest-update override requires exactly one
+# canonical build workflow). Triggers: push to main, pull requests to
+# main, manual dispatch. No automatic release/tag publication.
+#
+# Run 44449832903 parse repair: that hosted run failed with
+# "Unexpected symbol: '${'" on three collector download steps whose
+# conditions used the malformed single-brace form
+#   if: ${ always() && !cancelled() }
+# (former build-desktop.yml lines 1154/1163/1172). A workflow-file parse
+# failure is total: NO job ran, nothing was built, no artifact existed.
+# All conditions now use either the simplest valid form
+# (`if: always()`, no braces) or the exact `${{ expression }}` form.
+# scripts/ci/tests/test-expression-syntax.sh reparses every workflow
+# with a real YAML parser, rejects any `if:` value containing a `${`
+# that is not `${{`, and negative-proves the three historical malformed
+# strings; the preflight job runs that gate on every push so the defect
+# class cannot return silently.
 #
 # DAG contract (repaired for run 42026322748; CodeQL made independent for
 # run 43612608237): preflight, build-windows and build-linux are
@@ -61,7 +78,7 @@ on:
 # an active run or replacing older pending runs. queue: max keeps up to 100
 # pending runs in FIFO order; additional runs are subject to GitHub's queue cap.
 concurrency:
-  group: build-desktop-${{ github.ref }}
+  group: build-${{ github.ref }}
   queue: max
   cancel-in-progress: false
 
@@ -110,14 +127,14 @@ jobs:
         run: |
           set -Eeuo pipefail
           {
-            echo "=== OS image ==="
+            echo "[section] OS image"
             grep PRETTY_NAME /etc/os-release || echo "PRETTY_NAME: not present in /etc/os-release"
             uname -srm
-            echo "=== runner identity (allowlisted, non-secret context only) ==="
+            echo "[section] runner identity (allowlisted, non-secret context only)"
             echo "runner_os=${RUNNER_OS:-unknown} runner_name=${RUNNER_NAME:-unknown}"
             echo "image_os=${ImageOS:-unknown} image_version=${ImageVersion:-unknown}"
             echo "job=${GITHUB_JOB:-unknown} run_id=${GITHUB_RUN_ID:-unknown} attempt=${GITHUB_RUN_ATTEMPT:-unknown}"
-            echo "=== toolchain identity ==="
+            echo "[section] toolchain identity"
             go version || echo "ERROR: go not found on PATH (evidence failure)"
             echo "GOOS=$(go env GOOS 2>/dev/null || echo '?') GOARCH=$(go env GOARCH 2>/dev/null || echo '?') CGO_ENABLED=$(go env CGO_ENABLED 2>/dev/null || echo '?') GOTOOLCHAIN=$(go env GOTOOLCHAIN 2>/dev/null || echo '?')"
             gcc --version | head -1 || echo "ERROR: gcc not found on PATH"
@@ -174,6 +191,17 @@ jobs:
         run: |
           set -Eeuo pipefail
           bash scripts/ci/tests/test-verdict-expression.sh
+
+      # Run 44449832903 repair gate: reparse every workflow with a real
+      # YAML parser and reject the malformed single-brace `${ ... }`
+      # expression form that made that hosted run fail to parse (zero
+      # jobs ran). Negative-proven against the three historical
+      # annotation strings; see scripts/ci/tests/test-expression-syntax.sh.
+      - name: Workflow expression syntax and YAML parse gate (run 44449832903 repair)
+        if: ${{ always() && !cancelled() }}
+        run: |
+          set -Eeuo pipefail
+          bash scripts/ci/tests/test-expression-syntax.sh
 
       # Independent static gates. !cancelled() (not the default success
       # condition) so the gofmt/tidy/verify gates still run even if the
@@ -257,18 +285,18 @@ jobs:
           mkdir -p ci-logs bin-tools gate-results
           start_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           {
-            echo "=== actionlint v1.7.12 (pinned, checksum-verified) ==="
+            echo "[section] actionlint v1.7.12 (pinned, checksum-verified)"
             curl -fsSL -o bin-tools/actionlint.tgz \
               https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
             echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  bin-tools/actionlint.tgz" | sha256sum -c -
             tar -xzf bin-tools/actionlint.tgz -C bin-tools actionlint
             bin-tools/actionlint --version | head -1
-            echo "=== uv/uvx identity (installed by the SHA-pinned setup-uv action above) ==="
+            echo "[section] uv/uvx identity (installed by the SHA-pinned setup-uv action above)"
             command -v uvx >/dev/null 2>&1 || { echo "ERROR: uvx not on PATH after setup-uv"; exit 1; }
             uvx --version | tee ci-logs/uv-version.txt
             UVX_PATH="$(command -v uvx)"
             echo "uvx executable path: $UVX_PATH"
-            echo "=== zizmor 1.32.0 version check (SAME isolated uvx environment as the audit) ==="
+            echo "[section] zizmor 1.32.0 version check (SAME isolated uvx environment as the audit)"
             uvx --from 'zizmor==1.32.0' zizmor --version | tee ci-logs/zizmor-version.txt
             grep -q '^zizmor 1\.32\.0$' ci-logs/zizmor-version.txt || { echo "ERROR: pinned zizmor version verification failed"; exit 1; }
           } 2>&1 | tee ci-logs/workflow-static-tools.log
@@ -719,15 +747,15 @@ jobs:
           status_file=ci-logs/prereq-status.txt
           : > "$status_file"
           {
-            echo "=== OS image (ubuntu-26.04 migration evidence) ==="
+            echo "[section] OS image (ubuntu-26.04 migration evidence)"
             grep PRETTY_NAME /etc/os-release || echo "PRETTY_NAME: not present in /etc/os-release"
             uname -srm
-            echo "=== apt-get update ==="
+            echo "[section] apt-get update"
             if ! sudo apt-get update; then
               echo "ERROR: apt-get update failed"
               echo fail >> "$status_file"
             fi
-            echo "=== apt-get install Fyne prerequisites (minimal) ==="
+            echo "[section] apt-get install Fyne prerequisites (minimal)"
             if ! sudo apt-get install -y --no-install-recommends \
               gcc pkg-config \
               libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
@@ -736,12 +764,12 @@ jobs:
               echo "ERROR: Fyne prerequisite install failed"
               echo fail >> "$status_file"
             fi
-            echo "=== distro FFmpeg for export integration tests (external to the product) ==="
+            echo "[section] distro FFmpeg for export integration tests (external to the product)"
             if ! sudo apt-get install -y --no-install-recommends ffmpeg; then
               echo "ERROR: FFmpeg install failed (export integration tests will report their exact missing-encoder behavior)"
               echo fail >> "$status_file"
             fi
-            echo "=== virtual-display GUI smoke tooling (Xvfb + X11 inspection) ==="
+            echo "[section] virtual-display GUI smoke tooling (Xvfb + X11 inspection)"
             # The GUI smoke gate must be able to PROVE a mapped window, not
             # merely an alive process: xvfb provides the display, x11-utils
             # provides xdpyinfo (server readiness) and xwininfo (window map).
@@ -749,14 +777,14 @@ jobs:
               echo "ERROR: Xvfb/x11-utils install failed (GUI smoke will be recorded BLOCKED, never passed without tooling)"
               echo fail >> "$status_file"
             fi
-            echo "=== pkg-config modules ==="
+            echo "[section] pkg-config modules"
             if pkg-config --modversion gl egl x11 xrandr xinerama xcursor xi xxf86vm wayland-client xkbcommon; then
               echo "pkg-config modules: OK"
             else
               echo "ERROR: pkg-config module check failed"
               echo fail >> "$status_file"
             fi
-            echo "=== encoders/ffprobe availability (informational) ==="
+            echo "[section] encoders/ffprobe availability (informational)"
             ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx264|aac" | head -4 || echo "(encoder list unavailable)"
             ffprobe -version 2>/dev/null | head -1 || echo "(ffprobe unavailable)"
           } 2>&1 | tee ci-logs/linux-compiler.log
@@ -1094,7 +1122,14 @@ jobs:
     # never observes an in_progress/pending job conclusion (a defensive
     # IN_PROGRESS classification still exists in the collector).
     needs: [preflight, build-windows, build-linux, build-macos, build-android, build-ios]
-    if: ${{ always() && !cancelled() }}
+    # if: always() - plain valid form (run 44449832903 repair). The
+    # collector is the central always-runs job: it must execute after
+    # success, failure, skip AND cancellation (while a runner remains
+    # available) so it can report cancelled jobs and their missing
+    # bundles instead of silently disappearing. `&& !cancelled()` is
+    # deliberately NOT retained here: it would suppress the very report
+    # needed after cancellation (latest-update override section A).
+    if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
@@ -1124,7 +1159,7 @@ jobs:
 
       - name: Download preflight log part
         id: download_preflight
-        if: ${{ always() && !cancelled() }}
+        if: always()
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1133,7 +1168,7 @@ jobs:
 
       - name: Download Windows log part
         id: download_windows
-        if: ${{ always() && !cancelled() }}
+        if: always()
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1142,7 +1177,7 @@ jobs:
 
       - name: Download Linux log part
         id: download_linux
-        if: ${{ always() && !cancelled() }}
+        if: always()
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1151,7 +1186,14 @@ jobs:
 
       - name: Download macOS log part
         id: download_macos
-        if: ${ always() && !cancelled() }
+        # Run 44449832903 annotation (former build-desktop.yml line 1154):
+        # this condition used the malformed single-brace form
+        # `if: ${ always() && !cancelled() }`, which is not a valid
+        # GitHub Actions expression and made the whole workflow file fail
+        # to parse (zero jobs ran). Repaired to the simplest valid form;
+        # the three annotations are regression fixtures in
+        # scripts/ci/tests/test-expression-syntax.sh.
+        if: always()
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1160,7 +1202,10 @@ jobs:
 
       - name: Download Android log part
         id: download_android
-        if: ${ always() && !cancelled() }
+        # Run 44449832903 annotation (former build-desktop.yml line 1163):
+        # malformed single-brace `if: ${ always() && !cancelled() }`;
+        # repaired like the macOS step above.
+        if: always()
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1169,7 +1214,10 @@ jobs:
 
       - name: Download iOS log part
         id: download_ios
-        if: ${ always() && !cancelled() }
+        # Run 44449832903 annotation (former build-desktop.yml line 1172):
+        # malformed single-brace `if: ${ always() && !cancelled() }`;
+        # repaired like the macOS step above.
+        if: always()
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1177,7 +1225,7 @@ jobs:
           path: ci-parts/ios-logs-part-attempt${{ github.run_attempt }}
 
       - name: Write run manifest
-        if: ${{ always() && !cancelled() }}
+        if: always()
         env:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
@@ -1203,7 +1251,7 @@ jobs:
           set -Eeuo pipefail
           mkdir -p ci-parts
           {
-            echo "=== per-artifact download outcomes ==="
+            echo "[section] per-artifact download outcomes"
             echo "preflight=${DOWNLOAD_PREFLIGHT:-not-run}"
             echo "windows=${DOWNLOAD_WINDOWS:-not-run}"
             echo "linux=${DOWNLOAD_LINUX:-not-run}"
@@ -1211,7 +1259,7 @@ jobs:
             echo "android=${DOWNLOAD_ANDROID:-not-run}"
             echo "ios=${DOWNLOAD_IOS:-not-run}"
             echo "(CodeQL is an independent workflow; its artifacts are neither downloaded nor consolidated here)"
-            echo "=== downloaded evidence tree ==="
+            echo "[section] downloaded evidence tree"
             find ci-parts -maxdepth 4 -type f -printf '%P\n' | sort || true
           } | tee ci-parts/download-diagnostics.txt
           # Deterministic manifest via scripts/ci/write-manifest.py (stdlib
@@ -1235,7 +1283,7 @@ jobs:
       # Run even after setup-go fails; the rc is recorded so the emergency
       # non-Go fallback can still publish a truthful report.
       - name: Build collector binary
-        if: ${{ always() && !cancelled() }}
+        if: always()
         run: |
           set -Eeuo pipefail
           mkdir -p bin ci-logs
@@ -1253,7 +1301,7 @@ jobs:
           exit "$rc"
 
       - name: Run collector (report is written even when coverage is incomplete)
-        if: ${{ always() && !cancelled() }}
+        if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -1286,7 +1334,7 @@ jobs:
               echo "started_utc: $start_utc"
               echo "ended_utc: $end_utc"
               echo "collector_rc: $rc (0=complete, 1=incomplete coverage, 2=hard error, 3=required job failed)"
-              echo "--- collector stdout+stderr (verbatim) ---"
+              echo "[verbatim] collector stdout+stderr follows"
               cat "$cap"
             } | tee ci-logs/collector-run.log
             rm -f "$cap"
@@ -1313,7 +1361,7 @@ jobs:
           exit 0
 
       - name: Emergency fallback report (collector binary unavailable or hard-failed)
-        if: ${{ always() && !cancelled() }}
+        if: always()
         env:
           RESULT_PREFLIGHT: ${{ needs.preflight.result }}
           RESULT_WINDOWS: ${{ needs.build-windows.result }}
@@ -1338,7 +1386,7 @@ jobs:
 
       - name: Validate the final consolidated report before upload
         id: validate_report
-        if: ${{ always() && !cancelled() }}
+        if: always()
         run: |
           set -Eeuo pipefail
           test -s ci-out/SHEYTAN-Music-Visualizer-all-logs.txt || { echo "ERROR: consolidated report missing or empty"; exit 1; }
@@ -1411,6 +1459,13 @@ jobs:
 
       - name: Delete temporary log-part artifacts (single-artifact guarantee)
         id: cleanup_artifacts
+        # Justified exception to the always() collection contract
+        # (latest-update override section A: "For ordinary cleanup steps
+        # that must not run after cancellation, use a separately justified
+        # valid condition"): deleting per-job log-part artifacts after a
+        # user cancellation is pointless, and this braced form is the
+        # exact valid `${{ expression }}` syntax. The collector job
+        # itself still runs after cancellation via `if: always()`.
         if: ${{ always() && !cancelled() && steps.validate_report.outcome == 'success' && steps.upload_report.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1495,6 +1550,13 @@ jobs:
   final-verdict:
     name: final-verdict (all required gates must be green)
     needs: [preflight, build-windows, build-linux, build-macos, build-android, build-ios, collect-logs]
+    # Braced valid form, deliberately kept for cancellation (latest-update
+    # override section A justification): after a user cancellation the
+    # collector (if: always()) has already recorded every cancelled job
+    # and missing bundle in the consolidated report, so a verdict job
+    # start would add no evidence. This is the exact ${{ }} syntax; the
+    # malformed single-brace form is impossible here and is rejected by
+    # scripts/ci/tests/test-expression-syntax.sh.
     if: ${{ always() && !cancelled() }}
     timeout-minutes: 5
     permissions:

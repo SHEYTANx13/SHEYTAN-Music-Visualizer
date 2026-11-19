@@ -4,7 +4,8 @@ Status: current as of run 42939743766 repair (2026-11-11).
 
 ## The one consolidated report
 
-Every `build-desktop` run uploads exactly ONE user-facing diagnostics
+Every `build` run (the canonical workflow build.yml, renamed from
+build-desktop.yml in the run 44449832903 repair) uploads exactly ONE user-facing diagnostics
 artifact:
 
 - **`SHEYTAN-Music-Visualizer-all-logs.txt`** — a single plain-text file,

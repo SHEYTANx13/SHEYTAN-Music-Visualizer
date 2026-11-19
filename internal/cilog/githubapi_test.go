@@ -114,7 +114,7 @@ func TestAPIConclusionsAreAuthoritativeWithoutErrorMarkers(t *testing.T) {
 		API:          NewGitHubClient(srv.URL, "o/n", "test-token-abc"),
 	}
 	opts.Meta = RunMeta{
-		Product: "SHEYTAN Music Visualizer", Workflow: "build-desktop.yml",
+		Product: "SHEYTAN Music Visualizer", Workflow: "build.yml",
 		RunID: "1", Attempt: "1", CommitSHA: "7c830c0", Ref: "refs/heads/main",
 		Event: "push", CodeQL: &CodeQLSpec{Workflow: "codeql.yml", Job: "codeql", Result: "success"},
 		Jobs: []JobSpec{

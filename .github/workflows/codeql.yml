@@ -5,7 +5,9 @@ name: codeql
 # Invocation model (run 43612608237 repair — INDEPENDENT workflow):
 #   - This workflow is a normal top-level workflow: it self-triggers on
 #     push to main, pull requests to main, the weekly schedule, and
-#     workflow_dispatch. build-desktop.yml no longer calls it as a
+#     workflow_dispatch. build.yml (the canonical build workflow,
+#     renamed from build-desktop.yml in the run 44449832903 repair) no
+#     longer calls it as a
 #     reusable workflow, no longer waits for it, and never gates its own
 #     verdict on CodeQL results.
 #   - The `workflow_call` trigger and its `called` input were removed; the
@@ -34,7 +36,7 @@ on:
   workflow_dispatch:
 
 # Newer commits supersede stale security scans of the same ref. This group
-# is scoped to THIS workflow only — it never cancels build-desktop runs.
+# is scoped to THIS workflow only — it never cancels build.yml runs.
 concurrency:
   group: codeql-${{ github.ref }}
   cancel-in-progress: true
@@ -569,7 +571,7 @@ jobs:
           fi
 
           # rc=3 (a required analyze job failed) is verdict-separated like
-          # build-desktop.yml: the collector's own conclusion reports
+          # build.yml: the collector's own conclusion reports
           # COLLECTION health only; the upstream analysis failure is
           # surfaced by the dedicated final-verdict job below.
           if [ "$rc" = "3" ]; then

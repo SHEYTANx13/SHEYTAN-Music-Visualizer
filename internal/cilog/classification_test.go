@@ -55,7 +55,7 @@ func TestSkippedJobNeverFetchesRawLog(t *testing.T) {
 	mux.HandleFunc("/repos/o/n/actions/runs/1/attempts/1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"total_count":1,"jobs":[{"id":51,"name":"build-linux (ubuntu-26.04, x64)",
-			"status":"completed","conclusion":"skipped","started_at":null,"completed_at":null,"steps":[]}]}`))
+                        "status":"completed","conclusion":"skipped","started_at":null,"completed_at":null,"steps":[]}]}`))
 	})
 	mux.HandleFunc("/repos/o/n/actions/jobs/51/logs", func(w http.ResponseWriter, r *http.Request) {
 		logRequests++
@@ -67,7 +67,7 @@ func TestSkippedJobNeverFetchesRawLog(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
 	res, raw := collectWithMeta(t, opts, RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-linux", Result: ResultSkipped, Artifact: "linux-logs-part", Required: true}},
 	})
 
@@ -96,7 +96,7 @@ func TestInProgressJobClassifiedNotFailed(t *testing.T) {
 	mux.HandleFunc("/repos/o/n/actions/runs/1/attempts/1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"total_count":1,"jobs":[{"id":52,"name":"build-linux (ubuntu-26.04, x64)",
-			"status":"in_progress","conclusion":null,"started_at":"2026-11-05T12:21:00Z","completed_at":null,"steps":[]}]}`))
+                        "status":"in_progress","conclusion":null,"started_at":"2026-11-05T12:21:00Z","completed_at":null,"steps":[]}]}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -104,7 +104,7 @@ func TestInProgressJobClassifiedNotFailed(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
 	res, raw := collectWithMeta(t, opts, RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-linux", Result: ResultSuccess, Artifact: "linux-logs-part", Required: true}},
 	})
 
@@ -130,8 +130,8 @@ func TestRecoveredFromAPI(t *testing.T) {
 	mux.HandleFunc("/repos/o/n/actions/runs/1/attempts/1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"total_count":1,"jobs":[{"id":53,"name":"build-windows (windows-latest, x64, UCRT64)",
-			"status":"completed","conclusion":"failure","started_at":"2026-11-05T12:21:00Z","completed_at":"2026-11-05T12:25:00Z",
-			"steps":[{"number":1,"name":"Build and verify Windows x64 desktop app","status":"completed","conclusion":"failure"}]}]}`))
+                        "status":"completed","conclusion":"failure","started_at":"2026-11-05T12:21:00Z","completed_at":"2026-11-05T12:25:00Z",
+                        "steps":[{"number":1,"name":"Build and verify Windows x64 desktop app","status":"completed","conclusion":"failure"}]}]}`))
 	})
 	mux.HandleFunc("/repos/o/n/actions/jobs/53/logs", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("2026-11-05T12:24Z step failed: compile error in ui/fyne/studio.go\n"))
@@ -142,7 +142,7 @@ func TestRecoveredFromAPI(t *testing.T) {
 	root := t.TempDir() // NO artifact part at all
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
 	res, raw := collectWithMeta(t, opts, RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-windows", Result: ResultFailure, Artifact: "windows-logs-part", Required: true}},
 	})
 
@@ -168,7 +168,7 @@ func TestCompletedJob404IsAPIUnavailable(t *testing.T) {
 	mux.HandleFunc("/repos/o/n/actions/runs/1/attempts/1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"total_count":1,"jobs":[{"id":54,"name":"build-linux (ubuntu-26.04, x64)",
-			"status":"completed","conclusion":"failure","started_at":"2026-11-05T12:21:00Z","completed_at":"2026-11-05T12:24:00Z","steps":[]}]}`))
+                        "status":"completed","conclusion":"failure","started_at":"2026-11-05T12:21:00Z","completed_at":"2026-11-05T12:24:00Z","steps":[]}]}`))
 	})
 	mux.HandleFunc("/repos/o/n/actions/jobs/54/logs", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
@@ -179,7 +179,7 @@ func TestCompletedJob404IsAPIUnavailable(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
 	res, raw := collectWithMeta(t, opts, RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-linux", Result: ResultFailure, Artifact: "linux-logs-part", Required: true}},
 	})
 
@@ -209,7 +209,7 @@ func TestDeduplicatedFailureShowsBothSources(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
 	res, raw := collectWithMeta(t, opts, RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{
 			{Name: "preflight", Result: ResultSuccess, Artifact: "preflight-logs-part", Required: true},
 			{Name: "build-windows", Result: ResultFailure, Artifact: "windows-logs-part", Required: true},
@@ -237,8 +237,8 @@ func TestReconciledAggregateRow(t *testing.T) {
 	mux.HandleFunc("/repos/o/n/actions/runs/1/attempts/1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"total_count":2,"jobs":[
-			{"id":61,"name":"Analyze (go)","status":"completed","conclusion":"failure","steps":[]},
-			{"id":62,"name":"Analyze (actions)","status":"completed","conclusion":"success","steps":[]}]}`))
+                        {"id":61,"name":"Analyze (go)","status":"completed","conclusion":"failure","steps":[]},
+                        {"id":62,"name":"Analyze (actions)","status":"completed","conclusion":"success","steps":[]}]}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -246,7 +246,7 @@ func TestReconciledAggregateRow(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, API: NewGitHubClient(srv.URL, "o/n", "")}
 	res, raw := collectWithMeta(t, opts, RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		CodeQL: &CodeQLSpec{Workflow: "codeql.yml", Job: "analyze", Result: "failure"},
 		Jobs: []JobSpec{
 			{Name: "analyze (go)", Result: ResultFailure, Artifact: "codeql-logs-part-go", Required: true},
@@ -276,7 +276,7 @@ func TestGatesNotReachedStatement(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root}
 	meta := RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "preflight", Result: ResultFailure, Artifact: "preflight-logs-part", Required: true}},
 	}
 	// The artifact directory EXISTS but carries only a bootstrap note — no
@@ -309,7 +309,7 @@ func TestBlockedGateIsDistinctState(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root}
 	meta := RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-linux", Result: ResultFailure, Artifact: "linux-logs-part", Required: true}},
 	}
 	dir := root + "/linux-logs-part"
@@ -342,7 +342,7 @@ func TestSilentCodeQLBuildRecordIsPass(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root}
 	meta := RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "analyze (go)", Result: ResultSuccess, Artifact: "codeql-logs-part-go", Required: true}},
 	}
 	dir := root + "/codeql-logs-part-go"
@@ -381,7 +381,7 @@ func TestOverlayWarningStaysDiagnostic(t *testing.T) {
 	root := t.TempDir()
 	opts := Options{PartsRoot: root}
 	meta := RunMeta{
-		Workflow: "build-desktop.yml", RunID: "1", Attempt: "1",
+		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "analyze (go)", Result: ResultSuccess, Artifact: "codeql-logs-part-go", Required: true}},
 	}
 	dir := root + "/codeql-logs-part-go"

@@ -34,7 +34,7 @@ assert_not_contains() { # assert_not_contains <file> <needle> <what>
   if grep -qF -- "$2" "$1" 2>/dev/null; then echo "  forbidden text present in $1: $2 ($3)"; return 1; else return 0; fi
 }
 
-BD=".github/workflows/build-desktop.yml"
+BD=".github/workflows/build.yml"
 CQ=".github/workflows/codeql.yml"
 
 echo "=============================================================="
@@ -195,13 +195,16 @@ check("B7-no-needs-preflight-windows",
 check("B7-no-needs-preflight-linux",
       not re.search(r"build-linux:\n(?:.*\n)*?\s+needs: preflight", bd))
 
-# B11: collector depends on all evidence jobs with always() && !cancelled()
-# (run 43612608237: CodeQL is an independent workflow — the collector's
-# needs list covers exactly this workflow's own evidence jobs)
+# B11: collector depends on ALL evidence jobs (preflight + the five
+# platform targets of the run 44330231458 five-platform expansion; the
+# former three-job assertion was stale) and the collector's job-level
+# condition is the plain always() form (run 44449832903 repair: the
+# consolidated report must still be produced after a user cancellation,
+# so && !cancelled() must not return there).
 check("B11-collector-needs-all",
-      "needs: [preflight, build-windows, build-linux]" in bd
+      "needs: [preflight, build-windows, build-linux, build-macos, build-android, build-ios]" in bd
       and "needs: [preflight, build-windows, build-linux, codeql]" not in bd)
-check("B11-collector-always", "if: ${{ always() && !cancelled() }}" in bd)
+check("B11-collector-always", "\n    if: always()\n" in bd)
 
 # B10: CodeQL legs independent. The reusable workflow declares the two
 # language analyses as SEPARATE top-level jobs (no matrix), so neither
@@ -217,7 +220,7 @@ check("B13-dispatch", "workflow_dispatch:" in bd)
 
 # bootstrap step in every evidence-producing job
 check("A-bootstrap-preflight+platform", bd.count("Bootstrap CI log directories (guaranteed evidence)") >= 4,
-      f"found {bd.count('Bootstrap CI log directories (guaranteed evidence)')} in build-desktop.yml")
+      f"found {bd.count('Bootstrap CI log directories (guaranteed evidence)')} in build.yml")
 check("A-bootstrap-codeql-analyze", cq.count("Bootstrap CI log directories (guaranteed evidence)") >= 2)
 check("A-bootstrap-script-exists", open("scripts/ci/bootstrap-logs.sh").read().startswith("#!/usr/bin/env bash"))
 check("A-bootstrap-ps1-exists", "New-Item -ItemType Directory -Force -Path $logDir" in open("scripts/ci/Bootstrap-Logs.ps1").read())
@@ -238,12 +241,12 @@ check("upload-dir-not-glob", "          path: ci-logs\n" in bd and "          pa
 check("fallback-report-step", "emergency-report.sh" in bd and "emergency-report.sh" in cq)
 check("fallback-script-exists", open("scripts/ci/emergency-report.sh").read().startswith("#!/usr/bin/env bash"))
 
-# fail-closed after upload (build-desktop: the dedicated final-verdict
+# fail-closed after upload (build.yml: the dedicated final-verdict
 # gate fails closed; codeql.yml keeps its own "Fail closed after the
 # report upload attempt" step for the standalone collect job)
 check("fail-closed", "Fail closed unless every required gate succeeded" in bd)
 
-# manifest ↔ artifact name agreement (build-desktop): the jq manifest
+# manifest ↔ artifact name agreement (build.yml): the jq manifest
 # builds each artifact name via --arg from RUN_ATTEMPT, and the download
 # steps use the same attempt-suffixed names — both spellings must exist.
 # run-42376176493: the manifest is written by scripts/ci/write-manifest.py
@@ -255,7 +258,7 @@ check("manifest-agreement",
 check("manifest-writer-source-agreement",
       "preflight-logs-part-attempt{attempt}" in open("scripts/ci/write-manifest.py").read())
 
-# least privilege (run 43612608237 architecture): build-desktop must NOT
+# least privilege (run 43612608237 architecture): build.yml must NOT
 # call the codeql workflow at all (no reusable call, no broadened
 # permissions for it anywhere in the build DAG), and the standalone
 # codeql.yml must keep its workflow-level default at contents: read with
@@ -361,7 +364,7 @@ done
 for tok in stage-ffmpeg-tools ffmpeg_tools_staged; do
   assert_not_contains "$BL" "$tok" "build-linux.sh: retired token '$tok'" || D35OK=0
   assert_not_contains "$BW" "$tok" "build-windows.ps1: retired token '$tok'" || D35OK=0
-  assert_not_contains "$BD" "$tok" "build-desktop.yml: retired token '$tok'" || D35OK=0
+  assert_not_contains "$BD" "$tok" "build.yml: retired token '$tok'" || D35OK=0
 done
 for fld in package_status ffmpeg_binaries_bundled media_tools_downloader_fixture app_launch_self_check h264_export_proof h265_software_export_proof; do
   assert_contains "$BD" "$fld" "workflow reads the package-status field '$fld'" || D35OK=0
@@ -396,7 +399,7 @@ fi
   echo "log bootstrap: PASS" > parts/preflight-logs-part-attempt1/bootstrap.log
   printf 'EXIT_CODE: 1 FAIL\nCOMMAND: go test' > parts/windows-logs-part-attempt1/phase2-build.log
   cat > parts/manifest.json <<'JSONX'
-{"product":"SHEYTAN Music Visualizer","workflow":"build-desktop.yml","run_id":"1","attempt":"1",
+{"product":"SHEYTAN Music Visualizer","workflow":"build.yml","run_id":"1","attempt":"1",
  "jobs":[{"name":"preflight","result":"success","artifact":"preflight-logs-part-attempt1","required":true},
          {"name":"build-windows","result":"failure","artifact":"windows-logs-part-attempt1","required":true}]}
 JSONX
@@ -506,8 +509,12 @@ fi
   export REF='refs/heads/release/v1.0"weird\κυρία}'   # quotes, backslash, Unicode, slashes
   export EVENT=workflow_dispatch REPO='SHEYTANx13/SHEYTAN-Music-Visualizer' RUNNER_OS_LABEL=Linux
   export STARTED_AT=""   # optional value may be empty
+  # Five-platform contract (run 44330231458 expansion): the writer
+  # fail-closes unless every platform conclusion is present via env.
   export RESULT_PREFLIGHT=success RESULT_WINDOWS=skipped RESULT_LINUX=failure
+  export RESULT_MACOS=success RESULT_ANDROID=skipped RESULT_IOS=skipped
   export DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=skipped DOWNLOAD_LINUX=success
+  export DOWNLOAD_MACOS=success DOWNLOAD_ANDROID=skipped DOWNLOAD_IOS=skipped
   python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m1/manifest.json >writer.out 2>&1
   echo $? > writer.rc
 )
@@ -520,13 +527,17 @@ assert doc["ref"] == 'refs/heads/release/v1.0"weird\\κυρία}', doc["ref"]
 assert doc["event"] == "workflow_dispatch"
 assert doc["start_time_utc"] == ""
 results = {j["name"]: j["result"] for j in doc["jobs"]}
-assert results == {"preflight": "success", "build-windows": "skipped", "build-linux": "failure"}, results
+assert results == {"preflight": "success", "build-windows": "skipped", "build-linux": "failure",
+                   "build-macos": "success", "build-android": "skipped", "build-ios": "skipped"}, results
+required = {j["name"]: j["required"] for j in doc["jobs"]}
+assert required == {"preflight": True, "build-windows": True, "build-linux": True,
+                    "build-macos": True, "build-android": False, "build-ios": False}, required
 # run 43612608237: CodeQL is an independent workflow — the caller manifest
 # records that fact without declaring CodeQL evidence rows.
 assert doc.get("codeql", {}).get("job") == "independent-workflow", doc.get("codeql")
 assert doc["codeql"]["result"] == "NOT_APPLICABLE"
 outs = {d["artifact"]: d["outcome"] for d in doc["downloads"]}
-assert len(outs) == 3 and all(v in ("success", "skipped") for v in outs.values())
+assert len(outs) == 6 and all(v in ("success", "skipped") for v in outs.values())
 assert not any("codeql" in a for a in outs)
 assert os.path.getsize(os.path.join(t, "m1/manifest.json")) > 0
 assert not [f for f in os.listdir(os.path.join(t, "m1")) if f.startswith(".manifest-")], "temp file left behind"
@@ -534,7 +545,7 @@ assert os.path.exists(os.path.join(t, "m1/manifest-diagnostics.txt"))
 print("H31-OK")
 PYCHK
 then
-  report PASS "H30" "manifest writer: hostile ref (quotes/backslash/Unicode/slashes), empty optional, all three desktop job conclusions, independent-CodeQL marker, atomic rename, no temp leftovers, diagnostics written"
+  report PASS "H30" "manifest writer: hostile ref (quotes/backslash/Unicode/slashes), empty optional, all five platform job conclusions, independent-CodeQL marker, atomic rename, no temp leftovers, diagnostics written"
 else
   report FAIL "H30" "manifest writer fixture failed"
 fi

@@ -24,7 +24,7 @@ current user prompt.
    - Version/build metadata: `internal/buildinfo/buildinfo.go`
    - App log location and policy: `internal/logging/logging.go`
    - CI log capture/consolidation contract: `scripts/ci/` +
-     `internal/cilog` + `.github/workflows/build-desktop.yml`
+     `internal/cilog` + `.github/workflows/build.yml`
    Never duplicate these authorities; import the Go packages or link the
    documents instead.
 

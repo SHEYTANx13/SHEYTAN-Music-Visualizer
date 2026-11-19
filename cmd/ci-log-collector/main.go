@@ -1,7 +1,10 @@
 // Command ci-log-collector builds the deterministic consolidated
-// plain-text run report for the build-desktop workflow. The report is
-// ONE plain-text file named exactly `log.txt`, uploaded as an artifact
-// named exactly `log.txt` containing exactly that one file.
+// plain-text run report for the canonical build workflow
+// (.github/workflows/build.yml, consolidated from the retired
+// build-desktop.yml in the run 44449832903 repair). The report is
+// ONE plain-text file named exactly `SHEYTAN-Music-Visualizer-all-logs.txt`,
+// uploaded as an artifact of exactly that name containing exactly that
+// one file.
 //
 // Standard library only: the collector must stay runnable even when the
 // application dependency graph is broken.

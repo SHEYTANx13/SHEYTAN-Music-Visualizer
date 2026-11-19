@@ -16,6 +16,16 @@ import (
 // birth-time component, TestSameInodeReplacementRequiresReconfirmation
 // phase 1 accepted the stale confirmation on Windows ("same-(dev,ino)
 // replacement accepted").
+//
+// Run 44449832903 hardening: the primitive now also carries the
+// documented 128-bit FILE_ID_INFO file identity. On NTFS the low quad
+// embeds the MFT record sequence number (the generation discriminator
+// that NTFS increments on every record reuse) and the high quad is
+// exposed through RootIdentity.InoHigh. The sequence defeats NTFS name
+// tunneling, which can otherwise restore the original CreationTime
+// when a directory name is deleted and recreated inside the ~15 s
+// tunnel window. The same-directory stability assertion below also
+// pins InoHigh through sameRootIdentity's primary comparison.
 func TestWindowsIdentityCarriesCreationTime(t *testing.T) {
 	dir := t.TempDir()
 	id, err := identityFromPath(dir)
@@ -34,6 +44,9 @@ func TestWindowsIdentityCarriesCreationTime(t *testing.T) {
 	}
 	if !sameRootIdentity(id, id2) {
 		t.Fatalf("identity of the same directory instance is not stable: %+v vs %+v", id, id2)
+	}
+	if id.InoHigh != id2.InoHigh {
+		t.Fatalf("128-bit file identity upper quad unstable for the same directory instance: %d vs %d", id.InoHigh, id2.InoHigh)
 	}
 }
 

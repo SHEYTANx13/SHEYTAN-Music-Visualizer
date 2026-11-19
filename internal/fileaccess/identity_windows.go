@@ -3,12 +3,30 @@
 package fileaccess
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
+
+// fileIdInfo mirrors the undocumented-in-x/sys FILE_ID_INFO structure
+// returned by GetFileInformationByHandleEx with the FileIdInfo class:
+//
+//	typedef struct _FILE_ID_INFO {
+//	    ULONG       VolumeSerialNumber;
+//	    FILE_ID_128 FileId;
+//	} FILE_ID_INFO;
+//
+// On NTFS the low 64 bits of FileId are the file reference number: the
+// MFT record index in bits 0..47 and the record SEQUENCE NUMBER in bits
+// 48..63. On ReFS the full 128 bits are the durable file ID.
+type fileIdInfo struct {
+	VolumeSerialNumber uint32
+	FileId             [16]byte
+}
 
 // identityOf extracts the platform filesystem identity of a stat
 // result. The FileInfo-only view on Windows carries no file identity,
@@ -46,30 +64,41 @@ func filetimeUnixNanos(ft windows.Filetime) int64 {
 }
 
 // identityFromPath resolves the canonical filesystem identity of a
-// path using the Windows volume/file identity primitives: the volume
-// serial number plus the file index from GetFileInformationByHandle
-// (the NTFS file ID), with modification time and size as additional
-// discriminators.
+// path from the OPENED directory handle, using the Windows generation
+// discriminator required for the selected-root security contract:
+// volume serial + 128-bit file ID + directory creation FILETIME.
 //
-// The handle's CreationTime is captured as the birth-time component.
-// This is the run 44330231458 Windows go-test repair: a delete+recreate
-// can REUSE the same MFT record (volume serial + file index), and the
-// recreated directory's modification time can coincide with the
-// recorded one, so mtime alone cannot distinguish the old and the new
-// directory instance. CreationTime is the per-instance discriminator
-// on Windows; without it a stale confirmation against a same-file-id
-// replacement was accepted (TestSameInodeReplacementRequiresReconfirmation
-// failed with "same-(dev,ino) replacement accepted"). A filesystem that
-// does not report a usable creation time yields the zero pair, which
-// the comparison skips as absent.
+// The 128-bit file identity comes from GetFileInformationByHandleEx
+// (class FileIdInfo). On NTFS its low quad carries the MFT record
+// sequence number, which NTFS increments every time a record is freed
+// and reused by a new directory instance. This is the per-instance
+// generation and it defeats BOTH known reuse classes:
+//
+//  1. Same-(volume, file-index) replacement: the recreated directory
+//     can land on the SAME MFT record, but the sequence number
+//     differs, so the file reference differs.
+//  2. NTFS file-system tunneling: when a name is deleted and
+//     recreated within the ~15 s tunnel window, NTFS can RESTORE the
+//     original CreationTime, so a creation-time-only discriminator
+//     can still accept a replacement. The sequence number cannot be
+//     restored by tunneling.
+//
+// This is the run 44330231458 Windows go-test repair
+// (TestSameInodeReplacementRequiresReconfirmation failed with
+// "same-(dev,ino) replacement accepted"), hardened per the selected-root
+// identity contract: identity is derived from the actual opened handle,
+// and when the FileIdInfo class is unsupported (exFAT/FAT/network
+// shares) the ByHandleFileInformation file index and the creation-time
+// discriminator remain as the weaker fallback, with InoHigh absent.
 func identityFromPath(path string) (RootIdentity, error) {
 	h, err := os.Open(path)
 	if err != nil {
 		return RootIdentity{}, err
 	}
 	defer h.Close()
+	handle := windows.Handle(h.Fd())
 	var bi windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(windows.Handle(h.Fd()), &bi); err != nil {
+	if err := windows.GetFileInformationByHandle(handle, &bi); err != nil {
 		return RootIdentity{}, fmt.Errorf("fileaccess: windows file identity: %w", err)
 	}
 	fi, err := os.Stat(path)
@@ -87,6 +116,18 @@ func identityFromPath(path string) (RootIdentity, error) {
 	if bn := filetimeUnixNanos(bi.CreationTime); bn > 0 {
 		id.BtimeSec = bn / int64(time.Second)
 		id.BtimeNsec = bn % int64(time.Second)
+	}
+	// Upgrade to the documented 128-bit file identity. On success Ino
+	// becomes the full 64-bit file reference (index + MFT sequence) and
+	// InoHigh the upper quad. A filesystem that rejects the class keeps
+	// the ByHandleFileInformation index and zero InoHigh; the creation
+	// time captured above stays the per-instance discriminator there.
+	var fii fileIdInfo
+	if err := windows.GetFileInformationByHandleEx(
+		handle, uint32(windows.FileIdInfo),
+		(*byte)(unsafe.Pointer(&fii)), uint32(unsafe.Sizeof(fii))); err == nil {
+		id.Ino = binary.LittleEndian.Uint64(fii.FileId[0:8])
+		id.InoHigh = binary.LittleEndian.Uint64(fii.FileId[8:16])
 	}
 	return id, nil
 }

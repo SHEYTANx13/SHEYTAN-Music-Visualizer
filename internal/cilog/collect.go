@@ -1,7 +1,9 @@
 // Package cilog implements the consolidated CI run-log collector for
 // SHEYTAN Music Visualizer. The final user-facing diagnostic output of
-// the build-desktop workflow is ONE plain-text file named exactly
-// `log.txt`, produced by this package.
+// the canonical build workflow (.github/workflows/build.yml, consolidated
+// from the retired build-desktop.yml in the run 44449832903 repair) is
+// ONE plain-text file named exactly `SHEYTAN-Music-Visualizer-all-logs.txt`,
+// produced by this package.
 //
 // It reads a small JSON run manifest and a parts root containing
 // per-job log artifacts in namespaced directories (one directory per

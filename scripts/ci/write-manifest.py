@@ -125,7 +125,7 @@ def build_caller_manifest() -> dict:
     return {
         "product": "SHEYTAN Music Visualizer",
         "repository": env("REPO"),
-        "workflow": "build-desktop.yml",
+        "workflow": "build.yml",
         "run_id": run_id,
         "attempt": attempt,
         "commit_sha": sha,
@@ -140,7 +140,7 @@ def build_caller_manifest() -> dict:
             "job": "independent-workflow",
             "result": "NOT_APPLICABLE",
             "note": (
-                "CodeQL is no longer invoked by build-desktop.yml; it is "
+                "CodeQL is no longer invoked by build.yml; it is "
                 "a standalone workflow (push/pull_request/schedule/dispatch) "
                 "whose results are consolidated in that workflow's own "
                 "log.txt and never gate this build."

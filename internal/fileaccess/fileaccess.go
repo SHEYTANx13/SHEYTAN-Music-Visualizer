@@ -77,16 +77,25 @@ const (
 // requires fresh confirmation.
 //
 // Dev+Ino are the primary components (device/inode on Unix; volume
-// serial/file index on Windows). The remaining fields are OPTIONAL
-// platform discriminators: a zero pair means "absent on this platform"
-// and the comparison skips it. They exist because a delete+recreate can
-// REUSE the same device+inode pair (observed on CI ext4 runners), so
-// the birth/modification/status-change timestamps pin the identity to
-// the specific directory instance (identity_linux.go statx btime,
-// identity_windows.go mtime).
+// serial + 64-bit file reference on Windows). InoHigh carries the upper
+// 64 bits of the Windows 128-bit FILE_ID_INFO file identity (zero on
+// Unix and on Windows filesystems that do not support the class). The
+// remaining fields are OPTIONAL platform discriminators: a zero pair
+// means "absent on this platform" and the comparison skips it. They
+// exist because a delete+recreate can REUSE the same device+inode pair
+// (observed on CI ext4 runners), so the birth/modification/status-change
+// timestamps pin the identity to the specific directory instance
+// (identity_linux.go statx btime, identity_windows.go creation time).
 type RootIdentity struct {
 	Dev uint64
 	Ino uint64
+	// InoHigh is the upper half of the Windows 128-bit file identity
+	// (FILE_ID_INFO.FileId). On NTFS the lower half already carries the
+	// MFT record sequence number; on ReFS the full 128 bits are the
+	// durable file ID. Zero means absent; a present-vs-absent mismatch
+	// rejects the identity (fail closed), and on Unix both sides are
+	// always zero so the component is inert there.
+	InoHigh uint64
 
 	Size      int64
 	CtimeSec  int64
@@ -106,7 +115,7 @@ func tsPresent(sec, nsec int64) bool { return sec != 0 || nsec != 0 }
 // A recreation that reuses dev+ino but was created at a different time
 // is therefore rejected deterministically.
 func sameRootIdentity(a, b RootIdentity) bool {
-	if a.Dev != b.Dev || a.Ino != b.Ino {
+	if a.Dev != b.Dev || a.Ino != b.Ino || a.InoHigh != b.InoHigh {
 		return false
 	}
 	if a.Size != 0 && b.Size != 0 && a.Size != b.Size {
@@ -743,8 +752,8 @@ func extensionAllowed(rel string, exts []string) bool {
 // Every identity component participates so two different directory
 // instances (same path, replaced content) never share a scope ID.
 func newScopeID(root string, id RootIdentity) string {
-	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%d|%d|%d|%d|%d|%d|%d",
-		root, id.Dev, id.Ino, id.Size,
+	h := sha256.Sum256([]byte(fmt.Sprintf("%s|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d",
+		root, id.Dev, id.Ino, id.InoHigh, id.Size,
 		id.CtimeSec, id.CtimeNsec, id.BtimeSec, id.BtimeNsec,
 		id.MtimeSec, id.MtimeNsec)))
 	return "scope-" + hex.EncodeToString(h[:8])

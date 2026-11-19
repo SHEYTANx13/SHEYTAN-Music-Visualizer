@@ -2,7 +2,7 @@
 
 ## astral-sh/setup-uv v8.2.0 → v10.3.3
 
-- Changed file: `.github/workflows/build-desktop.yml` (the only active
+- Changed file: `.github/workflows/build.yml` (the only active
   `setup-uv` reference in the repository):
   - `uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0`
     → `uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3`
@@ -22,7 +22,7 @@
   `enable-cache: false`).
 - A repository-wide search confirmed no other `setup-uv` reference
   exists in workflows, composite actions, docs, fixtures or policy
-  files (`grep -rn "setup-uv"` → only build-desktop.yml; the
+  files (`grep -rn "setup-uv"` → only build.yml; the
   unmerged upstream `dependabot/github_actions/astral-sh/setup-uv-10.3.3`
   branch exists on the remote but no local file referenced it).
 - Not executed in this environment: a hosted Actions run that would
@@ -86,7 +86,7 @@
 - License: xz is BSD-3-Clause (upstream LICENSE, unchanged by the
   patch upgrade); setup-uv is MIT.
 - Rollback: revert the two file changes
-  (`.github/workflows/build-desktop.yml` pin + `go get
+  (`.github/workflows/build.yml` pin + `go get
   github.com/ulikunitz/xz@v0.5.15 && go mod tidy`) — no schema or
   API changes are coupled to either upgrade.
 

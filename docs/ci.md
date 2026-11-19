@@ -131,7 +131,8 @@ process (`Cannot bind argument to parameter 'Path' because it is null`).
 
 The contract now has three independent layers:
 
-1. **Workflow job env** — `build-desktop.yml` defines
+1. **Workflow job env** — `build.yml` (renamed from build-desktop.yml
+   in the run 44449832903 repair) defines
    `SHEYTAN_REPO_ROOT: ${{ github.workspace }}` at the build-windows job
    scope, so every step and child process inherits it.
 2. **Parent script** — `build-windows.ps1` sets

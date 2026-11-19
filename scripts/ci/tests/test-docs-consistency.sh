@@ -22,7 +22,7 @@ for name in \
   'SHEYTAN-Music-Visualizer-windows-x64.zip' \
   'SHEYTAN-Music-Visualizer-linux-x64.tar.gz' \
   'SHEYTAN-Music-Visualizer-all-logs.txt'; do
-  if grep -q "$name" .github/workflows/build-desktop.yml && grep -rq "$name" docs/ readme.md; then
+  if grep -q "$name" .github/workflows/build.yml && grep -rq "$name" docs/ readme.md; then
     ok "artifact name documented and wired: $name"
   else
     bad "artifact name missing in workflow or docs: $name"

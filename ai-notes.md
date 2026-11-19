@@ -98,7 +98,7 @@ external `note.md`.
 | `scripts/ci/Capture-Step.ps1` | PowerShell equivalent (immediate `$LASTEXITCODE` capture, exception recording) |
 | `scripts/build/build-linux.sh` | Linux verification ladder with `--mode preflight|desktop` |
 | `scripts/build/build-windows.ps1` | Windows verification ladder + portable staging/ZIP/PE validation |
-| `.github/workflows/build-desktop.yml` | preflight / build-windows (UCRT64) / build-linux / collect-logs with namespaced log parts and fail-closed consolidation |
+| `.github/workflows/build.yml` (renamed from build-desktop.yml, run 44449832903 repair) | preflight / build-windows (UCRT64) / build-linux / build-macos / build-android / build-ios / collect-logs with namespaced log parts and fail-closed consolidation |
 | `.github/workflows/codeql.yml` | CodeQL go(manual)/actions(none) matrix, least privilege, SHA pins |
 | `license.md` | sole licensing authority: Parsaetak Proprietary License v1.1 adapted to this product + verified third-party inventory |
 | `readme.md` | user-facing product truth and quickstart |

@@ -30,7 +30,16 @@
 set -Eeuo pipefail
 
 fail=0
-workflows_dir="$(dirname "$0")/../../.github/workflows"
+# Three levels up from scripts/ci/tests = repository root (the former
+# `../../` path resolved to scripts/.github/workflows, which does not
+# exist, so the loop below silently scanned zero files - a rot this
+# repair closes with the explicit existence guard).
+workflows_dir="$(cd "$(dirname "$0")/../../../.github/workflows" && pwd)"
+if [ ! -d "$workflows_dir" ]; then
+  echo "ERROR: workflows directory not found: $workflows_dir"
+  exit 1
+fi
+wf_count=0
 
 check_workflow() {
   local wf="$1"
@@ -66,7 +75,7 @@ check_workflow() {
   if [ -z "${loop_gates// }" ]; then
     return
   fi
-  case_gates="$(grep -oE '^\s+[a-z][a-z0-9-]*\)[[:space:]]+result="\$\{\{ needs\.[a-z][a-z0-9-]*\.result \}\}"' "$wf" | sed -E 's/^\s+([a-z][a-z0-9-]*)\).*/\1/' | tr '\n' ' ')"
+  case_gates="$(grep -oE '^\s+[a-z][a-z0-9_-]*\)[[:space:]]+result="\$\{\{ needs\.[a-z][a-z0-9_-]*\.result \}\}"' "$wf" | sed -E 's/^\s+([a-z][a-z0-9_-]*)\).*/\1/' | tr '\n' ' ')"
   for g in $loop_gates; do
     if ! echo "$case_gates" | tr ' ' '\n' | grep -qx "$g"; then
       echo "ERROR: $wf loops over gate '$g' but has no literal 'result=\"\${{ needs.$g.result }}\"' case branch for it"
@@ -80,8 +89,15 @@ export -f check_workflow 2>/dev/null || true
 
 for wf in "$workflows_dir"/*.yml "$workflows_dir"/*.yaml; do
   [ -e "$wf" ] || continue
+  wf_count=$((wf_count + 1))
   check_workflow "$wf"
 done
+
+if [ "$wf_count" -eq 0 ]; then
+  echo "FAIL: verdict-expression fixture scanned zero workflow files (path rot guard)"
+  exit 1
+fi
+echo "verdict-expression fixture scanned $wf_count workflow file(s)"
 
 if [ "$fail" -ne 0 ]; then
   echo "FAIL: verdict-expression fixture detected non-conforming workflow expression(s)"

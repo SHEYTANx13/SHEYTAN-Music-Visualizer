@@ -3,7 +3,8 @@ r"""record-gate-result.py — structured static-workflow-validation gate record.
 
 Run 43612608237 repair: the preflight job previously embedded this JSON
 record inside a `python3 -c "..."` string in .github/workflows/
-build-desktop.yml. The string quoted the actionlint ignore list with
+build.yml (renamed from build-desktop.yml in the run 44449832903
+repair). The string quoted the actionlint ignore list with
 sequences like `\\$\\/\\.github` that, after shell double-quote processing,
 reached Python as `\\.` / `\\/` invalid escape sequences and emitted:
 
@@ -16,9 +17,9 @@ scripts/ci/*.py helper with warnings promoted to errors
 (`python3 -W error::SyntaxWarning -m py_compile`).
 
 The ignore list below must stay in sync with the `-ignore` flags passed to
-actionlint in build-desktop.yml. Run 43612608237 removed the third entry
+actionlint in build.yml. Run 43612608237 removed the third entry
 (the `$/` self-repository reusable-workflow-call pattern) because CodeQL is
-no longer called as a reusable workflow from build-desktop.yml, which also
+no longer called as a reusable workflow from build.yml, which also
 removed the offending escape sequences at their source.
 
 Usage:
@@ -40,7 +41,7 @@ import sys
 ACTIONLINT_VERSION = "1.7.12"
 ZIZMOR_VERSION = "1.32.0"
 # Keep in exact sync with the actionlint -ignore flags in
-# .github/workflows/build-desktop.yml (plain-text descriptions of the two
+# .github/workflows/build.yml (plain-text descriptions of the two
 # documented upstream compatibility exceptions; no regex metacharacters).
 ACTIONLINT_IGNORES = [
     'unexpected key "queue" for "concurrency" section',

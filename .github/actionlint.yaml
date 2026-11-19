@@ -9,7 +9,8 @@
 #
 # NOTE (evidence honesty): listing the label here makes local linting
 # pass; it does NOT prove GitHub currently offers the ubuntu-26.04
-# image. The first hosted run of build-desktop.yml is the proof point;
+# image. The first hosted run of build.yml (renamed from
+# build-desktop.yml in the run 44449832903 repair) is the proof point;
 # until then the hosted-availability status is NOT OBSERVED.
 self-hosted-runner:
   labels:
