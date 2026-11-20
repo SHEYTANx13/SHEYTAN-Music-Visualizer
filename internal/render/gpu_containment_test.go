@@ -1,3 +1,5 @@
+//go:build !sheytan_nogpu
+
 package render
 
 // gpu_containment_test.go — GPU failure containment fixtures (run

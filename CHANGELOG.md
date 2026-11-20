@@ -1,5 +1,82 @@
 # Changelog
 
+## Run 44462492262 work order — Go-Gui + GoGPU + Wails shell architecture (2026-11-19/20)
+
+- **Shell architecture**: one toolkit-free Go application core
+  (`internal/*`, unchanged ownership rules) with TWO alternative
+  presentation shells and ONE renderer subsystem behind an explicit
+  contract. No shell owns another shell's window or widget tree; the
+  product never starts both shells in one session.
+- **`ui/gogui` + `cmd/app-gogui` (new)**: the native Go-Gui shell on
+  Gio (`gioui.org v0.10.3`) — one top-level window, top command bar,
+  the eleven canonical workspace tabs (Home, Studio, Worlds,
+  Templates, Library, Export, Requirements, Downloads, System Files,
+  Settings, Diagnostics), responsive breakpoints from the design
+  tokens, the CPU-frame preview bridge over the real
+  `internal/render` renderer (bounded buffers, stale-session guard,
+  honest backend evidence), command dispatch over the shared command
+  IDs, `--smoke N` windowed runtime evidence mode, `--self-check`,
+  `--version`, `--build-info-json`.
+- **`internal/transport/wails` + `cmd/app-wails` + `frontend/wails/dist`
+  (new)**: the Wails v3.1.0 web shell as a clearly isolated, buildable
+  vertical slice — a validated DTO-only Go service facade, embedded
+  token-driven vanilla HTML/CSS/JS frontend, `/api/*` JSON endpoints
+  for every facade capability. Built cgo-free in the
+  `purego,sheytan_nogpu` profile for linux/windows/darwin; the profile
+  renders through the honest CPU renderer (the gogpu fakecgo stack and
+  Wails' purego fakecgo cannot link into one binary — documented in
+  `internal/render/gpu_unlinked.go`).
+- **`design/tokens.json` + `design` package + `internal/presentation`
+  (new)**: the canonical framework-independent token document
+  (obsidian/crimson/ember/gold identity, Subtle/Ritual/Infernal
+  intensity presets, reduced-motion/reduced-glow, breakpoints,
+  accessibility contrast pairs) and the shared shell contracts:
+  11 navigation destinations, stable command IDs, typed event
+  envelopes with bounded coalescing delivery, versioned DTOs, and the
+  versioned workspace-layout store with corrupt-state recovery and
+  v0→v1 migration.
+- **Fyne removed**: `ui/fyne` deleted after the replacement surface
+  reached parity; `go.mod`/`go.sum` carry no Fyne reference;
+  `cmd/sheytan-music-visualizer` is now the toolkit-free CLI authority
+  (version / build-info-json / self-check / export-cli; the desktop
+  shells have their own entry points). `scripts/ci/check-no-fyne.sh`
+  enforces the removal in preflight.
+- **`internal/perfpolicy` (new)**: the persisted performance-mode
+  store moved out of the deleted Fyne package into the toolkit-free
+  core (same corrupt-document-is-error semantics).
+- **`internal/render` build profiles**: `Preference`, `ParsePreference`
+  and helper contracts moved to profile-neutral files; the
+  `sheytan_nogpu` profile (`gpu_unlinked.go`) provides the honest
+  GPU-unlinked fallback (exact reason in `BackendInfo`, CPU selection,
+  nothing reported detected/available/executed).
+- **CI capture/sanitizer repair (run 44462492262 failures)**:
+  `scripts/ci/capture.sh` no longer uses `sed` at all (BSD-safe):
+  the canonical sanitizer is the new `cmd/cisanitize` (Go,
+  SanitizeAndRedact with credential/token redaction), with a
+  byte-exact pure-stdlib Python fallback
+  (`scripts/ci/sanitize_bytes.py --self-test`). Windows producers
+  write LF-only logs through `scripts/ci/Write-SanitizedChunk.ps1`;
+  `Capture-Step.ps1` and `Invoke-CapturedProcess.ps1` never emit CRLF
+  into ci-logs and route every chunk through the sanitizer chain;
+  `Bootstrap-Logs.ps1` writes UTF-8-no-BOM LF content. Every
+  ci-logs producer is routed at capture time; the byte-level
+  validator stays strict. Sanitizer portability regression suite
+  (`scripts/ci/tests/test-sanitizer-portable.sh`) runs in preflight
+  and on the macOS/iOS jobs (BSD-safe).
+- **Workflow**: preflight gains the Fyne-removal gate; all five
+  platform jobs build the shells they own (Linux: native shell +
+  Wails 3-target; Windows: both shells cgo-free; macOS: native shell
+  + darwin Wails); Android gains a recorded gomobile APK attempt
+  (no emulator claim — UNAVAILABLE is recorded); iOS gains a recorded
+  simulator `.app` attempt with the device path recorded
+  `BLOCKED_SIGNING_NOT_CONFIGURED`. Windowed smokes are EXPERIMENTAL,
+  recorded, never faked.
+- **Honesty notes**: the windowed gio smoke could not be exercised in
+  the migration sandbox (gio maps no window under Xvfb there — silent
+  block, recorded); compile, self-check, unit, vet and full-suite
+  evidence is local and green; hosted-run status remains pending.
+
+
 ## Run 44094081531 work order - GitHub Requirements Manager core (2026-11-18)
 
 - **`internal/ghreq` (new)**: the package-acquisition core for the

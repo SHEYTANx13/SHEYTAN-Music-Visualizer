@@ -1,3 +1,5 @@
+//go:build !sheytan_nogpu
+
 package render
 
 // registry_test.go — collection/registry integrity for the visualizer

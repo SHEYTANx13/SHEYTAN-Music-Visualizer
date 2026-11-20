@@ -1,3 +1,5 @@
+//go:build !sheytan_nogpu
+
 package render
 
 // gpu_preference_test.go — tests for the backend preference model, the

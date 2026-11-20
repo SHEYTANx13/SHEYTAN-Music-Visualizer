@@ -79,10 +79,25 @@
 
 - No gratuitous dependency churn: `go.mod`/`go.sum` diff is exactly
   the xz upgrade (non-negotiable 12).
-- `fyne.io/fyne/v2 v2.8.2` remains the production UI framework; no
-  Cogent Core/Gio dependency was added to the production module
-  (work-order item D: POC only, and this environment cannot run a
-  credible native Windows/Linux GUI POC — see note.md).
+- SHELL MIGRATION (2026-11-19/20, run 44462492262): `fyne.io/fyne/v2`
+  was REMOVED from the production module after the replacement shells
+  reached parity (`go.mod`/`go.sum` contain no Fyne reference;
+  `scripts/ci/check-no-fyne.sh` enforces this in CI). The current
+  presentation dependencies are:
+  - `gioui.org v0.10.3` — the native Go-Gui shell toolkit
+    (`cmd/app-gogui`, `ui/gogui`). Actively maintained pure-Go GUI with
+    desktop targets; Linux desktop requires cgo with the Vulkan/X11/
+    Wayland/xkbcommon dev stack; Windows desktop is cgo-free.
+  - `github.com/wailsapp/wails/v3 v3.1.0` — the alternative
+    web-technology shell (`cmd/app-wails`,
+    `internal/transport/wails`, `frontend/wails/dist`). Built ONLY in
+    the cgo-free purego profile with the `sheytan_nogpu` tag, because
+    the gogpu fakecgo stack and Wails' purego fakecgo cannot link into
+    one binary; that profile renders through the honest CPU renderer.
+  - `github.com/gogpu/wgpu v0.34.15` (pinned, unchanged) — the native
+    GPU renderer behind `internal/render`; `v0.35.2` exists upstream
+    and was deliberately NOT adopted (no blind upgrades; the pinned
+    uniform contract is test-locked).
 - License: xz is BSD-3-Clause (upstream LICENSE, unchanged by the
   patch upgrade); setup-uv is MIT.
 - Rollback: revert the two file changes

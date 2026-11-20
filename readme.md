@@ -6,10 +6,28 @@ Product/brand/project home: [SHEYTAN](https://github.com/SHEYTANx13) ·
 
 SHEYTAN Music Visualizer is a **local-first desktop studio** that imports a
 song, analyzes it locally, derives a deterministic per-track visual identity
-("Song DNA") and renders music-reactive visuals in a native Fyne studio —
+("Song DNA") and renders music-reactive visuals in a native Go studio shell —
 then exports synchronized H.264/AAC MP4 videos up to 3840×2160 (4K). Nothing
 runs in the cloud: decoding, analysis, rendering and encoding happen on your
 machine. No account, no telemetry, no bundled codec binaries.
+
+> Shell architecture (2026-11-19/20 migration, run 44462492262): one
+> toolkit-free Go application core (`internal/*`) with TWO alternative
+> presentation shells and ONE renderer subsystem behind a contract:
+> - **Native Go-Gui shell** (`cmd/app-gogui`, Gio `gioui.org v0.10.3`) —
+>   the production desktop shell: one window, the eleven workspace tabs,
+>   SHEYTAN design tokens, CPU-frame preview bridge, honest GPU evidence.
+> - **Wails v3 web shell** (`cmd/app-wails`, `wailsapp/wails/v3 v3.1.0`) —
+>   an alternative cgo-free web-technology shell (purego profile,
+>   `sheytan_nogpu` build tag: the web-shell profile renders through the
+>   honest CPU renderer and never claims native GPU execution).
+> - **GoGPU renderer** (`github.com/gogpu/wgpu v0.34.15`) — the
+>   specialized GPU renderer behind `internal/render`; adapter evidence
+>   states (detected/available/selected/executed/verified) are exact and
+>   software adapters are never labeled GPU.
+> The former Fyne production UI (`ui/fyne`) was removed only after the
+> replacement surface reached parity; no hidden Fyne fallback remains
+> (enforced by `scripts/ci/check-no-fyne.sh` in CI).
 
 > Phase 2 status: the studio slice is implemented and locally verified on
 > Linux x64 (build, tests, race tests, real MP4 export proofs at 1080p and
@@ -40,14 +58,19 @@ premium, cinematic, restrained way: black dominates, red is the accent, warm
 white is reserved for text and peaks. The identity tokens are defined once in
 `internal/brand/brand.go` (obsidian background `#080808`, volcanic surfaces,
 dark-blood crimson `#9F0B18`, infernal action red `#D51D2A`, ember
-highlights) and drive the real Fyne theme (`ui/fyne/theme.go`) plus the four
-brand palettes used by the visualizer (`internal/visualizer`).
+highlights) are the identity source. The canonical, framework-independent presentation
+encoding of the same direction lives in `design/tokens.json` (intensity
+presets Subtle/Ritual/Infernal, reduced-motion and reduced-glow switches,
+responsive breakpoints, accessibility contrast pairs) and is consumed by
+BOTH shells via the `design` package — see
+[docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) — plus the four brand
+palettes used by the visualizer (`internal/visualizer`).
 
 ## What works today (Phase 2 slice)
 
 | Capability | Status |
 |---|---|
-| Studio shell: top bar, library/presets rail, live preview, inspector, transport, export dialog | DELIVERED (Fyne v2.8.2, hellish theme) |
+| Studio shell: top command bar, eleven workspace tabs (Home/Studio/Worlds/Templates/Library/Export/Requirements/Downloads/System Files/Settings/Diagnostics), library, live preview, inspector, transport, export dialog | DELIVERED (native Go-Gui/Gio shell `cmd/app-gogui` with SHEYTAN token theme; Wails v3 web shell `cmd/app-wails` as the alternative cgo-free profile) |
 | Import WAV (int16/int24/int32 + IEEE float32), MP3, FLAC, Ogg/Vorbis via first-party Go decoders | DELIVERED (`internal/audio`) |
 | Import AAC/M4A/ALAC via the user's local FFmpeg (optional adapter, never bundled) | DELIVERED as an optional adapter (`internal/audio/decoders_ffmpeg.go`; registers only when FFmpeg is present) |
 | Layered compositions: a dimmed background mode behind the primary mode | DELIVERED (CPU renderer, deterministic, bounded intensity; `internal/render`) |
@@ -109,7 +132,10 @@ decoders are never shared across goroutines.
 ## Build prerequisites
 
 - **Go** at the `go.mod` toolchain (1.27 line). The desktop build uses CGO.
-- **Linux**: `gcc`, `pkg-config` and the Fyne native libraries
+- **Linux**: `gcc`, `pkg-config` and the native UI libraries
+  (Gio/Gogpu stack: `libvulkan-dev`, `libxkbcommon-dev`,
+  `libxkbcommon-x11-dev`, `libwayland-dev`, `libegl1-mesa-dev`,
+  `mesa-vulkan-drivers` for software-Vulkan smoke runs)
   (`libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev
   libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libwayland-dev
   libxkbcommon-dev xorg-dev` on Debian/Ubuntu).

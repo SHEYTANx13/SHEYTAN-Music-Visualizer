@@ -1,3 +1,5 @@
+//go:build !sheytan_nogpu
+
 package render
 
 // gpu_noop_test.go — deterministic proof of the full GPU pipeline:
@@ -122,20 +124,6 @@ func TestCPURendererAllModesAndDeterminism(t *testing.T) {
 // wgpu backend (noop or software rasterizer).
 func isSoftwareLabel(api string) bool {
 	return api == "noop" || api == "software"
-}
-
-func testBins() []float64 {
-	bins := make([]float64, visualizer.NumVizBins)
-	for i := range bins {
-		bins[i] = 0.5 + 0.4*sin2(float64(i))
-	}
-	return bins
-}
-
-func sin2(x float64) float64 {
-	// deterministic pseudo-wave without importing math at top level
-	s, _ := sincos(x)
-	return s
 }
 
 func sincos(x float64) (float64, float64) {

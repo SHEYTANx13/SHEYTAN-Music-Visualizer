@@ -21,7 +21,7 @@
 //
 // Thread safety: Collect is a pure read-only snapshot builder; it is
 // safe to call from a background goroutine (the UI calls it off the
-// UI thread and marshals widget updates back through fyne.Do).
+// UI thread and marshals widget updates back through the shell event loop).
 package sysprofile
 
 import (

@@ -1,3 +1,5 @@
+//go:build !sheytan_nogpu
+
 package render
 
 // gpu_recovery_test.go — device-loss RECOVERY drills (roadmap Phase 2

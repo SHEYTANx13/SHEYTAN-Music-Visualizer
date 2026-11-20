@@ -191,7 +191,7 @@ func (m *Manager) Snapshot() Snapshot {
 
 // Subscribe registers a snapshot listener (called from the manager's
 // caller goroutine on every state/progress change; the UI marshals via
-// fyne.Do).
+// the shell event loop).
 func (m *Manager) Subscribe(fn func(Snapshot)) {
 	m.subMu.Lock()
 	m.subs = append(m.subs, fn)

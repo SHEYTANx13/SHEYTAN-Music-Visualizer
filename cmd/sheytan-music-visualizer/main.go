@@ -1,9 +1,12 @@
-// Command sheytan-music-visualizer is the desktop application entry
-// point for SHEYTAN Music Visualizer.
+// Command sheytan-music-visualizer is the toolkit-free CLI authority of
+// SHEYTAN Music Visualizer BETA. It never opens a window: the desktop
+// shells are separate entry points (cmd/app-gogui for the native
+// Go-Gui shell, cmd/app-wails for the Wails v3 web shell), and this
+// command owns the non-GUI product surface used by CI and scripting.
 //
 // Usage:
 //
-//	sheytan-music-visualizer                 start the studio window
+//	sheytan-music-visualizer                 print CLI guidance, then exit
 //	sheytan-music-visualizer --version       print product/build metadata
 //	sheytan-music-visualizer --build-info-json
 //	                                         print machine-readable build
@@ -23,7 +26,6 @@ import (
 	"math"
 	"os"
 	"regexp"
-	"runtime/debug"
 	"strings"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
@@ -35,7 +37,6 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
-	fyneapp "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/ui/fyne"
 )
 
 var hexColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
@@ -95,30 +96,18 @@ func run(args []string, out, errW io.Writer) int {
 			FPS: *exportFPS, Seconds: *exportSeconds, Codec: *exportCodec,
 		}, out, errW)
 	default:
-		err := runGUI()
-		if err == nil {
-			return 0
-		}
-		// Recoverable-panic reporting at the main boundary: log the
-		// stack where possible and return a real failure. A fatal
-		// runtime error (out of memory, arbitrary termination) is NOT
-		// recoverable and is never claimed to be.
-		fmt.Fprintf(errW, "%s: startup failed: %v\n", brand.ProductName, err)
-		return 1
+		// The CLI authority never opens a window. Point users and
+		// scripts at the shell entry points explicitly.
+		fmt.Fprintf(out, "%s CLI (toolkit-free authority; no window is opened)\n", brand.ProductName)
+		fmt.Fprintln(out, "  native Go-Gui shell:  app-gogui")
+		fmt.Fprintln(out, "  Wails v3 web shell:   app-wails")
+		fmt.Fprintln(out, "  CLI surfaces:")
+		fmt.Fprintln(out, "    --version          product and build metadata")
+		fmt.Fprintln(out, "    --build-info-json  machine-readable build identity")
+		fmt.Fprintln(out, "    --self-check       foundation invariant checks")
+		fmt.Fprintln(out, "    --export-cli       headless deterministic export diagnostic")
+		return 0
 	}
-}
-
-// runGUI launches the Fyne studio with a recoverable-panic boundary.
-func runGUI() (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("unexpected panic in GUI runtime: %v", r)
-			// The runtime log may already be open inside the UI package;
-			// stderr always carries the stack for a failed launch.
-			fmt.Fprintf(os.Stderr, "%s: PANIC (recoverable): %v\n%s", brand.ProductName, r, debug.Stack())
-		}
-	}()
-	return fyneapp.Run()
 }
 
 type check struct {

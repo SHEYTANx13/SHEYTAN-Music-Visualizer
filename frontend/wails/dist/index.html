@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>SHEYTAN Music Visualizer — BETA (Web Shell)</title>
+    <link rel="stylesheet" href="sheytan.css">
+</head>
+<body>
+    <header id="topbar" class="topbar">
+        <div class="brand">
+            <span class="brand-mark">SHEYTAN&trade;</span>
+            <span class="brand-name">Music Visualizer</span>
+            <span class="brand-beta">BETA</span>
+        </div>
+        <div class="topbar-status">
+            <span id="api-state" class="api-state api-state-pending" role="status" aria-live="polite">connecting&hellip;</span>
+            <span id="build-version" class="build-version"></span>
+        </div>
+    </header>
+
+    <nav id="tabstrip" class="tabstrip" aria-label="Workspace destinations">
+        <!-- Tab buttons are rendered by main.js from /api/destinations
+             (the canonical DestinationCatalog, including honest empty
+             states for unavailable destinations). -->
+    </nav>
+
+    <div id="error-banner" class="error-banner" hidden role="alert">
+        <span id="error-banner-text"></span>
+        <button type="button" id="error-retry">Retry</button>
+    </div>
+
+    <main id="workspace" class="workspace">
+
+        <section id="pane-home" class="pane" data-dest="home" hidden>
+            <h2>Home</h2>
+            <p class="pane-desc" id="home-desc"></p>
+            <div class="card-grid">
+                <div class="card">
+                    <h3>Build</h3>
+                    <dl id="home-build" class="kv"></dl>
+                </div>
+                <div class="card">
+                    <h3>Transport</h3>
+                    <dl id="home-transport" class="kv"></dl>
+                </div>
+                <div class="card">
+                    <h3>Renderer evidence</h3>
+                    <dl id="home-renderer" class="kv"></dl>
+                    <p class="note" id="home-renderer-note"></p>
+                </div>
+                <div class="card">
+                    <h3>Data layout</h3>
+                    <dl id="home-data" class="kv"></dl>
+                </div>
+            </div>
+            <p class="note">
+                This web shell is a control/status surface. Real-time visual
+                preview lives in the native shell; the renderer evidence above
+                is reported honestly from the backend renderer state machine.
+            </p>
+        </section>
+
+        <section id="pane-studio" class="pane" data-dest="studio" hidden>
+            <h2>Studio</h2>
+            <p class="pane-desc" id="studio-desc"></p>
+            <div class="transport">
+                <div class="transport-buttons">
+                    <button type="button" id="cmd-play-pause" data-command="transport.play-pause">Play / Pause</button>
+                    <button type="button" id="cmd-stop" data-command="transport.stop">Stop</button>
+                    <button type="button" id="cmd-seek-back" data-command="transport.seek-back">&laquo; 10s</button>
+                    <button type="button" id="cmd-seek-forward" data-command="transport.seek-forward">10s &raquo;</button>
+                </div>
+                <div class="transport-volume">
+                    <label for="volume">Volume</label>
+                    <input type="range" id="volume" min="0" max="1" step="0.01" value="0.9">
+                    <output id="volume-out" for="volume">0.90</output>
+                </div>
+            </div>
+            <div class="position-strip">
+                <span id="transport-state">state: unknown</span>
+                <span id="transport-position">position: unknown</span>
+                <span id="transport-total">total: unknown</span>
+                <span id="transport-device">device: unknown</span>
+            </div>
+            <p class="note" id="studio-track-note"></p>
+        </section>
+
+        <section id="pane-worlds" class="pane" data-dest="worlds" hidden>
+            <h2>Worlds</h2>
+            <div class="empty-state" id="empty-worlds"></div>
+        </section>
+
+        <section id="pane-templates" class="pane" data-dest="templates" hidden>
+            <h2>Templates</h2>
+            <p class="pane-desc" id="templates-desc"></p>
+            <ul id="preset-list" class="preset-list"></ul>
+        </section>
+
+        <section id="pane-library" class="pane" data-dest="library" hidden>
+            <h2>Library</h2>
+            <p class="pane-desc" id="library-desc"></p>
+            <dl id="library-summary" class="kv"></dl>
+            <p class="note">
+                Import is a native-shell action in this vertical slice
+                (command import.audio is not wired to the web layer).
+            </p>
+        </section>
+
+        <section id="pane-export" class="pane" data-dest="export" hidden>
+            <h2>Export</h2>
+            <p class="pane-desc" id="export-desc"></p>
+            <div class="empty-state">
+                Deterministic MP4 export is not wired to this web shell slice:
+                the export.start and export.cancel commands are intentionally
+                unsupported here. Use the native shell for exports.
+            </div>
+        </section>
+
+        <section id="pane-requirements" class="pane" data-dest="requirements" hidden>
+            <h2>Requirements</h2>
+            <p class="pane-desc" id="requirements-desc"></p>
+            <div class="empty-state">
+                Local media-tool (FFmpeg/FFprobe) status is managed by the
+                native shell in this vertical slice; the mediatools.install
+                and mediatools.open commands are not wired to the web layer.
+            </div>
+        </section>
+
+        <section id="pane-downloads" class="pane" data-dest="downloads" hidden>
+            <h2>Downloads</h2>
+            <div class="empty-state" id="empty-downloads"></div>
+        </section>
+
+        <section id="pane-system-files" class="pane" data-dest="system-files" hidden>
+            <h2>System Files</h2>
+            <p class="pane-desc" id="systemfiles-desc"></p>
+            <div class="empty-state">
+                Selected-scope file analysis is a native-shell surface in this
+                vertical slice; the systemfiles.analyze command is not wired
+                to the web layer.
+            </div>
+        </section>
+
+        <section id="pane-settings" class="pane" data-dest="settings" hidden>
+            <h2>Settings</h2>
+            <p class="pane-desc" id="settings-desc"></p>
+            <fieldset class="settings-group">
+                <legend>Theme intensity</legend>
+                <div id="intensity-options" class="radio-row"></div>
+            </fieldset>
+            <fieldset class="settings-group">
+                <legend>Accessibility</legend>
+                <label class="check-row">
+                    <input type="checkbox" id="opt-reduced-motion" data-setting="reduced-motion">
+                    Reduced motion
+                </label>
+                <label class="check-row">
+                    <input type="checkbox" id="opt-reduced-glow" data-setting="reduced-glow">
+                    Reduced glow
+                </label>
+            </fieldset>
+            <fieldset class="settings-group">
+                <legend>Renderer preference (read-only evidence)</legend>
+                <p class="note" id="renderer-pref-note"></p>
+            </fieldset>
+        </section>
+
+        <section id="pane-diagnostics" class="pane" data-dest="diagnostics" hidden>
+            <h2>Diagnostics</h2>
+            <p class="pane-desc" id="diagnostics-desc"></p>
+            <div class="card">
+                <h3>Self checks</h3>
+                <ul id="selfchecks" class="selfchecks"></ul>
+            </div>
+            <div class="card">
+                <h3>Snapshot</h3>
+                <pre id="diagnostics-json" class="json-view"></pre>
+            </div>
+        </section>
+
+    </main>
+
+    <footer id="statusstrip" class="statusstrip">
+        <span id="status-message">starting&hellip;</span>
+        <span class="status-spacer"></span>
+        <span id="status-checked"></span>
+        <span id="status-footer" class="status-footer"></span>
+    </footer>
+
+    <script src="main.js" type="module"></script>
+</body>
+</html>

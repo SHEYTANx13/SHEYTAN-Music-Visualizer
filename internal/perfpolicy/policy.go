@@ -1,8 +1,14 @@
-// policy_store.go — the persisted resource-policy mode inside the
+// Package perfpolicy persists the resource/performance mode inside the
 // resolved config directory (same document pattern as
-// renderer-preference.json and window-state.json: small JSON, atomic
-// replace, corrupt document is an ERROR — never a silent reset).
-package fyneapp
+// renderer-preference.json and workspace-layout.json: small JSON,
+// atomic replace, corrupt document is an ERROR — never a silent
+// reset).
+//
+// History: this store was previously package-local to the Fyne UI
+// (ui/fyne/policy_store.go). During the Go-Gui/Wails shell migration
+// it moved here because the policy belongs to the toolkit-free core:
+// both shells (and the CLI) read and write the same document.
+package perfpolicy
 
 import (
 	"encoding/json"
@@ -14,6 +20,10 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/sysprofile"
 )
+
+// DefaultFilename is the persisted performance-mode document name
+// inside the resolved config directory.
+const DefaultFilename = "system-policy.json"
 
 // policyDocument is the persisted JSON shape.
 type policyDocument struct {
@@ -31,9 +41,9 @@ func OpenPolicyStore(path string) *PolicyStore {
 	return &PolicyStore{path: path}
 }
 
-// policyStorePath is the persisted performance-mode document location.
-func policyStorePath(lay apppaths.Layout) string {
-	return filepath.Join(lay.Config, "system-policy.json")
+// StorePath returns the canonical document location for a layout.
+func StorePath(lay apppaths.Layout) string {
+	return filepath.Join(lay.Config, DefaultFilename)
 }
 
 // Load returns (mode, found, error). found=false means no stored
@@ -58,24 +68,24 @@ func (s *PolicyStore) Load() (sysprofile.PerformanceMode, bool, error) {
 }
 
 // Save persists the mode atomically (temp file + rename) so a crash
-// mid-write cannot leave a corrupt document.
+// never leaves a half-written policy document behind.
 func (s *PolicyStore) Save(m sysprofile.PerformanceMode) error {
+	// Validity gate: re-parse the mode so an invalid value is an error,
+	// never a persisted corrupt document.
 	if _, err := sysprofile.ParsePerformanceMode(string(m)); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(policyDocument{Mode: string(m)}, "", "  ")
+	b, err := json.MarshalIndent(policyDocument{Mode: string(m)}, "", "  ")
 	if err != nil {
-		return fmt.Errorf("system policy marshal: %w", err)
+		return fmt.Errorf("system policy encode failed: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("system policy dir: %w", err)
 	}
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("system policy write: %w", err)
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return fmt.Errorf("system policy write failed: %w", err)
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		return fmt.Errorf("system policy replace: %w", err)
-	}
-	return nil
+	return os.Rename(tmp, s.path)
 }

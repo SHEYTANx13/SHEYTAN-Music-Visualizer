@@ -1,3 +1,5 @@
+//go:build !sheytan_nogpu
+
 package render
 
 // gpu_adapter_class_test.go — honest adapter classification fixtures

@@ -45,8 +45,47 @@
 #            -ArgumentList @("--version")
 #   if ($r.Error) { ... fail closed ... }
 #   if ($r.ExitCode -ne 0) { ... real exit code ... }
-#   $r.StdOut  # string[] of captured stdout lines
-#   $r.StdErr  # string[] of captured stderr lines
+#   $r.StdOut  # string[] of captured stdout lines (sanitized, LF-normalized)
+#   $r.StdErr  # string[] of captured stderr lines (sanitized, LF-normalized)
+
+# Sanitizer routing (run 44462492262 repair): the captured stdout and
+# stderr text is routed through the canonical capture-time sanitizer
+# chain BEFORE the lines are returned - CI_SANITIZER_EXE (the built
+# cmd/cisanitize binary) first, then the python3 bootstrap fallback
+# scripts/ci/sanitize_bytes.py, then (only when no sanitizer is
+# available) a loud stderr marker with the raw bytes preserved; the
+# strict byte-level validator will fail that log. Output is
+# LF-normalized in EVERY path, so a caller writing the returned lines
+# into ci-logs/ can never produce CRLF control bytes. The sanitizer
+# process's own exit status is NEVER read into any result field and
+# can never replace or mask the child's exit code, which still comes
+# only from Process.ExitCode of the observed child.
+
+# Helper resolution: Write-SanitizedChunk.ps1 lives next to this file.
+# Dot-source it defensively so this helper keeps working even when
+# staged alone (the LF normalization fallback preserves the non-CRLF
+# guarantee without it).
+$sanitizerHelperPath = Join-Path $PSScriptRoot "Write-SanitizedChunk.ps1"
+if (Test-Path -LiteralPath $sanitizerHelperPath -PathType Leaf) {
+    . $sanitizerHelperPath
+}
+
+function Get-SanitizedLines {
+    # Routes one raw captured stream through the canonical sanitizer
+    # chain and returns its non-empty LF lines - the exact shape of the
+    # former "-split \"`r?`n\"" contract, now contract-compliant in every
+    # path. The sanitizer exit status is ignored here by contract.
+    param([AllowEmptyString()][string]$Raw)
+    $text = $Raw
+    if (Get-Command Write-SanitizedChunk -ErrorAction SilentlyContinue) {
+        $text = Write-SanitizedChunk -Text $Raw
+    }
+    else {
+        # Helper absent: keep the LF-only guarantee on our own.
+        $text = $Raw.Replace("`r`n", "`n").Replace("`r", "`n")
+    }
+    return @($text -split "`n" | Where-Object { $_.Length -gt 0 })
+}
 
 function Invoke-CapturedProcess {
     [CmdletBinding()]
@@ -142,8 +181,10 @@ function Invoke-CapturedProcess {
         # Give the pipes a final drain so captured output is never lost.
         try { $soTask.Wait(2000) | Out-Null } catch { }
         try { $seTask.Wait(2000) | Out-Null } catch { }
-        try { $result.StdOut = @($soTask.Result -split "`r?`n" | Where-Object { $_.Length -gt 0 }) } catch { }
-        try { $result.StdErr = @($seTask.Result -split "`r?`n" | Where-Object { $_.Length -gt 0 }) } catch { }
+        # Sanitizer routing: contract-compliant LF lines, raw bytes
+        # preserved behind a loud marker when no sanitizer is available.
+        try { $result.StdOut = Get-SanitizedLines -Raw $soTask.Result } catch { }
+        try { $result.StdErr = Get-SanitizedLines -Raw $seTask.Result } catch { }
         $result.Error = ("Invoke-CapturedProcess: child did not exit within {0}s (timed out; killed) — no exit code exists, the observation is incomplete" -f $TimeoutSeconds)
         $result.EndedUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         $result.ElapsedMilliseconds = [int64](((Get-Date).ToUniversalTime() - $startedUtc).TotalMilliseconds)
@@ -155,10 +196,10 @@ function Invoke-CapturedProcess {
     # read the REAL exit code. HasExited is re-checked and the code is
     # only reported when the OS actually exposed it — a missing exit
     # code is an error, never zero.
-    try { $result.StdOut = @($soTask.Result -split "`r?`n" | Where-Object { $_.Length -gt 0 }) } catch {
+    try { $result.StdOut = Get-SanitizedLines -Raw $soTask.Result } catch {
         $result.Error = "Invoke-CapturedProcess: stdout capture failed: $($_.Exception.Message)"
     }
-    try { $result.StdErr = @($seTask.Result -split "`r?`n" | Where-Object { $_.Length -gt 0 }) } catch {
+    try { $result.StdErr = Get-SanitizedLines -Raw $seTask.Result } catch {
         $result.Error = ($result.Error + " stderr capture failed: " + $_.Exception.Message).Trim()
     }
 

@@ -50,7 +50,7 @@ type Size struct {
 func (s Size) Valid() bool { return s.Width > 0 && s.Height > 0 }
 
 // Window is the platform surface the controller drives. The UI layer
-// adapts fyne.Window to this interface; tests use fakes.
+// each presentation shell adapts its own window type to this interface; tests use fakes.
 type Window interface {
 	// FullScreen reports the OBSERVED platform state.
 	FullScreen() bool

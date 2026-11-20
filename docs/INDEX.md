@@ -25,6 +25,7 @@ not exist. Links are verified by `scripts/ci/tests/test-docs-consistency.sh`.
 | [docs/ci.md](ci.md) | Canonical build/CI reference: toolchain per platform, `goffi_static` tag policy, hands-on build instructions, gate ownership, the `--build-info-json` identity authority, the package-status contract (VERIFIED / TEST_ONLY / UNAVAILABLE) and the final-verdict gate. |
 | [docs/CI-DIAGNOSTICS.md](CI-DIAGNOSTICS.md) | The consolidated `SHEYTAN-Music-Visualizer-all-logs.txt` diagnostics artifact, log-part lifecycle and collector contract. |
 | [docs/GPU-RENDERING.md](GPU-RENDERING.md) | Renderer selection, honest device classes, the Go↔WGSL uniform contract and the dedicated GPU palette gate. |
+| [docs/DESIGN-SYSTEM.md](DESIGN-SYSTEM.md) | Canonical design tokens (`design/tokens.json`), intensity presets, breakpoints and the token-sharing contract between the native and web shells. |
 | [docs/PERFORMANCE.md](PERFORMANCE.md) | Performance methodology, current measured baselines and the honesty rules for claims. |
 | [docs/performance-baseline.md](performance-baseline.md) | Full measured baseline history with exact commands, host identity and caveats. |
 | [docs/TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Canonical user-facing diagnostics + troubleshooting: runtime log, capability states, startup metrics, common failures with actionable fixes. |

@@ -65,8 +65,16 @@
 #   - Append a structured record: JOB, STEP, STARTED, WORKDIR, COMMAND,
 #     TOOL_CONTEXT, output, EXIT_CODE with PASS|FAIL verdict, ENDED.
 #
-# Encoding: UTF-8 without BOM is used consistently for the log
-# (PowerShell 7 default for Add-Content / Tee-Object).
+# Encoding: UTF-8 without BOM is used consistently for the log. EVERY
+# byte that enters the log file is written through [System.IO.File]::
+# AppendAllText with explicit LF line endings: Add-Content / Tee-Object
+# terminate lines with CRLF on Windows, and every CRLF is 521-class
+# control-byte evidence (run 44462492262: windows phase2-build.log
+# failed the byte-level gate on exactly this defect class). The whole
+# chunk is additionally routed through the capture-time sanitizer chain
+# (scripts/ci/Write-SanitizedChunk.ps1: CI_SANITIZER_EXE -> python
+# fallback -> LF-normalized raw with a loud marker), which adds
+# credential redaction on top of the line-level ASCII conversion below.
 
 # ASCII LOG CONTRACT (run 44330231458 remediation): every line that
 # enters the log passes through ConvertTo-AsciiLogLine, the PowerShell
@@ -103,6 +111,37 @@ function ConvertTo-AsciiLogLine {
     $s = $s -replace "-{3,}", "--"
     return $s
 }
+function ConvertTo-SanitizedLogText {
+    # Routes one log chunk through the capture-time sanitizer chain
+    # (Write-SanitizedChunk.ps1, sibling file). When the helper is
+    # unavailable the chunk is still LF-normalized: CRLF never enters
+    # the log file, whatever happens. Never throws; never masks exits.
+    param([AllowEmptyString()][string]$Text)
+    if ($script:SanitizeChunkAvailable) {
+        return (Write-SanitizedChunk -Text $Text)
+    }
+    return $Text.Replace("`r`n", "`n").Replace("`r", "`n")
+}
+
+function Add-CiLogText {
+    # The ONLY writer into CI_LOG_FILE in this file. LF-only, UTF-8
+    # without BOM, sanitized at capture time. $env:CI_LOG_FILE is
+    # resolved to a full path so the .NET API works with relative paths.
+    param([AllowEmptyString()][string]$Text)
+    if ([string]::IsNullOrEmpty($Text)) { return }
+    $clean = ConvertTo-SanitizedLogText -Text $Text
+    $full = [System.IO.Path]::GetFullPath($env:CI_LOG_FILE)
+    [System.IO.File]::AppendAllText($full, $clean, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# Capture-time sanitizer chain resolution (sibling helper; same dir).
+$script:SanitizeChunkAvailable = $false
+$sanHelper = Join-Path (Split-Path -Parent $PSCommandPath) 'Write-SanitizedChunk.ps1'
+if (Test-Path -LiteralPath $sanHelper -PathType Leaf) {
+    . $sanHelper
+    $script:SanitizeChunkAvailable = $true
+}
+
 function Capture-Step {
     [CmdletBinding()]
     param(
@@ -128,7 +167,7 @@ function Capture-Step {
     $startedDate = Get-Date
     $started = $startedDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
-    Add-Content -Path $env:CI_LOG_FILE -Value @(
+    $beginRecord = (@(
         ""
         ":: COMMAND BEGIN ::"
         "JOB: $(ConvertTo-AsciiLogLine $Job)"
@@ -138,7 +177,8 @@ function Capture-Step {
         "COMMAND: $(ConvertTo-AsciiLogLine $Command.ToString().Trim())"
         "TOOL_CONTEXT: $(ConvertTo-AsciiLogLine $ToolContext)"
         ":: OUTPUT (stdout+stderr from first byte) ::"
-    )
+    ) -join "`n") + "`n"
+    Add-CiLogText -Text $beginRecord
 
     # Serialize the gate into a standalone script so it runs in a child
     # pwsh process: `exit N` inside the block then means exactly
@@ -240,7 +280,7 @@ foreach ($tagToken in $goTags) {
     $gateExecuted = $false
     $pwsh = (Get-Command pwsh -ErrorAction SilentlyContinue)
     if ($null -eq $pwsh) {
-        Add-Content -Path $env:CI_LOG_FILE -Value "ERROR: pwsh executable not found on PATH; cannot run the gate in a child process."
+        Add-CiLogText -Text "ERROR: pwsh executable not found on PATH; cannot run the gate in a child process.`n"
         $rc = 1
     }
     else {
@@ -252,7 +292,14 @@ foreach ($tagToken in $goTags) {
         # would become an array filter that is truthy for ANY passing
         # gate with output.
         $gateExecuted = $true
-        & $pwsh.Source -NoProfile -NonInteractive -File $scriptFile 2>&1 | ForEach-Object { ConvertTo-AsciiLogLine $_.ToString() } | Tee-Object -FilePath $env:CI_LOG_FILE -Append | ForEach-Object { Write-Host $_ }
+        # Stream discipline (unchanged): console forwarding via the
+        # information stream only. The FILE capture no longer uses
+        # Tee-Object: its output accumulates in $outputBuf and is
+        # written once through Add-CiLogText (sanitized, LF-only), so
+        # CRLF terminations can never enter the log.
+        $outputBuf = New-Object System.Text.StringBuilder
+        & $pwsh.Source -NoProfile -NonInteractive -File $scriptFile 2>&1 | ForEach-Object { $line = ConvertTo-AsciiLogLine $_.ToString(); Write-Host $line; [void]$outputBuf.Append($line); [void]$outputBuf.Append("`n") }
+        Add-CiLogText -Text $outputBuf.ToString()
         # Save the child's exit code immediately, before anything else
         # can overwrite $LASTEXITCODE.
         if ($null -ne $LASTEXITCODE) {
@@ -260,19 +307,20 @@ foreach ($tagToken in $goTags) {
         }
         else {
             # No child process actually ran.
-            Add-Content -Path $env:CI_LOG_FILE -Value "ERROR: child pwsh produced no exit code (process did not start)."
+            Add-CiLogText -Text "ERROR: child pwsh produced no exit code (process did not start).`n"
             $rc = 1
         }
     }
 
     $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     $verdict = if ($rc -eq 0) { "PASS" } else { "FAIL" }
-    Add-Content -Path $env:CI_LOG_FILE -Value @(
+    $endRecord = (@(
         ":: END OUTPUT ::"
         "EXIT_CODE: $rc $verdict"
         "ENDED: $ended"
         ":: COMMAND END ::"
-    )
+    ) -join "`n") + "`n"
+    Add-CiLogText -Text $endRecord
 
     # Machine-readable per-gate record (run-42921967187 diagnostics
     # contract): every gate invocation writes ONE
@@ -305,7 +353,7 @@ foreach ($tagToken in $goTags) {
         } | ConvertTo-Json | Set-Content -Path $resultFile -Encoding utf8NoBOM
     }
     catch {
-        Add-Content -Path $env:CI_LOG_FILE -Value ("WARN: gate result record write failed for '{0}': {1}" -f $Step, $_.Exception.Message)
+        Add-CiLogText -Text ("WARN: gate result record write failed for '{0}': {1}`n" -f $Step, $_.Exception.Message)
     }
 
     $script:LastCaptureExit = $rc
