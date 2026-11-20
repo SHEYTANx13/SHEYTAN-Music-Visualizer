@@ -1,12 +1,15 @@
 // state.go — the mutex-protected UI state snapshot bridging studio
-// service events (and every other background source) into the Gio
-// event loop.
+// service events (and every other background source) into the go-gui
+// frame thread.
 //
 // Concurrency contract: OnStudioEvent / OnPlayEvent / Set* are called
-// from service goroutines; the Gio loop calls the read accessors every
-// frame. No gio type and no widget is ever touched here — the bridge
-// only mutates snapshot values and asks the window for the next frame
-// via win.Invalidate() (safe for concurrent use).
+// from service goroutines; the go-gui view function calls the read
+// accessors every frame. No go-gui type and no widget is ever touched
+// here — the bridge only mutates snapshot values and asks the window
+// for the next frame via QueueCommand(func(*gui.Window){
+// w.InvalidateLayout() }) (safe for concurrent use; the callback runs
+// on the frame thread, so the view function — not the service — re-reads
+// the snapshot).
 
 package gogui
 
@@ -17,11 +20,12 @@ import (
 	"sync"
 	"time"
 
-	"gioui.org/app"
+	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/mediatools"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/presentation"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
@@ -60,7 +64,11 @@ type trackSnapshot struct {
 // the mutex; readers copy the values they need.
 type uiState struct {
 	mu  sync.Mutex
-	win *app.Window
+	win *gui.Window
+
+	dest presentation.Destination // active workspace destination
+
+	paneW, paneH int // last laid-out preview pane size (px)
 
 	clock   playback.ClockInfo
 	track   trackSnapshot
@@ -100,21 +108,61 @@ type uiState struct {
 func newUIState() *uiState { return &uiState{} }
 
 // setWindow attaches the window (called once, before the loop starts).
-func (s *uiState) setWindow(w *app.Window) {
+func (s *uiState) setWindow(w *gui.Window) {
 	s.mu.Lock()
 	s.win = w
 	s.mu.Unlock()
 }
 
 // invalidate asks the window for the next frame (no-op when absent —
-// tests run display-less).
+// tests run display-less). The request goes through QueueCommand so a
+// service goroutine never touches the view directly: the queued
+// callback runs on the frame thread, where InvalidateLayout schedules
+// the rebuild that lets the view function read the fresh snapshot.
+// InvalidateLayout (not InvalidateRender) is required because the view
+// function must re-run to turn the snapshot into content.
 func (s *uiState) invalidate() {
 	s.mu.Lock()
 	w := s.win
 	s.mu.Unlock()
 	if w != nil {
-		w.Invalidate()
+		w.QueueCommand(func(w *gui.Window) { w.InvalidateLayout() })
 	}
+}
+
+// SetDestination records the active workspace destination (frame
+// thread, via syncTabs) so the preview pacer goroutine can read it
+// without touching view state.
+func (s *uiState) SetDestination(d presentation.Destination) {
+	s.mu.Lock()
+	s.dest = d
+	s.mu.Unlock()
+}
+
+// Destination returns the active workspace destination.
+func (s *uiState) Destination() presentation.Destination {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dest
+}
+
+// SetPaneSize records the last laid-out preview pane size in px (frame
+// thread) for the pacer's next render request.
+func (s *uiState) SetPaneSize(w, h int) {
+	s.mu.Lock()
+	s.paneW, s.paneH = w, h
+	s.mu.Unlock()
+}
+
+// PaneSize returns the last laid-out preview pane size (defaults when
+// nothing was laid out yet).
+func (s *uiState) PaneSize() (int, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.paneW <= 0 || s.paneH <= 0 {
+		return 480, 270
+	}
+	return s.paneW, s.paneH
 }
 
 // OnStudioEvent is the studio.Subscribe bridge (service goroutine).

@@ -1,15 +1,14 @@
-// shell.go — Run: the ONE Gio window lifecycle of the native shell.
+// shell.go — Run: the ONE Go-Gui window lifecycle of the native shell.
 // Owns the command bar, the workspace tab strip, destination routing,
-// the status strip and the smoke mode. studio.Studio and the
-// render.Renderer live HERE (outside all layout/tab state) so layout
-// changes never restart audio or recreate the renderer.
+// the status strip, the preview pacer goroutine and the smoke mode.
+// studio.Studio and the render.Renderer live HERE (outside all
+// layout/tab state) so layout changes never restart audio or recreate
+// the renderer.
 
 package gogui
 
 import (
 	"fmt"
-	"image"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,14 +18,8 @@ import (
 	"syscall"
 	"time"
 
-	"gioui.org/app"
-	"gioui.org/io/clipboard"
-	"gioui.org/io/system"
-	"gioui.org/layout"
-	"gioui.org/op"
-	"gioui.org/unit"
-	"gioui.org/widget"
-	"gioui.org/widget/material"
+	"github.com/go-gui-org/go-gui/gui"
+	"github.com/go-gui-org/go-gui/gui/backend"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/design"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
@@ -45,19 +38,28 @@ import (
 // reveal-in-folder portal action; overridable in tests).
 var execCommand = exec.Command
 
+// newShellWindow is the single window-construction seam. Run calls it
+// EXACTLY ONCE; one_window_test.go enforces the one-call contract from
+// source, and no other constructor of gui.Window may appear in this
+// package's non-test files.
+var newShellWindow = gui.NewWindow
+
 // RunOptions configures Run.
 type RunOptions struct {
 	// SmokeFrames > 0 opens the real window, renders exactly N frames
 	// through the real shell layout, then closes cleanly (CI/Xvfb
 	// evidence; exit non-zero when the target is not reached).
 	SmokeFrames int
-	// Width/Height are the initial window size in dp (defaults 1280x800).
+	// Width/Height are the initial window size in logical pixels
+	// (defaults 1280x800).
 	Width  int
 	Height int
 }
 
-// shell owns every widget of the window. All fields are owned by the
-// event-loop goroutine; the only cross-goroutine surface is uiState.
+// shell owns every control value of the window. All fields are owned
+// by the go-gui frame thread (the view generator and the widget
+// callbacks); the only cross-goroutine surfaces are uiState and the
+// preview pacer's publish path.
 type shell struct {
 	th         *ShellTheme
 	svc        *studio.Studio
@@ -69,120 +71,55 @@ type shell struct {
 	fileAccess *fileaccess.Manager
 	state      *uiState
 	preview    *previewBridge
+	surface    *gui.PixelSurface
+	surfaceErr error
 	disp       *dispatcher
-	win        *app.Window
+	win        *gui.Window
 
 	tabs      TabState
 	attrLines []string
 	presets   []visualizer.Preset
 	formats   []audio.SourceFormat
 
-	// frame geometry (event loop only)
-	widthDp         float32
-	previewPaneSize image.Point
+	// frame geometry (frame thread only)
+	widthDp float32
 
-	// command bar
-	btnImport widget.Clickable
-	btnOpen   widget.Clickable
-	btnSave   widget.Clickable
-	btnExport widget.Clickable
-	btnPlay   widget.Clickable
-	btnStop   widget.Clickable
-	btnBack   widget.Clickable
-	btnFwd    widget.Clickable
-	btnMedia  widget.Clickable
-	btnHelp   widget.Clickable
-	btnQuit   widget.Clickable
-	btnDiag   widget.Clickable
-	volume    widget.Float
+	// Control values (frame thread only). go-gui widgets are rebuilt
+	// every frame from these values; callbacks write them and dispatch.
+	volume         float32
+	modeValue      string
+	paletteValue   string
+	bgValue        string
+	intensityValue string
+	prefValue      string
+	resValue       string
+	fpsValue       string
+	codecValue     string
+	sens           float32
+	glow           float32
+	bgInt          float32
+	reducedMotion  bool
+	reducedGlow    bool
 
-	// tab strip
-	tabClicks map[presentation.Destination]*widget.Clickable
+	importPath  string
+	projectPath string
+	outPath     string
+	sysPath     string
+	seconds     string
 
-	// panel lists
-	homeList       widget.List
-	studioList     widget.List
-	studioRailList widget.List
-	studioMainList widget.List
-	templatesList  widget.List
-	libraryList    widget.List
-	exportList     widget.List
-	reqList        widget.List
-	sysList        widget.List
-	settingsList   widget.List
-	diagList       widget.List
-	emptyList      widget.List
-
-	// studio widgets
-	importPathEd    widget.Editor
-	importGoBtn     widget.Clickable
-	importCancelBtn widget.Clickable
-	recentPaths     []string
-	projectPathEd   widget.Editor
-	modeEnum        widget.Enum
-	paletteEnum     widget.Enum
-	bgEnum          widget.Enum
-	sens            widget.Float
-	glow            widget.Float
-	bgInt           widget.Float
-
-	// templates
-	presetClicks   map[string]*widget.Clickable
+	recentPaths    []string
 	selectedPreset string
-
-	// library (the shared project path entry serves save AND open)
-	openProjBtn widget.Clickable
-
-	// export
-	resEnum         widget.Enum
-	fpsEnum         widget.Enum
-	codecEnum       widget.Enum
-	secondsEd       widget.Editor
-	outPathEd       widget.Editor
-	exportStartBtn  widget.Clickable
-	exportCancelBtn widget.Clickable
-
-	// requirements
-	mtInstallBtn widget.Clickable
-	mtCancelBtn  widget.Clickable
-	mtUpdateBtn  widget.Clickable
-	mtRepairBtn  widget.Clickable
-	mtFolderBtn  widget.Clickable
-
-	// system files
-	sysPathEd      widget.Editor
-	sysAnalyzeBtn  widget.Clickable
 	pendingAuthReq *fileaccess.AuthorizationRequest
 
-	// settings
-	intensityEnum    widget.Enum
-	reducedMotionSw  widget.Bool
-	reducedGlowSw    widget.Bool
-	rendererPrefEnum widget.Enum
+	// last-seen service config revision for change detection
+	lastCfgRev uint64
 
-	// diagnostics
-	copyDiagBtn    widget.Clickable
-	logsRevealBtn  widget.Clickable
-	layoutResetBtn widget.Clickable
+	// smoke bookkeeping (frame thread only)
+	smokeTarget   int
+	smokeRendered int
+	smokeClosed   bool
 
-	// last-seen widget values (event-loop only) for change detection
-	lastVolume         float32
-	lastModeValue      string
-	lastPaletteValue   string
-	lastBgValue        string
-	lastIntensityValue string
-	lastPrefValue      string
-	lastResValue       string
-	lastFpsValue       string
-	lastCodecValue     string
-	lastSens           float32
-	lastGlow           float32
-	lastBgInt          float32
-	lastReducedMotion  bool
-	lastReducedGlow    bool
-	lastCfgRev         uint64
-
-	// background-fetch guards (event loop only)
+	// background-fetch guards (frame thread only)
 	ffmpegRequested        bool
 	mediaSnapshotRequested bool
 	lastJobsPoll           time.Time
@@ -203,6 +140,10 @@ func Run(opts RunOptions) error {
 
 	doc := design.MustLoad()
 	th := NewShellTheme(doc)
+	// The go-gui app theme is installed BEFORE the window is created so
+	// the first frame already paints in the dark polarity; the token
+	// colors ride along through ShellTheme.
+	gui.SetTheme(gui.ThemeDark)
 
 	// Single apppaths authority; bootstrap creates the contract dirs.
 	lay := apppaths.Resolve(apppaths.OSEnv())
@@ -244,37 +185,36 @@ func Run(opts RunOptions) error {
 	if tabsErr != nil {
 		st.SetStatus("Workspace layout could not be read; default applied: " + tabsErr.Error())
 	}
+	st.SetDestination(tabs.Layout.ActiveTab)
+
+	// The PixelSurface is the frame bridge: the pacer goroutine publishes
+	// renderer frames, the view shows it through gui.Image(Surface), and
+	// every Update wakes the window on its own.
+	surface, surfaceErr := gui.NewPixelSurface(gui.PixelSurfaceCfg{
+		Width: previewDefaultWidth, Height: previewDefaultHeight,
+	})
 
 	sh := &shell{
-		th:         th,
-		svc:        svc,
-		renderer:   renderer,
-		lay:        lay,
-		store:      store,
-		prefStore:  prefStore,
-		mediaTools: mediaTools,
-		fileAccess: fileAccess,
-		state:      st,
-		preview:    newPreviewBridge(),
-		tabs:       tabs,
-		attrLines:  brand.AttributionBlock(),
-		presets:    svc.Presets(),
-		formats:    svc.SupportedFormats(),
+		th:          th,
+		svc:         svc,
+		renderer:    renderer,
+		lay:         lay,
+		store:       store,
+		prefStore:   prefStore,
+		mediaTools:  mediaTools,
+		fileAccess:  fileAccess,
+		state:       st,
+		preview:     newPreviewBridge(),
+		surface:     surface,
+		surfaceErr:  surfaceErr,
+		tabs:        tabs,
+		attrLines:   brand.AttributionBlock(),
+		presets:     svc.Presets(),
+		formats:     svc.SupportedFormats(),
+		smokeTarget: opts.SmokeFrames,
 	}
 	sh.disp = newDispatcher(sh)
-	sh.tabClicks = make(map[presentation.Destination]*widget.Clickable, len(presentation.Destinations))
-	for _, d := range presentation.Destinations {
-		sh.tabClicks[d] = &widget.Clickable{}
-	}
-	sh.presetClicks = make(map[string]*widget.Clickable, len(sh.presets))
-	for _, p := range sh.presets {
-		sh.presetClicks[p.Name] = &widget.Clickable{}
-	}
-	sh.initEditors()
-	sh.initEnums()
-	sh.volume.Value = 1
-	sh.lastVolume = 1
-	sh.lastCfgRev = cfgRevInitial
+	sh.initControlValues()
 
 	svc.Subscribe(st.OnStudioEvent)
 	svc.SetPlayEventSink(st.OnPlayEvent)
@@ -284,9 +224,45 @@ func Run(opts RunOptions) error {
 		st.invalidate()
 	})
 
-	win := &app.Window{}
-	win.Option(app.Title(brand.WindowTitle()), app.Size(unit.Dp(opts.Width), unit.Dp(opts.Height)))
-	st.setWindow(win)
+	// The ONE window construction of the process (newShellWindow seam).
+	win := newShellWindow(gui.WindowCfg{
+		Title:   brand.WindowTitle(),
+		Width:   opts.Width,
+		Height:  opts.Height,
+		State:   sh,
+		BgColor: th.ObsidianColor(),
+		WMClass: "SHEYTAN-Music-Visualizer",
+		OnInit: func(w *gui.Window) {
+			sh.win = w
+			st.setWindow(w)
+			w.SetView(sh.view)
+			sh.registerShortcuts(w)
+		},
+		OnEvent: func(e *gui.Event, w *gui.Window) {
+			// OS app-quit joins the same close path as the Quit command:
+			// one window, one shutdown. OnEvent receives only events the
+			// widget tree left unhandled, which is exactly the quit case.
+			if e.Type == gui.EventQuitRequested {
+				e.IsHandled = true
+				w.Close()
+			}
+		},
+	})
+	if sh.win == nil {
+		sh.win = win
+		st.setWindow(win)
+	}
+	if surfaceErr == nil {
+		sh.seedSurface()
+		sh.preview.Attach(surface)
+	}
+
+	// Preview pacer: the producer goroutine owns the frame cadence and
+	// publishes through the PixelSurface; the window is never touched
+	// from here except through the state bridge.
+	pacerStop := make(chan struct{})
+	pacerDone := make(chan struct{})
+	go sh.previewLoop(pacerStop, pacerDone)
 
 	// OS termination signals enter the same close path as the Quit
 	// command: one window, one shutdown.
@@ -296,125 +272,83 @@ func Run(opts RunOptions) error {
 	go func() {
 		if sig, ok := <-sigCh; ok {
 			_ = sig
-			win.Perform(system.ActionClose)
-		}
-	}()
-
-	frames := 0
-	loopDone := make(chan struct{})
-	go func() {
-		defer close(loopDone)
-		var ops op.Ops
-		smokeTarget := opts.SmokeFrames
-		smokeClosed := false
-		for {
-			switch e := win.Event().(type) {
-			case app.DestroyEvent:
-				_ = e
-				return
-			case app.FrameEvent:
-				gtx := app.NewContext(&ops, e)
-				sh.widthDp = float32(e.Size.X) / gtx.Metric.PxPerDp
-				sh.handleEvents(gtx)
-				sh.layout(gtx)
-				e.Frame(gtx.Ops)
-				frames++
-				switch {
-				case smokeTarget > 0:
-					if !smokeClosed && frames >= smokeTarget {
-						smokeClosed = true
-						win.Perform(system.ActionClose)
-					}
-				default:
-					sh.pumpPreview(gtx)
-				}
-			}
+			win.Close()
 		}
 	}()
 
 	if opts.SmokeFrames > 0 {
 		watchdog := time.AfterFunc(smokeTimeout, func() {
-			win.Perform(system.ActionClose)
+			win.Close()
 		})
 		defer watchdog.Stop()
 	}
 
-	app.Main()
-	<-loopDone
+	backend.Run(win) // blocks until the window closes
+	close(pacerStop)
+	<-pacerDone
 
-	// Teardown: service first (cancels work, closes the transport),
-	// then the renderer (only now — never on resize or re-layout).
+	// Teardown: service first (cancels work, closes the transport), then
+	// the renderer, then the frame bridge (only now — never on resize or
+	// re-layout).
 	svc.Close()
 	renderer.Close()
+	if surface != nil {
+		surface.Close()
+	}
 	if err := store.Save(sh.tabs.Layout); err != nil {
 		st.SetStatus("Layout could not be persisted: " + err.Error())
 	}
 
 	if opts.SmokeFrames > 0 {
-		if frames < opts.SmokeFrames {
-			return fmt.Errorf("gogui: smoke timeout — only %d of %d frames rendered", frames, opts.SmokeFrames)
+		if sh.smokeRendered < opts.SmokeFrames {
+			return fmt.Errorf("gogui: smoke timeout — only %d of %d frames rendered", sh.smokeRendered, opts.SmokeFrames)
 		}
 		fmt.Printf("smoke: %d frames rendered backend=%s gpu=%s\n",
-			frames, rinfo.Backend, rinfo.GpuState)
+			sh.smokeRendered, rinfo.Backend, rinfo.GpuState)
 	}
 	return nil
 }
 
-// initEditors configures the single-line path editors.
-func (sh *shell) initEditors() {
-	for _, e := range []*widget.Editor{
-		&sh.importPathEd, &sh.projectPathEd, &sh.outPathEd,
-		&sh.sysPathEd, &sh.secondsEd,
-	} {
-		e.SingleLine = true
-	}
-}
-
-// initEnums sets the initial enum selections from the honest defaults.
-func (sh *shell) initEnums() {
+// initControlValues seeds the control values from the honest service
+// defaults (called once, before the window opens).
+func (sh *shell) initControlValues() {
 	cfg := sh.svc.Config()
-	sh.modeEnum.Value = string(cfg.Mode)
-	sh.paletteEnum.Value = strconv.Itoa(cfg.Palette)
-	sh.bgEnum.Value = backgroundLayerKey(cfg.BackgroundLayer)
-	sh.intensityEnum.Value = sh.th.IntensityName()
-	sh.rendererPrefEnum.Value = "auto"
+	sh.modeValue = string(cfg.Mode)
+	sh.paletteValue = strconv.Itoa(cfg.Palette)
+	sh.bgValue = backgroundLayerKey(cfg.BackgroundLayer)
+	sh.intensityValue = sh.th.IntensityName()
+	sh.prefValue = "auto"
 	if pref, found, perr := sh.prefStore.Load(); perr == nil && found {
 		switch pref {
 		case render.PrefCPU:
-			sh.rendererPrefEnum.Value = "cpu"
+			sh.prefValue = "cpu"
 		case render.PrefVulkan, render.PrefDX12, render.PrefSoftware:
-			sh.rendererPrefEnum.Value = "gpu"
+			sh.prefValue = "gpu"
 		}
 	}
-	sh.resEnum.Value = export.Resolutions[1].ID // 1080p
-	sh.fpsEnum.Value = "30"
-	sh.codecEnum.Value = "h264"
-	sh.sens.Value = sensitivityToSlider(cfg.Sensitivity)
-	sh.glow.Value = float32(cfg.Glow / glowMax)
-	sh.bgInt.Value = float32(cfg.BackgroundIntensity / backgroundIntensityMax)
-	sh.rememberLastValues()
+	sh.resValue = export.Resolutions[1].ID // 1080p
+	sh.fpsValue = "30"
+	sh.codecValue = "h264"
+	sh.seconds = ""
+	sh.sens = sensitivityToSlider(cfg.Sensitivity)
+	sh.glow = float32(cfg.Glow / glowMax)
+	sh.bgInt = float32(cfg.BackgroundIntensity / backgroundIntensityMax)
+	sh.volume = 1
+	_, sh.lastCfgRev = sh.state.Config()
 }
 
-// rememberLastValues snapshots the current widget values as the
-// change-detection baseline.
-func (sh *shell) rememberLastValues() {
-	sh.lastVolume = sh.volume.Value
-	sh.lastModeValue = sh.modeEnum.Value
-	sh.lastPaletteValue = sh.paletteEnum.Value
-	sh.lastBgValue = sh.bgEnum.Value
-	sh.lastIntensityValue = sh.intensityEnum.Value
-	sh.lastPrefValue = sh.rendererPrefEnum.Value
-	sh.lastResValue = sh.resEnum.Value
-	sh.lastFpsValue = sh.fpsEnum.Value
-	sh.lastCodecValue = sh.codecEnum.Value
-	sh.lastSens = sh.sens.Value
-	sh.lastGlow = sh.glow.Value
-	sh.lastBgInt = sh.bgInt.Value
-	sh.lastReducedMotion = sh.reducedMotionSw.Value
-	sh.lastReducedGlow = sh.reducedGlowSw.Value
+// syncControlsFromConfig flows a service-side config change (preset
+// apply, project load) into the control values.
+func (sh *shell) syncControlsFromConfig(cfg visualizer.Config) {
+	sh.modeValue = string(cfg.Mode)
+	sh.paletteValue = strconv.Itoa(cfg.Palette)
+	sh.bgValue = backgroundLayerKey(cfg.BackgroundLayer)
+	sh.sens = sensitivityToSlider(cfg.Sensitivity)
+	sh.glow = float32(cfg.Glow / glowMax)
+	sh.bgInt = float32(cfg.BackgroundIntensity / backgroundIntensityMax)
 }
 
-// backgroundLayerKey maps a config background layer to the enum key.
+// backgroundLayerKey maps a config background layer to the control key.
 func backgroundLayerKey(m visualizer.Mode) string {
 	if m == "" {
 		return string(visualizer.ModeNone)
@@ -422,314 +356,271 @@ func backgroundLayerKey(m visualizer.Mode) string {
 	return string(m)
 }
 
-// layout composes the whole window: command bar, tab strip, workspace,
-// status strip.
-func (sh *shell) layout(gtx layout.Context) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(sh.commandBar),
-		layout.Rigid(sh.tabStrip),
-		layout.Flexed(1, sh.destinationPanel),
-		layout.Rigid(sh.statusStrip),
-	)
+// view is the shell's root view generator: command bar, tab strip,
+// workspace, status strip. It runs again for each frame on the go-gui
+// frame thread.
+func (sh *shell) view(w *gui.Window) gui.View {
+	// Pending clipboard write (queued by CmdCopyToClipboard): the frame
+	// thread is the only writer of the OS clipboard.
+	if txt := sh.state.TakeClipboard(); txt != "" {
+		w.SetClipboard(txt)
+	}
+
+	// Smoke contract: count REAL presented frames (one FrameFn per
+	// presented frame), keep the loop alive until the target is reached,
+	// then close cleanly through the same path as Quit.
+	if sh.smokeTarget > 0 && !sh.smokeClosed {
+		sh.smokeRendered = int(w.FrameCount())
+		if sh.smokeRendered >= sh.smokeTarget {
+			sh.smokeClosed = true
+			w.Close()
+		} else {
+			w.InvalidateLayout()
+		}
+	}
+
+	ww, _ := w.WindowSize()
+	sh.widthDp = float32(ww)
+
+	// Service-side config changes (preset apply, project load) flow back
+	// into the controls through the config revision.
+	if _, rev := sh.state.Config(); rev != sh.lastCfgRev {
+		cfg, _ := sh.state.Config()
+		sh.lastCfgRev = rev
+		sh.syncControlsFromConfig(cfg)
+	}
+
+	return gui.Column(gui.ContainerCfg{
+		ID:      "shell-root",
+		Sizing:  gui.FillFill,
+		Padding: gui.PaddingNone,
+		Spacing: gui.NoSpacing,
+		Color:   sh.th.ObsidianColor(),
+		Content: []gui.View{
+			sh.commandBar(),
+			tabStripView(&sh.tabs, sh.th, sh.activateDestination, sh.moveActiveTab),
+			sh.destinationPanel(),
+			sh.statusStrip(),
+		},
+	})
+}
+
+// activateDestination switches the active tab from the strip (the
+// shared tab callback for the real shell).
+func (sh *shell) activateDestination(d presentation.Destination) {
+	sh.tabs.SetActive(d)
+	sh.syncTabs()
+}
+
+// moveActiveTab reorders the ACTIVE destination within the persisted
+// strip order (run 44648357437 item 4.3). delta<0 moves toward the
+// strip start, delta>0 toward the end. The tab strip's ‹/› controls
+// and the mod+alt+left/right chords both route through this one
+// mutation, so the pointer/touch and keyboard paths cannot drift.
+func (sh *shell) moveActiveTab(delta int) {
+	if !sh.tabs.MoveActive(delta) {
+		sh.state.SetStatus("Tab reorder: the active tab is already at that strip edge")
+		return
+	}
+	sh.syncTabs()
+	sh.state.SetStatus("Tab order updated — active: " + string(sh.tabs.Layout.ActiveTab))
+}
+
+// setSideCollapsed collapses/restores the side rail of the split
+// composition for the ACTIVE destination. The state persists
+// per-destination in the shared versioned layout document; the
+// collapsed rail keeps a visible restore control at the collapse site.
+func (sh *shell) setSideCollapsed(v bool) {
+	sh.tabs.SetSideCollapsed(v)
+	sh.syncTabs()
+	if v {
+		sh.state.SetStatus("Side panel collapsed for " + string(sh.tabs.Layout.ActiveTab) + " (restore: the button or mod+shift+B)")
+	} else {
+		sh.state.SetStatus("Side panel restored for " + string(sh.tabs.Layout.ActiveTab))
+	}
+}
+
+// toggleSplitOrientation flips the persisted split-axis override
+// (workspace.split.orientation): horizontal main-beside-rail ⇄ vertical
+// main-above-rail. The responsive breakpoint still decides split-vs-
+// stacked; within the split composition the user owns the axis.
+func (sh *shell) toggleSplitOrientation() {
+	sh.tabs.Layout.SplitVertical = !sh.tabs.Layout.SplitVertical
+	sh.syncTabs()
+	if sh.tabs.Layout.SplitVertical {
+		sh.state.SetStatus("Split orientation: vertical (main above rail)")
+	} else {
+		sh.state.SetStatus("Split orientation: horizontal (main beside rail)")
+	}
 }
 
 // commandBar — brand title + the top commands.
-func (sh *shell) commandBar(gtx layout.Context) layout.Dimensions {
-	return sh.surfaceBox(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(4), Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					t := material.H6(sh.th.Theme(), brand.ProductName)
-					t.Color = sh.th.Text()
-					return layout.Inset{Right: unit.Dp(12)}.Layout(gtx, t.Layout)
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnImport, "Import") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnOpen, "Open") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnSave, "Save") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnExport, "Export") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return sh.barButtonPrimary(gtx, &sh.btnPlay, transportButtonLabel(sh.state.Clock()))
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnStop, "Stop") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnBack, "−5s") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnFwd, "+5s") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Left: unit.Dp(6), Right: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						gtx.Constraints.Min.X = gtx.Dp(unit.Dp(140))
-						return material.Slider(sh.th.Theme(), &sh.volume).Layout(gtx)
-					})
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnMedia, "Media Tools") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnHelp, "Help") }),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sh.barButton(gtx, &sh.btnQuit, "Quit") }),
-			)
-		})
+func (sh *shell) commandBar() gui.View {
+	clk := sh.state.Clock()
+	return gui.Row(gui.ContainerCfg{
+		ID:          "command-bar",
+		Sizing:      gui.FillFit,
+		Padding:     gui.NewPadding(4, 8, 4, 8),
+		Spacing:     gui.SpacingSmall,
+		Color:       sh.th.SurfaceColor(),
+		SizeBorder:  gui.BorderThin,
+		ColorBorder: sh.th.DecorationBorderColor(),
+		VAlign:      gui.VAlignMiddle,
+		Content: []gui.View{
+			gui.Text(gui.TextCfg{
+				ID:        "brand-title",
+				Text:      brand.ProductName,
+				TextStyle: sh.th.TextStyleTitle(),
+			}),
+			sh.barButton("cmd-import", "Import", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.chooseImportPath()
+			}),
+			sh.barButton("cmd-open", "Open", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.activateDestination(presentation.DestLibrary)
+			}),
+			sh.barButton("cmd-save", "Save", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.disp.Run(presentation.CmdProjectSave)
+			}),
+			sh.barButton("cmd-export", "Export", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.activateDestination(presentation.DestExport)
+			}),
+			sh.barButtonPrimary("cmd-play", transportButtonLabel(clk), func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.disp.Run(presentation.CmdPlayPause)
+			}),
+			sh.barButton("cmd-stop", "Stop", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.disp.Run(presentation.CmdStop)
+			}),
+			sh.barButton("cmd-seek-back", "−5s", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.disp.Run(presentation.CmdSeekBack)
+			}),
+			sh.barButton("cmd-seek-forward", "+5s", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.disp.Run(presentation.CmdSeekForward)
+			}),
+			gui.Slider(gui.SliderCfg{
+				ID:    "cmd-volume",
+				Value: sh.volume,
+				Min:   0, Max: 1, Step: 0.01,
+				Width:   140,
+				A11YCfg: gui.A11YCfg{A11YLabel: "Playback volume"},
+				OnChange: func(v float32, ctx gui.EventCtx) {
+					ctx.Consume()
+					if changedEnough(sh.volume, v) {
+						sh.volume = v
+						sh.disp.Run(presentation.CmdSetVolume)
+					}
+				},
+			}),
+			sh.barButton("cmd-media-tools", "Media Tools", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.disp.Run(presentation.CmdMediaToolsOpen)
+			}),
+			sh.barButton("cmd-help", "Help", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.disp.Run(presentation.CmdHelpOpen)
+			}),
+			sh.barButton("cmd-quit", "Quit", func(ctx gui.EventCtx) {
+				ctx.Consume()
+				sh.disp.Run(presentation.CmdQuit)
+			}),
+		},
 	})
+}
+
+// changedEnough guards the volume dispatch against drag-step spam
+// (1% steps, the slider's own granularity).
+func changedEnough(last, v float32) bool {
+	d := v - last
+	if d < 0 {
+		d = -d
+	}
+	return d >= 0.01
 }
 
 // barButton renders a secondary (volcanic) command-bar button.
-func (sh *shell) barButton(gtx layout.Context, c *widget.Clickable, txt string) layout.Dimensions {
-	b := material.Button(sh.th.Theme(), c, txt)
-	b.Background = sh.th.Volcanic()
-	b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(8), Right: unit.Dp(8)}
-	return layout.Inset{Right: unit.Dp(4)}.Layout(gtx, b.Layout)
+func (sh *shell) barButton(id, label string, onClick func(gui.EventCtx)) gui.View {
+	return gui.Button(gui.ButtonCfg{
+		ID:      id,
+		Label:   label,
+		Colors:  gui.ColorSet{Base: sh.th.VolcanicColor()},
+		OnClick: onClick,
+	})
 }
 
 // barButtonPrimary renders the primary (accent) command-bar button.
-func (sh *shell) barButtonPrimary(gtx layout.Context, c *widget.Clickable, txt string) layout.Dimensions {
-	b := material.Button(sh.th.Theme(), c, txt)
-	b.Inset = layout.Inset{Top: unit.Dp(6), Bottom: unit.Dp(6), Left: unit.Dp(10), Right: unit.Dp(10)}
-	return layout.Inset{Right: unit.Dp(4)}.Layout(gtx, b.Layout)
-}
-
-// tabStrip — the 11 destinations in the persisted tab order.
-func (sh *shell) tabStrip(gtx layout.Context) layout.Dimensions {
-	return sh.surfaceBox(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(2), Bottom: unit.Dp(2)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			catalog := sh.tabs.OrderedCatalog()
-			children := make([]layout.FlexChild, 0, len(catalog))
-			for _, info := range catalog {
-				info := info
-				children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					active := sh.tabs.Layout.ActiveTab == info.ID
-					b := material.Button(sh.th.Theme(), sh.tabClicks[info.ID], info.Title)
-					if active {
-						b.Background = sh.th.Accent()
-					} else {
-						b.Background = sh.th.Volcanic()
-					}
-					b.Inset = layout.Inset{Top: unit.Dp(5), Bottom: unit.Dp(5), Left: unit.Dp(8), Right: unit.Dp(8)}
-					return b.Layout(gtx)
-				}))
-			}
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx, children...)
-		})
+func (sh *shell) barButtonPrimary(id, label string, onClick func(gui.EventCtx)) gui.View {
+	return gui.Button(gui.ButtonCfg{
+		ID:      id,
+		Label:   label,
+		Variant: gui.ButtonPrimary,
+		OnClick: onClick,
 	})
 }
 
-// statusStrip — transport state + clock, renderer backend/state, data
-// mode (honest, from the state snapshot).
-func (sh *shell) statusStrip(gtx layout.Context) layout.Dimensions {
-	return sh.surfaceBox(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8), Top: unit.Dp(3), Bottom: unit.Dp(3)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return sh.caption(gtx, "Status: "+sh.state.Status())
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return sh.caption(gtx, transportLine(sh.state.Clock()))
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					info := sh.state.Renderer()
-					return sh.caption(gtx, "renderer="+string(info.Backend)+"/"+string(info.GpuState))
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return sh.caption(gtx, "data="+string(sh.lay.Mode))
-				}),
-			)
-		})
+// statusStrip — status line, transport state + clock, renderer
+// backend/state, data mode (honest, from the state snapshot).
+func (sh *shell) statusStrip() gui.View {
+	info := sh.state.Renderer()
+	return gui.Row(gui.ContainerCfg{
+		ID:          "status-strip",
+		Sizing:      gui.FillFit,
+		Padding:     gui.NewPadding(3, 8, 3, 8),
+		Spacing:     gui.SpacingSmall,
+		Color:       sh.th.SurfaceColor(),
+		SizeBorder:  gui.BorderThin,
+		ColorBorder: sh.th.DecorationBorderColor(),
+		VAlign:      gui.VAlignMiddle,
+		Content: []gui.View{
+			gui.Column(gui.ContainerCfg{
+				Sizing: gui.FillFit,
+				Content: []gui.View{
+					gui.Text(gui.TextCfg{
+						Text:      "Status: " + sh.state.Status(),
+						TextStyle: sh.th.TextStyleCaption(),
+						Mode:      gui.TextModeWrap,
+					}),
+				},
+			}),
+			sh.statusCaption("Transport: " + transportLine(sh.state.Clock())),
+			sh.statusCaption("renderer=" + string(info.Backend) + "/" + string(info.GpuState)),
+			sh.statusCaption("data=" + string(sh.lay.Mode)),
+		},
 	})
 }
 
-// handleEvents processes every widget interaction of one frame and
-// dispatches the mapped commands. It runs on the event loop only.
-func (sh *shell) handleEvents(gtx layout.Context) {
-	sh.handleKeys(gtx)
-
-	// Pending clipboard write (queued by CmdCopyToClipboard).
-	if txt := sh.state.TakeClipboard(); txt != "" {
-		gtx.Execute(clipboard.WriteCmd{
-			Type: "application/text",
-			Data: io.NopCloser(strings.NewReader(txt)),
-		})
-	}
-
-	// Command bar.
-	if sh.btnImport.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdImportAudio)
-	}
-	if sh.btnOpen.Clicked(gtx) {
-		sh.tabs.SetActive(presentation.DestLibrary)
-		sh.syncTabs()
-	}
-	if sh.btnSave.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdProjectSave)
-	}
-	if sh.btnExport.Clicked(gtx) {
-		sh.tabs.SetActive(presentation.DestExport)
-		sh.syncTabs()
-	}
-	if sh.btnPlay.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdPlayPause)
-	}
-	if sh.btnStop.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdStop)
-	}
-	if sh.btnBack.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdSeekBack)
-	}
-	if sh.btnFwd.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdSeekForward)
-	}
-	if sh.btnMedia.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdMediaToolsOpen)
-	}
-	if sh.btnHelp.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdHelpOpen)
-	}
-	if sh.btnQuit.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdQuit)
-	}
-	if sh.volume.Value != sh.lastVolume {
-		sh.disp.Run(presentation.CmdSetVolume)
-		sh.lastVolume = sh.volume.Value
-	}
-
-	// Tab strip.
-	for _, info := range sh.tabs.OrderedCatalog() {
-		if sh.tabClicks[info.ID].Clicked(gtx) {
-			sh.tabs.SetActive(info.ID)
-			sh.syncTabs()
-		}
-	}
-
-	// Panel buttons with direct commands.
-	if sh.importGoBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdImportAudio)
-	}
-	if sh.importCancelBtn.Clicked(gtx) {
-		sh.cancelImport()
-	}
-	if sh.openProjBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdProjectOpen)
-	}
-	if sh.exportStartBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdExportStart)
-	}
-	if sh.exportCancelBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdExportCancel)
-	}
-	if sh.mtInstallBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdMediaToolsInstall)
-	}
-	if sh.mtCancelBtn.Clicked(gtx) {
-		sh.mediaTools.Cancel()
-	}
-	if sh.mtUpdateBtn.Clicked(gtx) {
-		sh.checkMediaToolsUpdate()
-	}
-	if sh.sysAnalyzeBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdAnalyzePath)
-	}
-	if sh.copyDiagBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdCopyToClipboard)
-	}
-	if sh.logsRevealBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdLogsReveal)
-	}
-	if sh.layoutResetBtn.Clicked(gtx) {
-		sh.disp.Run(presentation.CmdLayoutReset)
-	}
-
-	// Template presets.
-	for name, clk := range sh.presetClicks {
-		if clk.Clicked(gtx) {
-			sh.selectedPreset = name
-			sh.disp.Run(presentation.CmdPresetApply)
-		}
-	}
-
-	// Enum-driven commands (value-compare change detection; the radio
-	// layouts already consumed the pointer events this frame).
-	if sh.modeEnum.Value != sh.lastModeValue {
-		sh.lastModeValue = sh.modeEnum.Value
-		sh.disp.Run(presentation.CmdModeSet)
-	}
-	if sh.paletteEnum.Value != sh.lastPaletteValue {
-		sh.lastPaletteValue = sh.paletteEnum.Value
-		sh.disp.Run(presentation.CmdPaletteSet)
-	}
-	if sh.bgEnum.Value != sh.lastBgValue {
-		sh.lastBgValue = sh.bgEnum.Value
-		sh.disp.Run(presentation.CmdBackgroundLayerSet)
-	}
-	if sh.intensityEnum.Value != sh.lastIntensityValue {
-		sh.lastIntensityValue = sh.intensityEnum.Value
-		sh.disp.Run(presentation.CmdIntensitySet)
-	}
-	if sh.rendererPrefEnum.Value != sh.lastPrefValue {
-		sh.lastPrefValue = sh.rendererPrefEnum.Value
-		sh.disp.Run(presentation.CmdRendererSelect)
-	}
-	if sh.resEnum.Value != sh.lastResValue {
-		sh.lastResValue = sh.resEnum.Value
-	}
-	if sh.fpsEnum.Value != sh.lastFpsValue {
-		sh.lastFpsValue = sh.fpsEnum.Value
-	}
-	if sh.codecEnum.Value != sh.lastCodecValue {
-		sh.lastCodecValue = sh.codecEnum.Value
-	}
-	if sh.sens.Value != sh.lastSens {
-		sh.lastSens = sh.sens.Value
-		sh.disp.Run(presentation.CmdSensitivitySet)
-	}
-	if sh.glow.Value != sh.lastGlow {
-		sh.lastGlow = sh.glow.Value
-		sh.applyGlow()
-	}
-	if sh.bgInt.Value != sh.lastBgInt {
-		sh.lastBgInt = sh.bgInt.Value
-		sh.applyBackgroundIntensity()
-	}
-	if sh.reducedMotionSw.Value != sh.lastReducedMotion {
-		sh.lastReducedMotion = sh.reducedMotionSw.Value
-		sh.disp.Run(presentation.CmdReducedMotionSet)
-	}
-	if sh.reducedGlowSw.Value != sh.lastReducedGlow {
-		sh.lastReducedGlow = sh.reducedGlowSw.Value
-		sh.disp.Run(presentation.CmdReducedGlowSet)
-	}
-
-	// Service-side config changes (preset apply, project load) flow
-	// back into the widgets through the config revision.
-	if cfg, rev := sh.state.Config(); rev != sh.lastCfgRev {
-		sh.lastCfgRev = rev
-		sh.modeEnum.Value = string(cfg.Mode)
-		sh.paletteEnum.Value = strconv.Itoa(cfg.Palette)
-		sh.bgEnum.Value = backgroundLayerKey(cfg.BackgroundLayer)
-		sh.sens.Value = sensitivityToSlider(cfg.Sensitivity)
-		sh.glow.Value = float32(cfg.Glow / glowMax)
-		sh.bgInt.Value = float32(cfg.BackgroundIntensity / backgroundIntensityMax)
-		sh.rememberLastValues()
-	}
+// statusCaption renders one dim caption in the status strip.
+func (sh *shell) statusCaption(s string) gui.View {
+	return gui.Text(gui.TextCfg{
+		Text:      s,
+		TextStyle: sh.th.TextStyleCaption(),
+	})
 }
 
 // syncTabs persists the tab state and reports navigation in the
-// status strip. Saves are small atomic writes on the event loop.
+// status strip. Saves are small atomic writes on the frame thread.
 func (sh *shell) syncTabs() {
+	sh.state.SetDestination(sh.tabs.Layout.ActiveTab)
 	sh.state.SetStatus("Destination: " + string(sh.tabs.Layout.ActiveTab))
 	sh.saveLayout()
 }
 
 // saveLayout persists the workspace layout through the shared store.
 func (sh *shell) saveLayout() {
+	if sh.store == nil {
+		// Display-less unit tests build shells without a store; there is
+		// nothing to persist. The real window path always carries one.
+		return
+	}
 	if err := sh.store.Save(sh.tabs.Layout); err != nil {
 		sh.state.SetStatus("Layout could not be persisted: " + err.Error())
 	}
-}
-
-// gotoDestination switches the active tab programmatically.
-func (sh *shell) gotoDestination(d presentation.Destination) {
-	sh.tabs.SetActive(d)
-	sh.syncTabs()
-}
-
-// navigateIndex applies the mod+1..9,0 navigation selection.
-func (sh *shell) navigateIndex() {
-	// The keyboard path applies navigation directly (shortcutFor
-	// carries the digit); this handler covers the command-table case.
-	sh.state.SetStatus("Navigate: use mod+1..9,0 or the tab strip")
 }
 
 // rememberImportPath keeps a small bounded recent-paths list.
@@ -743,14 +634,6 @@ func (sh *shell) rememberImportPath(path string) {
 	if len(sh.recentPaths) > recentPathsMax {
 		sh.recentPaths = sh.recentPaths[:recentPathsMax]
 	}
-}
-
-// applyBackgroundIntensity pushes the background intensity slider.
-func (sh *shell) applyBackgroundIntensity() {
-	cfg := sh.svc.Config()
-	cfg.BackgroundIntensity = float64(sh.bgInt.Value) * backgroundIntensityMax
-	cfg.Clamp()
-	sh.svc.SetConfig(cfg)
 }
 
 // ensureFFmpegDetection runs the (potentially blocking) FFmpeg probe
@@ -801,37 +684,64 @@ func (sh *shell) pollJobs() {
 	sh.state.SetJobs(sh.svc.JobsOverview())
 }
 
-// pumpPreview renders one preview frame when pacing allows and keeps
-// the frame loop alive at the honest cadence.
-func (sh *shell) pumpPreview(gtx layout.Context) {
-	if sh.tabs.Layout.ActiveTab != presentation.DestStudio {
-		return
+// previewLoop is the preview frame pacer goroutine. It renders
+// studio.PreviewFrame through the shell renderer at the honest cadence
+// and publishes through the PixelSurface; UI refreshes ride the surface
+// wake (Studio tab) and the state bridge (every destination while
+// playing).
+func (sh *shell) previewLoop(stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	for {
+		now := time.Now()
+		playing := sh.svc.IsPlayingLike()
+		allowed := sh.preview.ShouldRequestFrame(now, playing, sh.th.ReducedMotion())
+		if allowed && sh.state.Destination() == presentation.DestStudio {
+			w, h := sh.state.PaneSize()
+			w, h = clampPreviewSize(w, h)
+			if fr, err := sh.svc.PreviewFrame(w, h, sh.renderer); err == nil {
+				sh.preview.Publish(fr, now)
+			}
+		}
+		if playing && allowed {
+			// Keep the transport clock and status strip fresh at the same
+			// bounded cadence (the surface wake only covers the Studio
+			// preview image; the layout refresh covers every readout).
+			sh.state.invalidate()
+		}
+		next := now.Add(previewMinInterval)
+		if !playing {
+			next = sh.preview.NextIdleDeadline(now, sh.th.ReducedMotion())
+		}
+		wait := time.Until(next)
+		if wait < time.Millisecond {
+			wait = time.Millisecond
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-stop:
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
 	}
-	playing := sh.svc.IsPlayingLike()
-	now := time.Now()
-	if !sh.preview.ShouldRequestFrame(now, playing, sh.th.ReducedMotion()) {
-		// Schedule the next check at the exact interval end — no busy
-		// polling, no wall-clock parsing.
-		gtx.Execute(op.InvalidateCmd{At: sh.preview.NextIdleDeadline(now, sh.th.ReducedMotion())})
-		return
-	}
-	w, h := sh.previewRequestSize()
-	fr, err := sh.svc.PreviewFrame(w, h, sh.renderer)
-	if err == nil && fr != nil {
-		sh.preview.Accept(fr, now)
-	}
-	sh.win.Invalidate()
 }
 
-// previewRequestSize derives the render target from the last laid-out
-// pane size, clamped to the bounded preview budget. A resize just
-// changes the next request; the renderer is never recreated.
-func (sh *shell) previewRequestSize() (int, int) {
-	size := sh.previewPaneSize
-	if size.X <= 0 || size.Y <= 0 {
-		size = image.Pt(480, 270)
+// seedSurface paints the deterministic obsidian empty-preview backdrop
+// into the fresh surface (opaque pixels: premultiplied and straight
+// alpha coincide), so the "no frames yet" pane shows the brand ground
+// instead of transparency.
+func (sh *shell) seedSurface() {
+	seed := placeholderImage(previewDefaultWidth, previewDefaultHeight, sh.th.Obsidian())
+	_ = sh.surface.Update(seed.Pix, seed.Stride)
+}
+
+// previewRequestSize clamps a pane size to the bounded preview budget.
+// A resize just changes the next request; the renderer is never
+// recreated.
+func clampPreviewSize(w, h int) (int, int) {
+	if w <= 0 || h <= 0 {
+		w, h = 480, 270
 	}
-	w, h := size.X, size.Y
 	if w > previewMaxWidthPx {
 		h = h * previewMaxWidthPx / w
 		w = previewMaxWidthPx
@@ -856,7 +766,6 @@ const (
 	smokeTimeout       = 45 * time.Second
 	previewMaxWidthPx  = 640
 	previewMaxHeightPx = 360
-	cfgRevInitial      = ^uint64(0)
 )
 
 // joinOrNone renders a capability list or an honest "none".

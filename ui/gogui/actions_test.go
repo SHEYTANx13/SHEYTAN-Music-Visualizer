@@ -1,11 +1,12 @@
 package gogui
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"gioui.org/io/key"
+	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fileaccess"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/presentation"
@@ -85,15 +86,35 @@ func TestDispatcherCompleteness(t *testing.T) {
 }
 
 // TestDispatcherRunUnsupported verifies the unsupported path surfaces
-// the honest reason through the status strip instead of failing.
+// the honest reason through the status strip instead of failing, AND
+// that the four workspace-composition commands are now REALLY handled
+// (run 44648357437 item 4.3 — the honest-missing stubs were replaced
+// by persisted reorder/collapse/orientation behavior).
 func TestDispatcherRunUnsupported(t *testing.T) {
 	sh := &shell{state: newUIState()}
 	d := newDispatcher(sh)
-	if !d.Run(presentation.CmdSplitOrientation) {
-		t.Fatal("explicitly unsupported commands must still report handled=true (they surface a reason)")
+	for _, id := range []presentation.CommandID{
+		presentation.CmdTabsReorder,
+		presentation.CmdSplitOrientation,
+		presentation.CmdPanelCollapse,
+		presentation.CmdPanelRestore,
+	} {
+		if !d.Run(id) {
+			t.Fatalf("workspace command %q must be handled", id)
+		}
+		if got := sh.state.Status(); got == "" {
+			t.Errorf("workspace command %q must set a status message", id)
+		}
 	}
-	if got := sh.state.Status(); got == "" {
-		t.Error("unsupported command must set a status message")
+	for _, id := range []presentation.CommandID{
+		presentation.CmdTabsReorder,
+		presentation.CmdSplitOrientation,
+		presentation.CmdPanelCollapse,
+		presentation.CmdPanelRestore,
+	} {
+		if reason, unsupported := d.unsupported[id]; unsupported {
+			t.Errorf("command %q must not be in the unsupported set any more (reason %q)", id, reason)
+		}
 	}
 }
 
@@ -126,42 +147,78 @@ func TestDispatcherKeyHandlers(t *testing.T) {
 }
 
 // TestShortcutFor verifies the canonical desktop shortcut table binds
-// exactly as presentation.Shortcuts documents.
+// exactly as presentation.Shortcuts documents (mod = Ctrl on
+// Windows/Linux, Super/Cmd on macOS; both chords are accepted by the
+// pure mapping).
 func TestShortcutFor(t *testing.T) {
-	mod := key.ModShortcut
-	modAlt := key.ModShortcut | key.ModAlt
+	mod := gui.ModCtrl
+	modSuper := gui.ModSuper
+	modAlt := gui.ModCtrl | gui.ModAlt
 	cases := []struct {
-		name     key.Name
-		mods     key.Modifiers
+		name     gui.KeyCode
+		mods     gui.Modifier
 		wantCmd  presentation.CommandID
 		wantNav  int
 		wantBind bool
 	}{
-		{key.NameSpace, 0, presentation.CmdPlayPause, 0, true},
-		{key.NameLeftArrow, 0, presentation.CmdSeekBack, 0, true},
-		{key.NameRightArrow, 0, presentation.CmdSeekForward, 0, true},
-		{"I", mod, presentation.CmdImportAudio, 0, true},
-		{"S", mod, presentation.CmdProjectSave, 0, true},
-		{"O", mod, presentation.CmdProjectOpen, 0, true},
-		{"E", mod, presentation.CmdExportStart, 0, true},
-		{"Q", mod, presentation.CmdQuit, 0, true},
-		{".", mod, presentation.CmdStop, 0, true},
-		{"1", mod, presentation.CmdNavigate, 1, true},
-		{"9", mod, presentation.CmdNavigate, 9, true},
-		{"0", mod, presentation.CmdNavigate, 10, true},
-		{"0", modAlt, presentation.CmdLayoutReset, 0, true},
-		// Non-bindings: plain letters, shifted space, modifiers alone.
-		{"I", 0, "", 0, false},
-		{"S", 0, "", 0, false},
-		{key.NameSpace, mod, "", 0, false},
-		{"X", mod, "", 0, false},
+		{gui.KeySpace, 0, presentation.CmdPlayPause, 0, true},
+		{gui.KeyLeft, 0, presentation.CmdSeekBack, 0, true},
+		{gui.KeyRight, 0, presentation.CmdSeekForward, 0, true},
+		{gui.KeyI, mod, presentation.CmdImportAudio, 0, true},
+		{gui.KeyI, modSuper, presentation.CmdImportAudio, 0, true},
+		{gui.KeyS, mod, presentation.CmdProjectSave, 0, true},
+		{gui.KeyO, mod, presentation.CmdProjectOpen, 0, true},
+		{gui.KeyE, mod, presentation.CmdExportStart, 0, true},
+		{gui.KeyQ, mod, presentation.CmdQuit, 0, true},
+		{gui.KeyPeriod, mod, presentation.CmdStop, 0, true},
+		{gui.Key1, mod, presentation.CmdNavigate, 1, true},
+		{gui.Key9, mod, presentation.CmdNavigate, 9, true},
+		{gui.Key0, mod, presentation.CmdNavigate, 10, true},
+		{gui.Key0, modAlt, presentation.CmdLayoutReset, 0, true},
+		// Non-bindings: plain letters, modifier-held space, other letters.
+		{gui.KeyI, 0, "", 0, false},
+		{gui.KeyS, 0, "", 0, false},
+		{gui.KeySpace, mod, "", 0, false},
+		{gui.KeyX, mod, "", 0, false},
+		// Arrow seek is exact-chord: a held modifier is not reinterpreted.
+		{gui.KeyLeft, mod, "", 0, false},
 	}
 	for _, c := range cases {
 		cmd, nav, bound := shortcutFor(c.name, c.mods)
 		if bound != c.wantBind || cmd != c.wantCmd || nav != c.wantNav {
-			t.Errorf("shortcutFor(%q, %v) = (%q, %d, %v), want (%q, %d, %v)",
+			t.Errorf("shortcutFor(%d, %v) = (%q, %d, %v), want (%q, %d, %v)",
 				c.name, c.mods, cmd, nav, bound, c.wantCmd, c.wantNav, c.wantBind)
 		}
+	}
+}
+
+// TestRegisterShortcutsChords verifies every registered shortcut chord
+// is distinct, every command is Global, and the table is complete (the
+// registration would fail loudly on duplicates; this test pins the
+// mapping without a window).
+func TestRegisterShortcutsChords(t *testing.T) {
+	sh := &shell{state: newUIState()}
+	sh.disp = newDispatcher(sh)
+	sh.tabs = TabState{Layout: presentation.DefaultLayout()}
+
+	seen := map[gui.Shortcut]string{}
+	cmds := sh.shortcutTable()
+	for _, c := range cmds {
+		if prev, dup := seen[c.Shortcut]; dup {
+			t.Errorf("duplicate shortcut %v: %q and %q", c.Shortcut, prev, c.ID)
+		}
+		seen[c.Shortcut] = c.ID
+		if !c.Global {
+			t.Errorf("shortcut %q must be Global (fires before focus dispatch)", c.ID)
+		}
+		if c.Execute == nil {
+			t.Errorf("shortcut %q has no Execute", c.ID)
+		}
+	}
+	// space + stop + 2 seek + 4 file + quit + layout reset + mod+1..9,0
+	// + 2 tab-reorder chords + panel collapse/restore (item 4.3).
+	if len(cmds) != 24 {
+		t.Errorf("registered %d shortcuts, want 24", len(cmds))
 	}
 }
 
@@ -200,11 +257,18 @@ func TestExportSecondsAndDefaultPaths(t *testing.T) {
 	if got := exportSeconds("garbage"); got != 0 {
 		t.Errorf("exportSeconds(garbage) = %v, want 0", got)
 	}
-	if got := defaultProjectPath("/data/projects"); got != "/data/projects/project.sheytan.json" {
-		t.Errorf("defaultProjectPath = %q", got)
+	// The contract is "data dir + canonical file name joined by the
+	// PLATFORM separator" (filepath.Join in the helpers), not a
+	// POSIX-only string. Asserting the literal slash-joined form
+	// broke every native-backslash platform (run 44648357437,
+	// build-windows actions_test.go:204/207).
+	if got, want := defaultProjectPath("/data/projects"),
+		filepath.Join("/data/projects", "project.sheytan.json"); got != want {
+		t.Errorf("defaultProjectPath = %q, want %q", got, want)
 	}
-	if got := defaultExportPath("/data/exports"); got != "/data/exports/export.mp4" {
-		t.Errorf("defaultExportPath = %q", got)
+	if got, want := defaultExportPath("/data/exports"),
+		filepath.Join("/data/exports", "export.mp4"); got != want {
+		t.Errorf("defaultExportPath = %q, want %q", got, want)
 	}
 }
 
@@ -259,5 +323,22 @@ func TestSeekClampLogic(t *testing.T) {
 		if target != c.want {
 			t.Errorf("clamp(%v, %v) = %v, want %v", c.pos, c.delta, target, c.want)
 		}
+	}
+}
+
+// TestVolumeDispatchGuard verifies the slider dispatch guard (1%
+// granularity, no per-drag-step spam).
+func TestVolumeDispatchGuard(t *testing.T) {
+	if changedEnough(0.5, 0.5) {
+		t.Error("same value must not dispatch")
+	}
+	if changedEnough(0.5, 0.505) {
+		t.Error("sub-1% change must not dispatch")
+	}
+	if !changedEnough(0.5, 0.52) {
+		t.Error("1%+ change must dispatch")
+	}
+	if !changedEnough(0.5, 0.48) {
+		t.Error("downward 1%+ change must dispatch")
 	}
 }

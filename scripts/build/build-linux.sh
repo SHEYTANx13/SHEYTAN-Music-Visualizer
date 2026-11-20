@@ -36,7 +36,7 @@
 # Build tag note: the WGPU dependency (github.com/go-webgpu/goffi) uses
 # its own fakecgo/dlopen stubs that the Go internal linker cannot place
 # into a CGO binary; -tags goffi_static selects goffi's static dlopen
-# path and is REQUIRED for every build that links Fyne + wgpu together
+# path and is REQUIRED for every build that links the Go-Gui shell + wgpu together
 # (see ai-notes.md). The tag is harmless on Windows.
 
 # Justifications (shellcheck):
@@ -84,21 +84,27 @@ FAILURES=0
 FAILED_GATES=""
 SKIPPED_GATES=""
 
-note() { printf '%s\n' "$*" >>"$CI_LOG_FILE"; }
+# Structural note writer (run 44648357437 item 2.11 repair): sanitized
+# AT THE MOMENT text enters the log file — the raw appends let the
+# '='-banner runs (the 240 forbidden sequences) and non-ASCII prose
+# (em-dashes, the ™ mark) reach phase2-build.log unclamped. ci_sanitize
+# is loud on its own failure path, so a sanitizer outage can never
+# silently pass raw bytes through as "clean".
+note() { printf '%s\n' "$*" | ci_sanitize >>"$CI_LOG_FILE"; }
 fail_gate() {
   FAILURES=$((FAILURES + 1))
   FAILED_GATES="$FAILED_GATES $1"
 }
 skip_gate() {
   SKIPPED_GATES="$SKIPPED_GATES $1"
-  printf 'SKIPPED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"
+  printf 'SKIPPED: gate %s (%s)\n' "$1" "$2" | ci_sanitize >>"$CI_LOG_FILE"
 }
 blocked_gate() {
   # Missing-prerequisite classification, distinct from SKIPPED (intentional
   # not-run) and from FAIL (a command ran and exited nonzero). The
   # consolidated report parses these into the BLOCKED gate state.
   SKIPPED_GATES="$SKIPPED_GATES $1"
-  printf 'BLOCKED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"
+  printf 'BLOCKED: gate %s (%s)\n' "$1" "$2" | ci_sanitize >>"$CI_LOG_FILE"
 }
 
 note "=============================================================="
@@ -107,7 +113,7 @@ note "Product:  SHEYTAN Music Visualizer (SHEYTAN™, licensor Parsaetak)"
 note "Mode:     $MODE"
 note "Host:     $(uname -srm)"
 note "Started:  $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-note "Build tag: goffi_static (Fyne + wgpu link compatibility)"
+note "Build tag: goffi_static (Go-Gui shell + wgpu link compatibility)"
 note "=============================================================="
 
 GO_TAGS="-tags goffi_static"
@@ -215,6 +221,20 @@ if [ "$MODE" = "desktop" ]; then
     fail_gate build-executable
   fi
 
+  # GUI-shell build gate (run 44648357437 item 2.6 repair): the
+  # virtual-display gui-smoke gate must launch the REAL GUI executable,
+  # never the CLI authority binary — the old smoke launched
+  # ./bin/sheytan-music-visualizer, which intentionally opens no window
+  # ("toolkit-free authority"), so the gate failed with "application
+  # exited before its window became viewable". The GUI shell is built
+  # here under the SAME canonical tags and smoke-tested below.
+  GUI_EXE_OK=0
+  if CI_TOOL_CONTEXT="gate:build-gogui-shell" ci_capture "$JOB" build-gogui-shell go build -trimpath $GO_TAGS "${LDFLAGS[@]+"${LDFLAGS[@]}"}" -o bin/app-gogui ./cmd/app-gogui; then
+    GUI_EXE_OK=1
+  else
+    fail_gate build-gogui-shell
+  fi
+
   if [ "$EXE_OK" -eq 1 ]; then
     CI_TOOL_CONTEXT="runtime:--version" ci_capture "$JOB" run-version ./bin/sheytan-music-visualizer --version ||
       fail_gate run-version
@@ -223,6 +243,19 @@ if [ "$MODE" = "desktop" ]; then
   else
     skip_gate run-version "executable build failed"
     skip_gate run-self-check "executable build failed"
+  fi
+
+  # The GUI shell gets its OWN version/self-check gates (run 44648357437
+  # item 2.6: keep the CLI self-check a separate non-GUI test; the GUI
+  # shell's renderer-frame self-check is the GPU/CPU evidence source).
+  if [ "$GUI_EXE_OK" -eq 1 ]; then
+    CI_TOOL_CONTEXT="runtime:--version (gui shell)" ci_capture "$JOB" run-gogui-version ./bin/app-gogui --version ||
+      fail_gate run-gogui-version
+    CI_TOOL_CONTEXT="runtime:--self-check (gui shell)" ci_capture "$JOB" run-gogui-self-check env SHEYTAN_LOG_DIR="$(pwd)/ci-logs/app-logs" ./bin/app-gogui --self-check ||
+      fail_gate run-gogui-self-check
+  else
+    skip_gate run-gogui-version "gui shell build failed"
+    skip_gate run-gogui-self-check "gui shell build failed"
   fi
 
   # Package-status evidence note (run 43712071111): the record is
@@ -693,14 +726,15 @@ CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race
   # Blocked honestly when the display/inspection tooling is missing —
   # never passed without tooling.
   #
-  # PREREQUISITE GUARD (run 42598929646 defect E repair): the smoke
-  # launches ./bin/sheytan-music-visualizer. When the executable build
-  # failed, the gate is recorded BLOCKED with the exact reason — it
-  # must NEVER attempt to execute a nonexistent binary (that produced
-  # the misleading "No such file or directory" launch failure in the
-  # failed run). A BLOCKED prerequisite is not a pass and not a
-  # software failure.
-  if [ "$EXE_OK" -eq 1 ]; then
+  # PREREQUISITE GUARD (run 42598929646 defect E repair; target
+  # corrected by run 44648357437 item 2.6): the smoke launches the REAL
+  # GUI shell (./bin/app-gogui). When the GUI-shell build failed, the
+  # gate is recorded BLOCKED with the exact reason — it must NEVER
+  # attempt to execute a nonexistent binary (that produced the
+  # misleading "No such file or directory" launch failure), and it must
+  # never launch the CLI authority, which opens no window by design.
+  # A BLOCKED prerequisite is not a pass and not a software failure.
+  if [ "$GUI_EXE_OK" -eq 1 ]; then
     if command -v Xvfb >/dev/null 2>&1 && command -v xdpyinfo >/dev/null 2>&1 && command -v xwininfo >/dev/null 2>&1; then
     CI_TOOL_CONTEXT="gate:gui-smoke (virtual display Xvfb; IsViewable proof + graceful-close proof)" ci_capture "$JOB" gui-smoke bash -c '
       set -u
@@ -773,7 +807,7 @@ CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race
       #    signal; map state must reach IsViewable to pass. A live process
       #    without a viewable window FAILS — including the
       #    run-42376176493 case where the XID existed but stayed IsUnMapped.
-      ALSA_CONFIG_PATH="$PWD/$ALSA_NULL_CONF" SHEYTAN_LOG_DIR="$(pwd)/$SMOKE_DIR/app-logs" ./bin/sheytan-music-visualizer >"$SMOKE_DIR/app.log" 2>&1 &
+      ALSA_CONFIG_PATH="$PWD/$ALSA_NULL_CONF" SHEYTAN_LOG_DIR="$(pwd)/$SMOKE_DIR/app-logs" ./bin/app-gogui >"$SMOKE_DIR/app.log" 2>&1 &
       AP=$!
       echo "app_pid=$AP"
       WINDOW_MAPPED=0

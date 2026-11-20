@@ -1,6 +1,14 @@
-// theme.go — the SHEYTAN hellish black/red Gio theme built from the
-// canonical design tokens (design.MustLoad()). Black dominates; red is
-// the accent for primary actions, focus and meaningful emphasis only.
+// theme.go — the SHEYTAN hellish black/red theme built from the
+// canonical design tokens (design.MustLoad()) over the go-gui theme
+// system (github.com/go-gui-org/go-gui). Black dominates; red is the
+// accent for primary actions, focus and meaningful emphasis only.
+//
+// Run installs gui.ThemeDark as the app default BEFORE the window is
+// created (dark polarity, dark titlebars); the token document then
+// drives every brand color through this ShellTheme: widget fills,
+// borders and text styles carry the exact token values, and the
+// go-gui roles (gui.CurrentTheme().TextStyleTitle & co) provide the
+// typography.
 //
 // The intensity presets (subtle / ritual / infernal) from the token
 // document drive the decorative chrome parameters: the decoration
@@ -14,20 +22,17 @@ import (
 	"image/color"
 	"sync"
 
-	"gioui.org/widget/material"
-
-	"gioui.org/unit"
+	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/design"
 )
 
 // ShellTheme owns the token-derived theme for the single window. It is
-// safe for concurrent use: the event loop reads colors every frame,
+// safe for concurrent use: the frame thread reads colors every frame,
 // while the settings panel switches presets and flags.
 type ShellTheme struct {
-	mu       sync.Mutex
-	doc      design.TokenDocument
-	material *material.Theme
+	mu  sync.Mutex
+	doc design.TokenDocument
 
 	intensityName string
 	intensity     design.Intensity
@@ -75,33 +80,21 @@ func mustHex(s string) color.NRGBA {
 	return c
 }
 
+// guiColor converts a token-derived color into the go-gui Color type
+// (explicitly set so widget defaults never mistake it for "unset").
+func guiColor(c color.NRGBA) gui.Color {
+	return gui.RGBA(c.R, c.G, c.B, c.A)
+}
+
 // NewShellTheme builds the brand theme from the validated token
 // document. Identity values mirror internal/brand constants; the JSON
 // document is the presentation authority.
 func NewShellTheme(doc design.TokenDocument) *ShellTheme {
-	mt := material.NewTheme()
-	bg := mustHex(doc.Color.Surface["obsidian"])
-	fg := mustHex(doc.Color.Text["primary"])
-	accent := mustHex(doc.Color.Accent["infernalRed"])
-	mt.Palette = material.Palette{
-		Bg:         bg,
-		Fg:         fg,
-		ContrastBg: accent,
-		ContrastFg: fg,
-	}
-	// 14sp body text matches the token type scale body size.
-	mt.TextSize = unit.Sp(14)
-	t := &ShellTheme{
-		doc:      doc,
-		material: mt,
-	}
+	t := &ShellTheme{doc: doc}
 	t.intensityName = doc.DefaultIntensity
 	t.intensity = doc.IntensityPresets[doc.DefaultIntensity]
 	return t
 }
-
-// Theme exposes the underlying material theme (single window goroutine).
-func (t *ShellTheme) Theme() *material.Theme { return t.material }
 
 // TokenDoc returns the loaded token document.
 func (t *ShellTheme) TokenDoc() design.TokenDocument { return t.doc }
@@ -156,7 +149,8 @@ func (t *ShellTheme) ReducedGlow() bool {
 }
 
 // Colors — every color is read from the token document, never
-// hard-coded locally.
+// hard-coded locally. The color.NRGBA getters are the pure token
+// surface (unit-tested); the gui.Color variants feed the widgets.
 
 func (t *ShellTheme) Obsidian() color.NRGBA   { return mustHex(t.doc.Color.Surface["obsidian"]) }
 func (t *ShellTheme) Surface() color.NRGBA    { return mustHex(t.doc.Color.Surface["deepCharcoal"]) }
@@ -175,6 +169,16 @@ func (t *ShellTheme) StatusWarning() color.NRGBA { return mustHex(t.doc.Color.St
 func (t *ShellTheme) StatusError() color.NRGBA   { return mustHex(t.doc.Color.Status["error"]) }
 func (t *ShellTheme) StatusInfo() color.NRGBA    { return mustHex(t.doc.Color.Status["info"]) }
 
+// ObsidianColor … DividerColor are the same token colors as go-gui
+// Color values for widget fills and borders.
+
+func (t *ShellTheme) ObsidianColor() gui.Color { return guiColor(t.Obsidian()) }
+func (t *ShellTheme) SurfaceColor() gui.Color  { return guiColor(t.Surface()) }
+func (t *ShellTheme) VolcanicColor() gui.Color { return guiColor(t.Volcanic()) }
+func (t *ShellTheme) AccentColor() gui.Color   { return guiColor(t.Accent()) }
+func (t *ShellTheme) GoldColor() gui.Color     { return guiColor(t.Gold()) }
+func (t *ShellTheme) TextDimColor() gui.Color  { return guiColor(t.TextDim()) }
+
 // withAlpha scales a base color with an explicit alpha byte.
 func withAlpha(c color.NRGBA, a uint8) color.NRGBA { c.A = a; return c }
 
@@ -187,6 +191,12 @@ func (t *ShellTheme) DecorationColor() color.NRGBA {
 	defer t.mu.Unlock()
 	a := uint8(t.intensity.DecorationOpacity*255 + 0.5)
 	return withAlpha(mustHex(t.doc.Color.Accent["darkBlood"]), a)
+}
+
+// DecorationBorderColor is the DecorationColor as the go-gui border
+// color the panel surfaces draw their hairline accent edge with.
+func (t *ShellTheme) DecorationBorderColor() gui.Color {
+	return guiColor(t.DecorationColor())
 }
 
 // GlowColor is the color of the preview glow frame. The alpha derives
@@ -202,9 +212,56 @@ func (t *ShellTheme) GlowColor() color.NRGBA {
 	return withAlpha(mustHex(t.doc.Color.Accent["emberHighlight"]), a)
 }
 
+// GlowBorderColor is the GlowColor as the go-gui border color of the
+// preview chrome frame.
+func (t *ShellTheme) GlowBorderColor() gui.Color { return guiColor(t.GlowColor()) }
+
 // IntensityEmbers reports whether the active preset draws ember marks.
 func (t *ShellTheme) IntensityEmbers() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.intensity.Embers
+}
+
+// Text styles — the go-gui theme roles (CurrentTheme) provide the
+// typography; the token colors provide the ink. Every helper returns a
+// fresh value, so callers may adjust further.
+
+// textStyle recolors a themed role with an explicit token ink.
+func textStyle(role gui.TextStyle, ink color.NRGBA) gui.TextStyle {
+	role.Color = guiColor(ink)
+	return role
+}
+
+// TextStyleTitle is the window/panel title role with the token primary
+// text color.
+func (t *ShellTheme) TextStyleTitle() gui.TextStyle {
+	return textStyle(gui.CurrentTheme().TextStyleTitle, t.Text())
+}
+
+// TextStyleSection is the section-heading role with the accent ink
+// (the crimson section headings the panels draw).
+func (t *ShellTheme) TextStyleSection() gui.TextStyle {
+	return textStyle(gui.CurrentTheme().TextStyleTitle, t.Accent())
+}
+
+// TextStyleBody is the body role with the token primary text color.
+func (t *ShellTheme) TextStyleBody() gui.TextStyle {
+	return textStyle(gui.CurrentTheme().TextStyleBody, t.Text())
+}
+
+// TextStyleCaption is the caption role with the token secondary
+// (dimmed) text color.
+func (t *ShellTheme) TextStyleCaption() gui.TextStyle {
+	return textStyle(gui.CurrentTheme().TextStyleCaption, t.TextDim())
+}
+
+// TextStyleAccentCaption is the caption role with the accent ink.
+func (t *ShellTheme) TextStyleAccentCaption() gui.TextStyle {
+	return textStyle(gui.CurrentTheme().TextStyleCaption, t.Accent())
+}
+
+// TextStyleStatus recolors the caption role with a status color.
+func (t *ShellTheme) TextStyleStatus(c color.NRGBA) gui.TextStyle {
+	return textStyle(gui.CurrentTheme().TextStyleCaption, c)
 }

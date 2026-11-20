@@ -47,6 +47,15 @@
 #   if ($r.ExitCode -ne 0) { ... real exit code ... }
 #   $r.StdOut  # string[] of captured stdout lines (sanitized, LF-normalized)
 #   $r.StdErr  # string[] of captured stderr lines (sanitized, LF-normalized)
+#
+# Cardinality contract (run 44648357437 package-gate repair): StdOut and
+# StdErr are ALWAYS arrays with the true line count — @() for a silent
+# child, a 1-element array for a single line — because every assignment
+# site re-wraps the function output with @(). Without the re-wrap,
+# PowerShell's pipeline unrolls the returned array, and 0/1-line results
+# arrive as $null / scalar, which crashes .Count reads under
+# Set-StrictMode -Version Latest ("The property 'Count' cannot be found
+# on this object.") and silently mis-indexes $lines[0] on a scalar
 
 # Sanitizer routing (run 44462492262 repair): the captured stdout and
 # stderr text is routed through the canonical capture-time sanitizer
@@ -183,8 +192,11 @@ function Invoke-CapturedProcess {
         try { $seTask.Wait(2000) | Out-Null } catch { }
         # Sanitizer routing: contract-compliant LF lines, raw bytes
         # preserved behind a loud marker when no sanitizer is available.
-        try { $result.StdOut = Get-SanitizedLines -Raw $soTask.Result } catch { }
-        try { $result.StdErr = Get-SanitizedLines -Raw $seTask.Result } catch { }
+        # @( ) preserves array cardinality through the pipeline unroll
+        # (0 lines -> empty array, 1 line -> 1-element array) so strict
+        # mode never sees a scalar/$null where .Count is read.
+        try { $result.StdOut = @(Get-SanitizedLines -Raw $soTask.Result) } catch { }
+        try { $result.StdErr = @(Get-SanitizedLines -Raw $seTask.Result) } catch { }
         $result.Error = ("Invoke-CapturedProcess: child did not exit within {0}s (timed out; killed) — no exit code exists, the observation is incomplete" -f $TimeoutSeconds)
         $result.EndedUtc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         $result.ElapsedMilliseconds = [int64](((Get-Date).ToUniversalTime() - $startedUtc).TotalMilliseconds)
@@ -196,10 +208,10 @@ function Invoke-CapturedProcess {
     # read the REAL exit code. HasExited is re-checked and the code is
     # only reported when the OS actually exposed it — a missing exit
     # code is an error, never zero.
-    try { $result.StdOut = Get-SanitizedLines -Raw $soTask.Result } catch {
+    try { $result.StdOut = @(Get-SanitizedLines -Raw $soTask.Result) } catch {
         $result.Error = "Invoke-CapturedProcess: stdout capture failed: $($_.Exception.Message)"
     }
-    try { $result.StdErr = Get-SanitizedLines -Raw $seTask.Result } catch {
+    try { $result.StdErr = @(Get-SanitizedLines -Raw $seTask.Result) } catch {
         $result.Error = ($result.Error + " stderr capture failed: " + $_.Exception.Message).Trim()
     }
 

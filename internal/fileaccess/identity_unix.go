@@ -1,4 +1,8 @@
-//go:build unix && !linux
+//go:build unix && !linux && !darwin
+
+// identity_unix.go — BSD filesystem identity (freebsd/openbsd/netbsd).
+// macOS/Darwin uses the dedicated identity_darwin.go primitive; Linux
+// uses the statx-based primitive in identity_linux.go.
 
 package fileaccess
 

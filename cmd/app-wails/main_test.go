@@ -2,7 +2,6 @@
 
 package main
 
-
 // main_test.go — flag parsing and pure helper coverage only. No
 // window, no webview, no studio runtime: the shell itself cannot run
 // on a display-less machine, so these tests pin the CLI contract that

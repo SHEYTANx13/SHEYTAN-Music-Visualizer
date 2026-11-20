@@ -14,9 +14,12 @@ machine. No account, no telemetry, no bundled codec binaries.
 > Shell architecture (2026-11-19/20 migration, run 44462492262): one
 > toolkit-free Go application core (`internal/*`) with TWO alternative
 > presentation shells and ONE renderer subsystem behind a contract:
-> - **Native Go-Gui shell** (`cmd/app-gogui`, Gio `gioui.org v0.10.3`) —
+> - **Native Go-Gui shell** (`cmd/app-gogui`, the actual Go-Gui library
+>   `github.com/go-gui-org/go-gui v0.98.0` — NOT Gio `gioui.org`, which was
+>   removed in the 2026-11-21 migration) —
 >   the production desktop shell: one window, the eleven workspace tabs,
->   SHEYTAN design tokens, CPU-frame preview bridge, honest GPU evidence.
+>   SHEYTAN design tokens, PixelSurface CPU-frame preview bridge, honest GPU
+>   evidence, cgo-free Linux desktop (pure-Go X11, runtime GL dlopen).
 > - **Wails v3 web shell** (`cmd/app-wails`, `wailsapp/wails/v3 v3.1.0`) —
 >   an alternative cgo-free web-technology shell (purego profile,
 >   `sheytan_nogpu` build tag: the web-shell profile renders through the
@@ -70,7 +73,7 @@ palettes used by the visualizer (`internal/visualizer`).
 
 | Capability | Status |
 |---|---|
-| Studio shell: top command bar, eleven workspace tabs (Home/Studio/Worlds/Templates/Library/Export/Requirements/Downloads/System Files/Settings/Diagnostics), library, live preview, inspector, transport, export dialog | DELIVERED (native Go-Gui/Gio shell `cmd/app-gogui` with SHEYTAN token theme; Wails v3 web shell `cmd/app-wails` as the alternative cgo-free profile) |
+| Studio shell: top command bar, eleven workspace tabs (Home/Studio/Worlds/Templates/Library/Export/Requirements/Downloads/System Files/Settings/Diagnostics), library, live preview, inspector, transport, export dialog | DELIVERED (native Go-Gui shell `cmd/app-gogui` on `github.com/go-gui-org/go-gui v0.98.0` with SHEYTAN token theme; Wails v3 web shell `cmd/app-wails` as the alternative cgo-free profile) |
 | Import WAV (int16/int24/int32 + IEEE float32), MP3, FLAC, Ogg/Vorbis via first-party Go decoders | DELIVERED (`internal/audio`) |
 | Import AAC/M4A/ALAC via the user's local FFmpeg (optional adapter, never bundled) | DELIVERED as an optional adapter (`internal/audio/decoders_ffmpeg.go`; registers only when FFmpeg is present) |
 | Layered compositions: a dimmed background mode behind the primary mode | DELIVERED (CPU renderer, deterministic, bounded intensity; `internal/render`) |
@@ -132,13 +135,14 @@ decoders are never shared across goroutines.
 ## Build prerequisites
 
 - **Go** at the `go.mod` toolchain (1.27 line). The desktop build uses CGO.
-- **Linux**: `gcc`, `pkg-config` and the native UI libraries
-  (Gio/Gogpu stack: `libvulkan-dev`, `libxkbcommon-dev`,
-  `libxkbcommon-x11-dev`, `libwayland-dev`, `libegl1-mesa-dev`,
-  `mesa-vulkan-drivers` for software-Vulkan smoke runs)
-  (`libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev
-  libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libwayland-dev
-  libxkbcommon-dev xorg-dev` on Debian/Ubuntu).
+- **Linux**: `gcc` (the GoGPU wgpu renderer stack compiles cgo) and the
+  RUNTIME UI libraries only — the go-gui v0.98.0 desktop backend is
+  cgo-free (pure-Go X11 via jezek/xgb; libEGL/libGL/wayland/xkbcommon are
+  dlopened at run time, so no `-dev` headers or pkg-config UI modules are
+  needed):
+  `libegl1 libgl1 libvulkan1 mesa-vulkan-drivers libwayland-client0
+  libxkbcommon0 libx11-6` (mesa-vulkan-drivers for software-Vulkan smoke
+  runs). `xvfb` + `x11-utils` for the virtual-display GUI smoke.
 - **Windows**: MSYS2 **UCRT64** toolchain (not the deprecated MINGW64):
   `mingw-w64-ucrt-x86_64-gcc` and `mingw-w64-ucrt-x86_64-pkgconf`, with
   `CGO_ENABLED=1 GOOS=windows GOARCH=amd64`.

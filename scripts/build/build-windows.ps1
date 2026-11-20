@@ -71,7 +71,7 @@ $env:SHEYTAN_REPO_ROOT = $repoRoot
 $logDir = Join-Path $repoRoot "ci-logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $env:CI_LOG_FILE = Join-Path $logDir "phase2-build.log"
-Set-Content -Path $env:CI_LOG_FILE -Value "" -NoNewline # fresh local run
+[System.IO.File]::WriteAllText($env:CI_LOG_FILE, "", (New-Object System.Text.UTF8Encoding($false))) # fresh local run (LF-safe writer)
 
 # Persisted-evidence reset (run 43712071111): the export-proof result
 # files consumed by scripts/ci/write-package-status.py are rewritten by
@@ -83,6 +83,22 @@ foreach ($staleProof in @("export-proof-h264.result.txt", "export-proof-h265.res
 }
 
 . (Join-Path $repoRoot "scripts/ci/Capture-Step.ps1")
+
+# Run 44648357437 log-contract repair (work order 2.11): every note is
+# sanitized at the moment it enters the log file. The former
+# Add-Content writer appended CRLF on Windows (0x0D is a control byte
+# the strict validator rejects — the 21 control bytes in
+# phase2-build.log) and the raw '=====' banners bypassed the '='-run
+# clamp (the 240 forbidden sequences). Write-Note is defined EARLY —
+# before the Go-prerequisite BLOCKED branch below — routes through the
+# canonical capture-time sanitizer chain (Write-SanitizedChunk, already
+# dot-sourced by Capture-Step.ps1) and appends with byte-exact LF via
+# [IO.File]::AppendAllText, the writer discipline Capture-Step.ps1
+# documents.
+function Write-Note([string]$text) {
+    $clean = Write-SanitizedChunk -Text $text
+    [System.IO.File]::AppendAllText($env:CI_LOG_FILE, $clean + "`n", (New-Object System.Text.UTF8Encoding($false)))
+}
 
 $job = "phase2-windows-build"
 
@@ -155,7 +171,7 @@ if ($null -eq $goResolved) {
         "media-tools-pinned-install", "verify-extracted-path-with-spaces"
     )
     foreach ($g in $blockedGates) {
-        Add-Content -Path $env:CI_LOG_FILE -Value ("BLOCKED: gate {0} ({1})" -f $g, $blockedReason)
+        Write-Note ("BLOCKED: gate {0} ({1})" -f $g, $blockedReason)
     }
     Write-Note ""
     $ended = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -168,9 +184,6 @@ if ($null -eq $goResolved) {
     exit 1
 }
 
-function Write-Note([string]$text) {
-    Add-Content -Path $env:CI_LOG_FILE -Value $text
-}
 function Fail-Gate([string]$gate) {
     $script:failures++
     $script:failedGates += $gate

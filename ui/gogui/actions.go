@@ -1,13 +1,16 @@
-// actions.go — command dispatch for the Gio shell: every
+// actions.go — command dispatch for the Go-Gui shell: every
 // presentation.CommandID used by this shell is mapped to a real handler
 // or explicitly unsupported with its honest reason, and the canonical
 // desktop keyboard shortcuts (from presentation.Shortcuts) are bound
-// here through a pure, testable mapping.
+// here through a pure, testable mapping registered once as go-gui
+// window commands (Window.RegisterCommands, Global so they fire before
+// focus dispatch).
 //
-// UI-thread rules: handlers run on the event loop; anything that may
-// block (import, export, project I/O, media-tools install, FFmpeg
-// detection, file analysis) is launched on a goroutine and reports back
-// through the state snapshot.
+// UI-thread rules: handlers run on the go-gui frame thread (widget
+// callbacks and queued commands); anything that may block (import,
+// export, project I/O, media-tools install, FFmpeg detection, file
+// analysis) is launched on a goroutine and reports back through the
+// state snapshot.
 
 package gogui
 
@@ -19,10 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"gioui.org/io/event"
-	"gioui.org/io/key"
-	"gioui.org/io/system"
-	"gioui.org/layout"
+	"github.com/go-gui-org/go-gui/gui"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fileaccess"
@@ -103,14 +103,14 @@ func (d *dispatcher) bind(sh *shell) {
 	h[presentation.CmdSeekBack] = func() { sh.seekBy(-5 * time.Second) }
 	h[presentation.CmdSeekForward] = func() { sh.seekBy(5 * time.Second) }
 	h[presentation.CmdSetVolume] = func() {
-		svc.SetVolume(float64(sh.volume.Value))
-		st.SetStatus(fmt.Sprintf("Volume %.0f%%", sh.volume.Value*100))
+		svc.SetVolume(float64(sh.volume))
+		st.SetStatus(fmt.Sprintf("Volume %.0f%%", sh.volume*100))
 	}
 
 	// Import / project.
-	h[presentation.CmdImportAudio] = func() { sh.startImport() }
-	h[presentation.CmdProjectSave] = func() { sh.saveProject() }
-	h[presentation.CmdProjectOpen] = func() { sh.openProject() }
+	h[presentation.CmdImportAudio] = func() { sh.startImportPath("") }
+	h[presentation.CmdProjectSave] = func() { sh.saveProjectPath("") }
+	h[presentation.CmdProjectOpen] = func() { sh.openProjectPath("") }
 
 	// Export.
 	h[presentation.CmdExportStart] = func() { sh.startExport() }
@@ -124,27 +124,27 @@ func (d *dispatcher) bind(sh *shell) {
 	}
 
 	// Visualizer configuration.
-	h[presentation.CmdModeSet] = func() { sh.applyMode(visualizer.Mode(sh.modeEnum.Value)) }
-	h[presentation.CmdPaletteSet] = func() { sh.applyPalette(sh.paletteEnum.Value) }
+	h[presentation.CmdModeSet] = func() { sh.applyMode(visualizer.Mode(sh.modeValue)) }
+	h[presentation.CmdPaletteSet] = func() { sh.applyPalette(sh.paletteValue) }
 	h[presentation.CmdSensitivitySet] = func() { sh.applySensitivity() }
-	h[presentation.CmdBackgroundLayerSet] = func() { sh.applyBackgroundLayer(visualizer.Mode(sh.bgEnum.Value)) }
+	h[presentation.CmdBackgroundLayerSet] = func() { sh.applyBackgroundLayer(visualizer.Mode(sh.bgValue)) }
 	h[presentation.CmdPresetApply] = func() { sh.applySelectedPreset() }
 
 	// Renderer preference: persisted and revalidated on next launch.
 	// The renderer instance is closed ONLY at shutdown, so the swap can
 	// never race a mid-flight frame.
-	h[presentation.CmdRendererSelect] = func() { sh.applyRendererPreference(sh.rendererPrefEnum.Value) }
+	h[presentation.CmdRendererSelect] = func() { sh.applyRendererPreference(sh.prefValue) }
 
 	// Theme.
 	h[presentation.CmdIntensitySet] = func() {
-		if sh.th.SetIntensity(sh.intensityEnum.Value) {
-			st.SetStatus("Theme intensity: " + sh.intensityEnum.Value)
+		if sh.th.SetIntensity(sh.intensityValue) {
+			st.SetStatus("Theme intensity: " + sh.intensityValue)
 		} else {
-			st.SetStatus("Unknown intensity preset: " + sh.intensityEnum.Value)
+			st.SetStatus("Unknown intensity preset: " + sh.intensityValue)
 		}
 	}
-	h[presentation.CmdReducedMotionSet] = func() { sh.th.SetReducedMotion(sh.reducedMotionSw.Value) }
-	h[presentation.CmdReducedGlowSet] = func() { sh.th.SetReducedGlow(sh.reducedGlowSw.Value) }
+	h[presentation.CmdReducedMotionSet] = func() { sh.th.SetReducedMotion(sh.reducedMotion) }
+	h[presentation.CmdReducedGlowSet] = func() { sh.th.SetReducedGlow(sh.reducedGlow) }
 
 	// Navigation / workspace.
 	h[presentation.CmdNavigate] = func() { sh.navigateIndex() }
@@ -183,129 +183,337 @@ func (d *dispatcher) bind(sh *shell) {
 		st.SetStatus(sh.brandAttribution())
 	}
 
-	// Quit: close the ONE window; teardown runs on DestroyEvent.
+	// Quit: close the ONE window; teardown runs after backend.Run
+	// returns.
 	h[presentation.CmdQuit] = func() {
-		sh.win.Perform(system.ActionClose)
+		if sh.win != nil {
+			sh.win.Close()
+		}
 	}
 
-	// Explicitly unsupported commands — honest reasons, never silent no-ops.
-	d.unsupported[presentation.CmdTabsReorder] =
-		"drag-and-drop tab reordering is not implemented in this vertical slice; " +
-			"the persisted store round-trips a user order written by any shell and Reset restores the canonical order"
-	d.unsupported[presentation.CmdSplitOrientation] =
-		"the split orientation follows the responsive breakpoint from the design tokens instead of a manual toggle"
-	d.unsupported[presentation.CmdPanelCollapse] =
-		"panel collapse is not implemented in this vertical slice; every destination renders its full surface"
-	d.unsupported[presentation.CmdPanelRestore] =
-		"panel collapse is not implemented in this vertical slice; there is nothing collapsed to restore"
+	// Workspace composition commands (run 44648357437 item 4.3): real
+	// persisted behavior behind every canonical ID — the honest-missing
+	// stubs are gone. CmdTabsReorder's no-argument dispatcher form moves
+	// the active tab one position toward the strip END; the
+	// direction-aware paths are the strip's ‹/› controls and the
+	// mod+alt+left/right chords.
+	h[presentation.CmdTabsReorder] = func() {
+		sh.moveActiveTab(1)
+	}
+	h[presentation.CmdSplitOrientation] = func() {
+		sh.toggleSplitOrientation()
+	}
+	h[presentation.CmdPanelCollapse] = func() {
+		sh.setSideCollapsed(true)
+	}
+	h[presentation.CmdPanelRestore] = func() {
+		sh.setSideCollapsed(false)
+	}
 }
 
-// shortcutFor maps a keyboard event to a command and, for navigation,
-// to the 1-based tab index (mod+1..9, mod+0 → 10). The bool reports
+// shortcutModifier is the canonical desktop shortcut modifier of this
+// platform: Super (Cmd) on macOS, Ctrl everywhere else. The pure
+// shortcutFor mapping accepts either chord, so tests and future
+// platforms share one table.
+func shortcutModifier() gui.Modifier {
+	if runtime.GOOS == "darwin" {
+		return gui.ModSuper
+	}
+	return gui.ModCtrl
+}
+
+// shortcutFor maps a go-gui key event to a command and, for navigation,
+// to the 1-based tab index (Ctrl+1..9, Ctrl+0 → 10). The bool reports
 // whether the key combination is bound. This is the pure binding of
 // presentation.Shortcuts for this shell:
 //
-//	mod+i import · space play/pause · mod+. stop · left/right seek
+//	space play/pause · mod+. stop · left/right seek · mod+i import
 //	mod+s save · mod+o open · mod+e export · mod+1..9,0 navigate
 //	mod+alt+0 layout reset · mod+q quit
-func shortcutFor(name key.Name, mods key.Modifiers) (presentation.CommandID, int, bool) {
-	mod := mods.Contain(key.ModShortcut)
-	alt := mods.Contain(key.ModAlt)
-	switch name {
-	case key.NameSpace:
+//
+// mod is the shortcut modifier: Ctrl (Windows/Linux) or Super (macOS).
+// Unlike the Gio binding it replaces, arrow-key seek is exact-chord
+// (no modifiers): go-gui matches shortcuts exactly, so a modifier
+// combination is never silently reinterpreted.
+func shortcutFor(code gui.KeyCode, mods gui.Modifier) (presentation.CommandID, int, bool) {
+	mod := mods.HasAny(gui.ModCtrl, gui.ModSuper)
+	alt := mods.Has(gui.ModAlt)
+	switch code {
+	case gui.KeySpace:
 		if mods == 0 {
 			return presentation.CmdPlayPause, 0, true
 		}
-	case key.NameLeftArrow:
-		return presentation.CmdSeekBack, 0, true
-	case key.NameRightArrow:
-		return presentation.CmdSeekForward, 0, true
-	case "I":
+	case gui.KeyLeft:
+		if mods == 0 {
+			return presentation.CmdSeekBack, 0, true
+		}
+		if mod && alt {
+			// Keyboard reorder alternative (item 4.3): mod+alt+left moves
+			// the ACTIVE tab toward the strip start.
+			return presentation.CmdTabsReorder, -1, true
+		}
+	case gui.KeyRight:
+		if mods == 0 {
+			return presentation.CmdSeekForward, 0, true
+		}
+		if mod && alt {
+			// Keyboard reorder alternative (item 4.3): mod+alt+right moves
+			// the ACTIVE tab toward the strip end.
+			return presentation.CmdTabsReorder, 1, true
+		}
+	case gui.KeyB:
+		if mod && mods.Has(gui.ModShift) {
+			return presentation.CmdPanelRestore, 0, true
+		}
+		if mod {
+			return presentation.CmdPanelCollapse, 0, true
+		}
+	case gui.KeyI:
 		if mod {
 			return presentation.CmdImportAudio, 0, true
 		}
-	case "S":
+	case gui.KeyS:
 		if mod {
 			return presentation.CmdProjectSave, 0, true
 		}
-	case "O":
+	case gui.KeyO:
 		if mod {
 			return presentation.CmdProjectOpen, 0, true
 		}
-	case "E":
+	case gui.KeyE:
 		if mod {
 			return presentation.CmdExportStart, 0, true
 		}
-	case "Q":
+	case gui.KeyQ:
 		if mod {
 			return presentation.CmdQuit, 0, true
 		}
-	case ".":
+	case gui.KeyPeriod:
 		if mod {
 			return presentation.CmdStop, 0, true
 		}
-	case "0":
+	case gui.Key0:
 		if mod && alt {
 			return presentation.CmdLayoutReset, 0, true
 		}
 		if mod {
 			return presentation.CmdNavigate, 10, true
 		}
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+	case gui.Key1, gui.Key2, gui.Key3, gui.Key4, gui.Key5,
+		gui.Key6, gui.Key7, gui.Key8, gui.Key9:
 		if mod {
-			return presentation.CmdNavigate, int(name[0] - '0'), true
+			return presentation.CmdNavigate, int(code - gui.Key0), true
 		}
 	}
 	return "", 0, false
 }
 
-// handleKeys processes the window-level key events of one frame and
-// dispatches the mapped commands.
-func (sh *shell) handleKeys(gtx layout.Context) {
-	filters := []event.Filter{
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "I"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "S"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "O"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "E"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "Q"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "."},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "0"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "1"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "2"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "3"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "4"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "5"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "6"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "7"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "8"},
-		key.Filter{Required: key.ModShortcut, Optional: key.ModShortcutAlt, Name: "9"},
-		key.Filter{Name: key.NameSpace},
-		key.Filter{Name: key.NameLeftArrow},
-		key.Filter{Name: key.NameRightArrow},
+// shortcutTable builds the global go-gui command table for the
+// canonical desktop shortcuts. Pure (no window); the count and chord
+// uniqueness are unit-tested.
+func (sh *shell) shortcutTable() []gui.Command {
+	mod := shortcutModifier()
+	modAlt := mod | gui.ModAlt
+	type binding struct {
+		id    string
+		label string
+		key   gui.KeyCode
+		mods  gui.Modifier
+		cmd   presentation.CommandID
+		nav   int
 	}
-	for {
-		ev, ok := gtx.Event(filters...)
-		if !ok {
-			return
-		}
-		ke, isKey := ev.(key.Event)
-		if !isKey || ke.State != key.Press {
-			continue
-		}
-		cmd, navIndex, bound := shortcutFor(ke.Name, ke.Modifiers)
-		if !bound {
-			continue
-		}
-		if cmd == presentation.CmdNavigate {
-			if dest, ok := TabForShortcut(sh.tabs.Layout.TabOrder, navIndex); ok {
-				sh.tabs.SetActive(dest)
-				sh.syncTabs()
-				sh.state.SetStatus("Destination: " + string(dest))
+	bindings := []binding{
+		{"sc-play-pause", "Play/Pause", gui.KeySpace, gui.ModNone, presentation.CmdPlayPause, 0},
+		{"sc-stop", "Stop", gui.KeyPeriod, mod, presentation.CmdStop, 0},
+		{"sc-seek-back", "Seek −5s", gui.KeyLeft, gui.ModNone, presentation.CmdSeekBack, 0},
+		{"sc-seek-forward", "Seek +5s", gui.KeyRight, gui.ModNone, presentation.CmdSeekForward, 0},
+		{"sc-import", "Import audio", gui.KeyI, mod, presentation.CmdImportAudio, 0},
+		{"sc-save", "Save project", gui.KeyS, mod, presentation.CmdProjectSave, 0},
+		{"sc-open", "Open project", gui.KeyO, mod, presentation.CmdProjectOpen, 0},
+		{"sc-export", "Export", gui.KeyE, mod, presentation.CmdExportStart, 0},
+		{"sc-quit", "Quit", gui.KeyQ, mod, presentation.CmdQuit, 0},
+		{"sc-layout-reset", "Reset workspace layout", gui.Key0, modAlt, presentation.CmdLayoutReset, 0},
+		{"sc-tab-reorder-left", "Move tab left", gui.KeyLeft, modAlt, presentation.CmdTabsReorder, -1},
+		{"sc-tab-reorder-right", "Move tab right", gui.KeyRight, modAlt, presentation.CmdTabsReorder, 1},
+		{"sc-panel-collapse", "Collapse side panel", gui.KeyB, mod, presentation.CmdPanelCollapse, 0},
+		{"sc-panel-restore", "Restore side panel", gui.KeyB, mod | gui.ModShift, presentation.CmdPanelRestore, 0},
+		{"sc-navigate-10", "Open destination 10", gui.Key0, mod, presentation.CmdNavigate, 10},
+		{"sc-navigate-1", "Open destination 1", gui.Key1, mod, presentation.CmdNavigate, 1},
+		{"sc-navigate-2", "Open destination 2", gui.Key2, mod, presentation.CmdNavigate, 2},
+		{"sc-navigate-3", "Open destination 3", gui.Key3, mod, presentation.CmdNavigate, 3},
+		{"sc-navigate-4", "Open destination 4", gui.Key4, mod, presentation.CmdNavigate, 4},
+		{"sc-navigate-5", "Open destination 5", gui.Key5, mod, presentation.CmdNavigate, 5},
+		{"sc-navigate-6", "Open destination 6", gui.Key6, mod, presentation.CmdNavigate, 6},
+		{"sc-navigate-7", "Open destination 7", gui.Key7, mod, presentation.CmdNavigate, 7},
+		{"sc-navigate-8", "Open destination 8", gui.Key8, mod, presentation.CmdNavigate, 8},
+		{"sc-navigate-9", "Open destination 9", gui.Key9, mod, presentation.CmdNavigate, 9},
+	}
+	cmds := make([]gui.Command, 0, len(bindings))
+	for _, b := range bindings {
+		b := b
+		cmds = append(cmds, gui.Command{
+			ID:       b.id,
+			Label:    b.label,
+			Shortcut: gui.Shortcut{Key: b.key, Modifiers: b.mods},
+			Global:   true,
+			Execute: func(e *gui.Event, w *gui.Window) {
+				if b.cmd == presentation.CmdNavigate {
+					if dest, ok := TabForShortcut(sh.tabs.Layout.TabOrder, b.nav); ok {
+						sh.tabs.SetActive(dest)
+						sh.syncTabs()
+						sh.state.SetStatus("Destination: " + string(dest))
+					}
+					return
+				}
+				if b.cmd == presentation.CmdTabsReorder {
+					// The nav field carries the move direction for the
+					// reorder chords (item 4.3 keyboard path).
+					sh.moveActiveTab(b.nav)
+					return
+				}
+				sh.disp.Run(b.cmd)
+			},
+		})
+	}
+	return cmds
+}
+
+// registerShortcuts binds the canonical desktop shortcut table as
+// global go-gui window commands (fired before focus dispatch, so a
+// focused input cannot swallow them). Global commands whose chord is
+// already taken by a widget would be a registration error; this table
+// owns every chord it registers.
+func (sh *shell) registerShortcuts(w *gui.Window) {
+	if err := w.RegisterCommands(sh.shortcutTable()...); err != nil {
+		// A duplicate chord is a programming bug in this table; report it
+		// honestly instead of failing the window open.
+		sh.state.SetStatus("Keyboard shortcuts partially unavailable: " + err.Error())
+	}
+}
+
+// navigateIndex applies the mod+1..9,0 navigation selection when it
+// arrives through the command table rather than a specific binding.
+func (sh *shell) navigateIndex() {
+	sh.state.SetStatus("Navigate: use mod+1..9,0 or the tab strip")
+}
+
+// chooseImportPath opens the native open-file dialog for an audio
+// file. Where the platform has no native picker, go-gui falls back to
+// its in-window file browser — the dialog never fakes success. The
+// chosen path is a user-mediated selection only: every authorization
+// check stays in the Go core (fileaccess) inside the import path.
+func (sh *shell) chooseImportPath() {
+	sh.win.NativeOpenDialog(gui.NativeOpenDialogCfg{
+		Title: "Import audio file",
+		Filters: []gui.NativeFileFilter{
+			{Name: "Audio (wav, mp3, flac, ogg)", Extensions: []string{"wav", "mp3", "flac", "ogg"}},
+		},
+		OnDone: func(res gui.NativeDialogResult, w *gui.Window) {
+			switch res.Status {
+			case gui.DialogOK:
+				paths := res.PathStrings()
+				if len(paths) == 0 {
+					sh.state.SetStatus("Import dialog returned no file; use the path entry")
+					return
+				}
+				sh.startImportPath(paths[0])
+			case gui.DialogError:
+				sh.state.SetStatus("Import dialog unavailable (" + res.ErrorMessage + "); use the path entry")
+			case gui.DialogCancel, gui.DialogDiscard:
+				sh.state.SetStatus("Import canceled")
 			}
-			continue
-		}
-		sh.disp.Run(cmd)
-	}
+		},
+	})
+}
+
+// chooseProjectPath opens the native open-file dialog for a project
+// file and loads it (the in-window file browser is the documented
+// fallback).
+func (sh *shell) chooseProjectPath() {
+	sh.win.NativeOpenDialog(gui.NativeOpenDialogCfg{
+		Title: "Open project",
+		Filters: []gui.NativeFileFilter{
+			{Name: "SHEYTAN project (json)", Extensions: []string{"json"}},
+		},
+		OnDone: func(res gui.NativeDialogResult, w *gui.Window) {
+			switch res.Status {
+			case gui.DialogOK:
+				paths := res.PathStrings()
+				if len(paths) == 0 {
+					sh.state.SetStatus("Open dialog returned no file; use the path entry")
+					return
+				}
+				sh.projectPath = paths[0]
+				sh.openProjectPath(paths[0])
+			case gui.DialogError:
+				sh.state.SetStatus("Open dialog unavailable (" + res.ErrorMessage + "); use the path entry")
+			case gui.DialogCancel, gui.DialogDiscard:
+				sh.state.SetStatus("Open project canceled")
+			}
+		},
+	})
+}
+
+// chooseProjectSavePath opens the native save-file dialog for the
+// project write (the in-window file browser is the documented
+// fallback).
+func (sh *shell) chooseProjectSavePath() {
+	sh.win.NativeSaveDialog(gui.NativeSaveDialogCfg{
+		Title:            "Save project",
+		DefaultName:      "project.sheytan.json",
+		DefaultExtension: "json",
+		Filters: []gui.NativeFileFilter{
+			{Name: "SHEYTAN project (json)", Extensions: []string{"json"}},
+		},
+		ConfirmOverwrite: true,
+		OnDone: func(res gui.NativeDialogResult, w *gui.Window) {
+			switch res.Status {
+			case gui.DialogOK:
+				paths := res.PathStrings()
+				if len(paths) == 0 {
+					sh.state.SetStatus("Save dialog returned no path; use the path entry")
+					return
+				}
+				sh.projectPath = paths[0]
+				sh.saveProjectPath(paths[0])
+			case gui.DialogError:
+				sh.state.SetStatus("Save dialog unavailable (" + res.ErrorMessage + "); use the path entry")
+			case gui.DialogCancel, gui.DialogDiscard:
+				sh.state.SetStatus("Save project canceled")
+			}
+		},
+	})
+}
+
+// chooseExportPath opens the native save-file dialog for the export
+// output and stores the choice in the export output entry (the export
+// itself only starts on the explicit Start export action).
+func (sh *shell) chooseExportPath() {
+	sh.win.NativeSaveDialog(gui.NativeSaveDialogCfg{
+		Title:            "Choose export output",
+		DefaultName:      "export.mp4",
+		DefaultExtension: "mp4",
+		Filters: []gui.NativeFileFilter{
+			{Name: "MP4 video", Extensions: []string{"mp4"}},
+		},
+		ConfirmOverwrite: true,
+		OnDone: func(res gui.NativeDialogResult, w *gui.Window) {
+			switch res.Status {
+			case gui.DialogOK:
+				paths := res.PathStrings()
+				if len(paths) == 0 {
+					sh.state.SetStatus("Save dialog returned no path; use the path entry")
+					return
+				}
+				sh.outPath = paths[0]
+				sh.state.SetStatus("Export output: " + shortName(paths[0]))
+			case gui.DialogError:
+				sh.state.SetStatus("Save dialog unavailable (" + res.ErrorMessage + "); use the path entry")
+			case gui.DialogCancel, gui.DialogDiscard:
+				sh.state.SetStatus("Export output selection canceled")
+			}
+		},
+	})
 }
 
 // revealLogs opens the log directory through the platform file-manager
@@ -347,13 +555,19 @@ func (sh *shell) seekBy(delta time.Duration) {
 	}
 }
 
-// startImport runs the import from the path entry on a goroutine.
-func (sh *shell) startImport() {
-	path := strings.TrimSpace(sh.importPathEd.Text())
+// startImportPath runs the import for an explicit path (the native
+// dialog result) or for the path-entry field when path is empty, on a
+// goroutine.
+func (sh *shell) startImportPath(path string) {
+	path = strings.TrimSpace(path)
 	if path == "" {
-		sh.state.SetStatus("Import: enter an audio file path first (no native file picker in this slice)")
+		path = strings.TrimSpace(sh.importPath)
+	}
+	if path == "" {
+		sh.state.SetStatus("Import: pick a file with the Import dialog or enter an audio file path first")
 		return
 	}
+	sh.importPath = path
 	sh.rememberImportPath(path)
 	sh.state.SetStatus("Import requested: " + shortName(path))
 	svc, st := sh.svc, sh.state
@@ -365,18 +579,23 @@ func (sh *shell) startImport() {
 	}()
 }
 
-// saveProject writes the project to the entered path (goroutine). An
-// empty path falls back to the default inside the projects data dir.
-func (sh *shell) saveProject() {
+// saveProjectPath writes the project to an explicit path (the native
+// save dialog result) or to the entered/default path when path is
+// empty (goroutine). An empty result falls back to the default inside
+// the projects data dir.
+func (sh *shell) saveProjectPath(path string) {
 	if sh.svc.Track() == nil {
 		sh.state.SetStatus("Save project: nothing to save — import a track first")
 		return
 	}
-	path := strings.TrimSpace(sh.projectPathEd.Text())
+	path = strings.TrimSpace(path)
+	if path == "" {
+		path = strings.TrimSpace(sh.projectPath)
+	}
 	if path == "" {
 		path = defaultProjectPath(sh.lay.Projects)
-		sh.projectPathEd.SetText(path)
 	}
+	sh.projectPath = path
 	svc, st := sh.svc, sh.state
 	go func() {
 		if err := svc.SaveProject(path); err != nil {
@@ -385,13 +604,19 @@ func (sh *shell) saveProject() {
 	}()
 }
 
-// openProject loads the project at the entered path (goroutine).
-func (sh *shell) openProject() {
-	path := strings.TrimSpace(sh.projectPathEd.Text())
+// openProjectPath loads the project at an explicit path (the native
+// open dialog result) or at the entered path when path is empty
+// (goroutine).
+func (sh *shell) openProjectPath(path string) {
+	path = strings.TrimSpace(path)
 	if path == "" {
-		sh.state.SetStatus("Open project: enter a project .json path first")
+		path = strings.TrimSpace(sh.projectPath)
+	}
+	if path == "" {
+		sh.state.SetStatus("Open project: pick a file with the Open dialog or enter a project .json path first")
 		return
 	}
+	sh.projectPath = path
 	svc, st := sh.svc, sh.state
 	go func() {
 		if err := svc.LoadProject(path); err != nil {
@@ -412,7 +637,7 @@ func (sh *shell) applyMode(m visualizer.Mode) {
 	sh.state.SetConfig(sh.svc.Config())
 }
 
-// applyPalette pushes the palette index change (enum value "0".."3").
+// applyPalette pushes the palette index change (value "0".."3").
 func (sh *shell) applyPalette(v string) {
 	idx := 0
 	fmt.Sscanf(v, "%d", &idx)
@@ -427,7 +652,7 @@ func (sh *shell) applyPalette(v string) {
 // value mapped onto the 0.2..3 contract range).
 func (sh *shell) applySensitivity() {
 	cfg := sh.svc.Config()
-	cfg.Sensitivity = sliderToSensitivity(float64(sh.sens.Value))
+	cfg.Sensitivity = sliderToSensitivity(float64(sh.sens))
 	cfg.Clamp()
 	sh.svc.SetConfig(cfg)
 }
@@ -436,7 +661,15 @@ func (sh *shell) applySensitivity() {
 // onto the 0..1.5 contract range).
 func (sh *shell) applyGlow() {
 	cfg := sh.svc.Config()
-	cfg.Glow = float64(sh.glow.Value) * glowMax
+	cfg.Glow = float64(sh.glow) * glowMax
+	cfg.Clamp()
+	sh.svc.SetConfig(cfg)
+}
+
+// applyBackgroundIntensity pushes the background intensity slider.
+func (sh *shell) applyBackgroundIntensity() {
+	cfg := sh.svc.Config()
+	cfg.BackgroundIntensity = float64(sh.bgInt) * backgroundIntensityMax
 	cfg.Clamp()
 	sh.svc.SetConfig(cfg)
 }
@@ -490,35 +723,35 @@ func (sh *shell) applyRendererPreference(choice string) {
 }
 
 // startExport validates the export fields and launches the job on a
-// goroutine (never blocks the event loop).
+// goroutine (never blocks the frame thread).
 func (sh *shell) startExport() {
 	if sh.svc.Track() == nil {
 		sh.state.SetStatus("Export: import a track before exporting")
 		return
 	}
-	out := strings.TrimSpace(sh.outPathEd.Text())
+	out := strings.TrimSpace(sh.outPath)
 	if out == "" {
 		out = defaultExportPath(sh.lay.Exports)
-		sh.outPathEd.SetText(out)
+		sh.outPath = out
 	}
 	if _, err := export.SanitizeOutputPath(out); err != nil {
 		sh.state.SetStatus("Export: " + err.Error())
 		return
 	}
-	w, h, ok := export.ResolutionByID(sh.resEnum.Value)
+	w, h, ok := export.ResolutionByID(sh.resValue)
 	if !ok {
-		sh.state.SetStatus("Export: unknown resolution preset " + sh.resEnum.Value)
+		sh.state.SetStatus("Export: unknown resolution preset " + sh.resValue)
 		return
 	}
 	fps := 30
-	fmt.Sscanf(sh.fpsEnum.Value, "%d", &fps)
-	seconds := exportSeconds(sh.secondsEd.Text())
+	fmt.Sscanf(sh.fpsValue, "%d", &fps)
+	seconds := exportSeconds(sh.seconds)
 	if seconds <= 0 {
 		sh.state.SetStatus("Export: seconds must be a positive number")
 		return
 	}
 	codec := export.CodecH264
-	if sh.codecEnum.Value == "hevc" {
+	if sh.codecValue == "hevc" {
 		codec = export.CodecHEVC
 	}
 	req := export.Request{
@@ -565,7 +798,7 @@ func (sh *shell) startMediaToolsInstall() {
 // explicit user confirmation) authorizes and runs the bounded walk on
 // a goroutine.
 func (sh *shell) analyzeSystemPath() {
-	root := strings.TrimSpace(sh.sysPathEd.Text())
+	root := strings.TrimSpace(sh.sysPath)
 	if root == "" {
 		sh.state.SetStatus("System Files: enter a file or folder path to analyze")
 		return

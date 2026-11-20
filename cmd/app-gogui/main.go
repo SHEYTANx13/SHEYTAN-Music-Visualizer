@@ -1,5 +1,6 @@
-// Command app-gogui is the entry point of the NATIVE Go-Gui (Gio)
-// shell of SHEYTAN Music Visualizer BETA.
+// Command app-gogui is the entry point of the NATIVE Go-Gui shell
+// (github.com/go-gui-org/go-gui v0.98.0) of SHEYTAN Music Visualizer
+// BETA.
 //
 // Usage:
 //

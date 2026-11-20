@@ -82,12 +82,16 @@
 - SHELL MIGRATION (2026-11-19/20, run 44462492262): `fyne.io/fyne/v2`
   was REMOVED from the production module after the replacement shells
   reached parity (`go.mod`/`go.sum` contain no Fyne reference;
-  `scripts/ci/check-no-fyne.sh` enforces this in CI). The current
-  presentation dependencies are:
-  - `gioui.org v0.10.3` — the native Go-Gui shell toolkit
-    (`cmd/app-gogui`, `ui/gogui`). Actively maintained pure-Go GUI with
-    desktop targets; Linux desktop requires cgo with the Vulkan/X11/
-    Wayland/xkbcommon dev stack; Windows desktop is cgo-free.
+  `scripts/ci/check-no-fyne.sh` enforces this in CI). TOOLKIT
+  MIGRATION (2026-11-21, run 44648357437 repair): `gioui.org` was
+  removed and the native shell now uses the actual Go-Gui library.
+  The current presentation dependencies are:
+  - `github.com/go-gui-org/go-gui v0.98.0` — the native Go-Gui shell
+    toolkit (`cmd/app-gogui`, `ui/gogui`). Immediate-mode Go-first GUI;
+    the Linux desktop backend is CGO-FREE (pure-Go X11 via jezek/xgb,
+    runtime dlopen of libEGL/libGL/wayland/xkbcommon — no `-dev`
+    headers or pkg-config UI modules at build time); Windows desktop is
+    cgo-free; macOS uses the host toolchain (Metal backend).
   - `github.com/wailsapp/wails/v3 v3.1.0` — the alternative
     web-technology shell (`cmd/app-wails`,
     `internal/transport/wails`, `frontend/wails/dist`). Built ONLY in

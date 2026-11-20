@@ -84,38 +84,41 @@ jobs:
       # Keep the install result in a file because this block is piped to tee
       # and therefore executes in a subshell. The `||` captures the complete
       # pipefail result without allowing `set -e` to exit before it is logged.
-      - name: Install Fyne native prerequisites
+      - name: Install Go/GoGPU native prerequisites
         run: |
           set -Eeuo pipefail
           status_file=ci-logs/prereq-status.txt
           : > "$status_file"
           pipeline_status=0
           {
-            echo "=== apt-get update ==="
+            echo "[section] apt-get update"
             if ! sudo apt-get update; then
               echo "ERROR: apt-get update failed"
               echo fail >> "$status_file"
             fi
 
-            echo "=== apt-get install Fyne prerequisites ==="
+            # Dependency-graph reconciliation (run 44648357437, failure
+            # 2.12): the traced build profile is `go vet -tags
+            # goffi_static ./...` plus the manual traced build of the
+            # same production profile. The UI shell is go-gui v0.98.0
+            # (cgo-free Linux desktop: pure-Go X11 + runtime dlopen),
+            # so NO X11/Wayland/GL -dev headers or pkg-config UI
+            # modules are required. Only the C toolchain for the GoGPU
+            # wgpu cgo stack is needed. (The former "Fyne/Gio
+            # prerequisites" demanded libx11-dev et al. and the stale
+            # gio vulkan header include failed go vet before analysis
+            # could start.)
+            echo "[section] apt-get install Go/GoGPU prerequisites"
             if ! sudo apt-get install -y --no-install-recommends \
-              gcc pkg-config \
-              libgl1-mesa-dev libegl1-mesa-dev libx11-dev libxcursor-dev \
-              libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev \
-              libwayland-dev libxkbcommon-dev; then
-              echo "ERROR: Fyne prerequisite install failed"
+              gcc pkg-config; then
+              echo "ERROR: Go/GoGPU prerequisite install failed"
               echo fail >> "$status_file"
             fi
 
-            echo "=== pkg-config modules ==="
-            if pkg-config --modversion gl egl x11 xrandr xinerama xcursor xi xxf86vm wayland-client xkbcommon; then
-              echo "pkg-config modules: OK"
-            else
-              echo "ERROR: pkg-config module check failed"
-              echo fail >> "$status_file"
-            fi
+            echo "[section] build-time pkg-config UI modules"
+            echo "required: none (go-gui v0.98.0 cgo-free Linux desktop; the traced build below is the proof)"
 
-            echo "=== CGO compiler identity ==="
+            echo "[section] CGO compiler identity"
             if [ "$CGO_ENABLED" != "1" ]; then
               echo "ERROR: CGO_ENABLED must be 1 for the traced desktop build"
               echo fail >> "$status_file"
@@ -129,7 +132,7 @@ jobs:
           } 2>&1 | tee ci-logs/codeql-prereq.log || pipeline_status=$?
 
           if grep -q '^fail$' "$status_file" || [ "$pipeline_status" -ne 0 ]; then
-            echo "ERROR: Fyne prerequisites or evidence pipeline failed"
+            echo "ERROR: Go/GoGPU prerequisites or evidence pipeline failed"
             exit 1
           fi
 

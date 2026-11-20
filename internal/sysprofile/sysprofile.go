@@ -285,7 +285,7 @@ func normalizeDisplay(d DisplayInfo) DisplayInfo {
 	}
 	if d.Refresh.State == "" {
 		d.Refresh = unknownFact(
-			"the pinned Fyne v2.8.2 framework does not expose the display refresh rate")
+			"the current window backend does not expose the display refresh rate")
 	}
 	return d
 }
@@ -378,7 +378,16 @@ func collectMemory() MemoryInfo {
 		}
 	}
 	m.TotalBytes = Quantity{Value: total, State: StateDetected, Source: src}
-	m.AvailableBytes = Quantity{Value: avail, State: StateDetected, Source: src}
+	if avail > 0 {
+		m.AvailableBytes = Quantity{Value: avail, State: StateDetected, Source: src}
+	} else {
+		// A collector that proved the total but has no honest
+		// available-memory primitive (e.g. darwin sysctl, where
+		// available needs Mach host_statistics64) must not have
+		// "0 bytes available" reported as a detected fact.
+		m.AvailableBytes = Quantity{State: StateUnknown,
+			Reason: "available physical memory not exposed by the native collector (" + src + ")"}
+	}
 	return m
 }
 

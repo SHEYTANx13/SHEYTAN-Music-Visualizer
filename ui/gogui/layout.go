@@ -192,6 +192,59 @@ func (t *TabState) Reset() {
 	t.Layout = presentation.DefaultLayout()
 }
 
+// MoveActive swaps the ACTIVE destination one strip position toward
+// the start (delta<0) or the end (delta>0). It returns false when the
+// move is impossible (edge position or the active tab is somehow
+// absent). This is the state mutation behind the tab-strip reorder
+// controls and the mod+alt+left/right chords (run 44648357437 item
+// 4.3): the pointer/touch gesture and the keyboard alternative share
+// one persisted-order mutation.
+func (t *TabState) MoveActive(delta int) bool {
+	i := t.ActiveIndex()
+	if i < 0 {
+		return false
+	}
+	j := i + delta
+	if j < 0 || j >= len(t.Layout.TabOrder) {
+		return false
+	}
+	t.Layout.TabOrder[i], t.Layout.TabOrder[j] = t.Layout.TabOrder[j], t.Layout.TabOrder[i]
+	return true
+}
+
+// SideCollapsed reports whether the ACTIVE destination's side rail is
+// collapsed (persisted per destination in the shared versioned layout
+// document; old documents without the field load as expanded).
+func (t *TabState) SideCollapsed() bool {
+	active := t.Layout.ActiveTab
+	for _, d := range t.Layout.Collapsed {
+		if d == active {
+			return true
+		}
+	}
+	return false
+}
+
+// SetSideCollapsed adds/removes the ACTIVE destination from the
+// persisted collapsed set (deduplicated; other destinations keep
+// their state).
+func (t *TabState) SetSideCollapsed(v bool) {
+	active := t.Layout.ActiveTab
+	out := make([]presentation.Destination, 0, len(t.Layout.Collapsed))
+	found := false
+	for _, d := range t.Layout.Collapsed {
+		if d == active {
+			found = true
+			continue
+		}
+		out = append(out, d)
+	}
+	if v && !found {
+		out = append(out, active)
+	}
+	t.Layout.Collapsed = out
+}
+
 // OrderedCatalog returns the destination catalog entries in the
 // persisted tab order.
 func (t *TabState) OrderedCatalog() []presentation.DestinationInfo {

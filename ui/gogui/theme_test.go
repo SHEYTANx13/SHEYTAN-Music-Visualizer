@@ -4,6 +4,8 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/go-gui-org/go-gui/gui"
+
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/design"
 )
 
@@ -48,25 +50,57 @@ func mustTestDoc(t *testing.T) design.TokenDocument {
 	return design.MustLoad()
 }
 
-// TestThemePaletteFromTokens verifies the theme palette is built from
-// the token document, not hard-coded locally.
-func TestThemePaletteFromTokens(t *testing.T) {
+// TestThemeTokensFromDocument verifies the ShellTheme color surface is
+// built from the token document, not hard-coded locally, and that the
+// go-gui Color variants carry exactly the token values.
+func TestThemeTokensFromDocument(t *testing.T) {
 	doc := mustTestDoc(t)
 	th := NewShellTheme(doc)
-	if got, want := th.Theme().Palette.Fg, mustHex(doc.Color.Text["primary"]); got != want {
-		t.Errorf("theme Fg = %v, want %v (token text.primary)", got, want)
+	if got, want := th.Text(), mustHex(doc.Color.Text["primary"]); got != want {
+		t.Errorf("Text = %v, want %v (token text.primary)", got, want)
 	}
-	if got, want := th.Theme().Palette.ContrastBg, mustHex(doc.Color.Accent["infernalRed"]); got != want {
-		t.Errorf("theme ContrastBg = %v, want %v (token accent.infernalRed)", got, want)
+	if got, want := th.Accent(), mustHex(doc.Color.Accent["infernalRed"]); got != want {
+		t.Errorf("Accent = %v, want %v (token accent.infernalRed)", got, want)
 	}
 	if got, want := th.Obsidian(), mustHex(doc.Color.Surface["obsidian"]); got != want {
 		t.Errorf("Obsidian = %v, want %v", got, want)
 	}
-	if got, want := th.Accent(), mustHex(doc.Color.Accent["infernalRed"]); got != want {
-		t.Errorf("Accent = %v, want %v", got, want)
-	}
 	if got, want := th.Gold(), mustHex(doc.Color.Secondary["antiqueGold"]); got != want {
 		t.Errorf("Gold = %v, want %v", got, want)
+	}
+	// The gui.Color variants are the same tokens, explicitly set.
+	if got, want := th.AccentColor(), guiColor(mustHex(doc.Color.Accent["infernalRed"])); got != want {
+		t.Errorf("AccentColor = %v, want %v", got, want)
+	}
+	if !th.AccentColor().IsSet() {
+		t.Error("AccentColor must be an explicitly set gui.Color")
+	}
+	if got, want := th.ObsidianColor(), guiColor(mustHex(doc.Color.Surface["obsidian"])); got != want {
+		t.Errorf("ObsidianColor = %v, want %v", got, want)
+	}
+}
+
+// TestThemeTextStyles verifies the text style helpers carry the theme
+// roles (typography) with the token ink (colors) — the go-gui role is
+// the base, the token color the override.
+func TestThemeTextStyles(t *testing.T) {
+	doc := mustTestDoc(t)
+	th := NewShellTheme(doc)
+	title := th.TextStyleTitle()
+	if got, want := title.Color, guiColor(th.Text()); got != want {
+		t.Errorf("title ink = %v, want token primary %v", got, want)
+	}
+	base := gui.CurrentTheme().TextStyleTitle
+	if title.Size != base.Size {
+		t.Errorf("title size = %v, want the themed role size %v", title.Size, base.Size)
+	}
+	caption := th.TextStyleCaption()
+	if got, want := caption.Color, guiColor(th.TextDim()); got != want {
+		t.Errorf("caption ink = %v, want token secondary %v", got, want)
+	}
+	section := th.TextStyleSection()
+	if got, want := section.Color, guiColor(th.Accent()); got != want {
+		t.Errorf("section ink = %v, want accent %v", got, want)
 	}
 }
 
