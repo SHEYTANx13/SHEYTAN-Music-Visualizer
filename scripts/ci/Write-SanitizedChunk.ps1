@@ -154,8 +154,13 @@ function Write-SanitizedChunk {
         if ($null -ne $out) { return (ConvertTo-LfText $out) }
     }
 
-    # 3. Loud raw passthrough: never silent, never fabricated, never
-    #    masked. The strict validator will fail this log.
+    # 3. FAIL CLOSED (priority-A repair of the raw-passthrough bypass):
+    #    raw output must never enter a file bound for the strict log
+    #    contract, even behind a loud marker. The chunk is replaced by a
+    #    strict-contract ERROR record that preserves the failure origin;
+    #    the caller's step exit code is untouched (the record is
+    #    diagnostic, the exit code decides the gate).
     [Console]::Error.WriteLine($marker)
-    return (ConvertTo-LfText $Text)
+    $line = 'ERROR|platform=windows-x64|job=build-windows|step=log-capture|gate=desktop-build|command=write-sanitized-chunk|tool=Write-SanitizedChunk|source=NOT_PROVIDED_BY_TOOL|message=sanitizer and python fallback unavailable; captured chunk NOT written raw (fail closed); the producing command exit code still decides the gate'
+    return (ConvertTo-LfText $line)
 }

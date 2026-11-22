@@ -134,6 +134,20 @@ type Config struct {
 	TitleText     string `json:"titleText"`
 	SubtitleText  string `json:"subtitleText"`
 	ShowWatermark bool   `json:"showWatermark"`
+
+	// ---- v3 composition response (priority-D §7.4). The UI exposes a
+	// manageable set of grouped knobs, never the raw DSP internals.
+	BassImpact          float64 `json:"bassImpact"`          // 0..2 sub/bass geometry weight
+	TransientIntensity  float64 `json:"transientIntensity"`  // 0..2 kick/snare/hat reaction
+	VocalSensitivity    float64 `json:"vocalSensitivity"`    // 0..2 vocal-reactive layer gain
+	StereoWidthGain     float64 `json:"stereoWidthGain"`     // 0..1 spatial spread
+	SectionIntensity    float64 `json:"sectionIntensity"`    // 0..1 section-transition reaction
+	BeatEmphasis        float64 `json:"beatEmphasis"`        // 0..1.5 beat/downbeat pulse
+	ChordReactivity     float64 `json:"chordReactivity"`     // 0..1 harmonic palette rotation
+	ConfidenceThreshold float64 `json:"confidenceThreshold"` // 0..0.9; below it features gate off
+	// Layer enablement (default-on where measured evidence exists).
+	VocalLayerEnabled bool `json:"vocalLayerEnabled"`
+	RoleLayersEnabled bool `json:"roleLayersEnabled"`
 }
 
 // Clamp normalizes every field into its valid range.
@@ -151,6 +165,15 @@ func (c *Config) Clamp() {
 	if c.MotionStyle < 0 || c.MotionStyle > 3 {
 		c.MotionStyle = 0
 	}
+	// v3 composition response knobs.
+	c.BassImpact = clampRange(c.BassImpact, 0, 2, 1.0)
+	c.TransientIntensity = clampRange(c.TransientIntensity, 0, 2, 1.0)
+	c.VocalSensitivity = clampRange(c.VocalSensitivity, 0, 2, 1.0)
+	c.StereoWidthGain = clampRange(c.StereoWidthGain, 0, 1, 0.5)
+	c.SectionIntensity = clampRange(c.SectionIntensity, 0, 1, 0.6)
+	c.BeatEmphasis = clampRange(c.BeatEmphasis, 0, 1.5, 0.8)
+	c.ChordReactivity = clampRange(c.ChordReactivity, 0, 1, 0.4)
+	c.ConfidenceThreshold = clampRange(c.ConfidenceThreshold, 0, 0.9, 0.3)
 	// Layered composition: an empty/unknown layer is "none"; a
 	// background layer equal to the primary mode is pointless and
 	// normalized to "none"; intensity is only meaningful when a

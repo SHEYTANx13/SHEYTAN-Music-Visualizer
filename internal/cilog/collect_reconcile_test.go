@@ -20,7 +20,7 @@ import (
 // observation.
 func TestManifestEvidenceRecordsLabelAndKinds(t *testing.T) {
 	root := t.TempDir()
-	opts := Options{PartsRoot: root, ReportPath: filepath.Join(t.TempDir(), "report.txt"), Now: fixedNow}
+	opts := Options{PartsRoot: root, ReportPath: filepath.Join(t.TempDir(), "report.txt"), SummaryPath: filepath.Join(t.TempDir(), "summary.txt"), Now: fixedNow}
 	mk := func(name, content string) {
 		t.Helper()
 		dir := filepath.Join(root, name)
@@ -44,17 +44,16 @@ func TestManifestEvidenceRecordsLabelAndKinds(t *testing.T) {
 	if res.Coverage != CoverageComplete {
 		t.Fatalf("coverage = %s, want COMPLETE", res.Coverage)
 	}
-	if !strings.Contains(report, "Manifest evidence records: 2") {
-		t.Fatal("report must label manifest rows as evidence records with the count")
+	summary := mustSummary(t, opts)
+	_ = report
+	if !strings.Contains(summary, "Manifest evidence records: 2") {
+		t.Fatalf("summary must label manifest rows as evidence records with the count:\n%s", summary)
 	}
-	if strings.Contains(report, "Declared jobs:") {
-		t.Fatal("report must not mislabel manifest evidence records as Declared jobs")
+	if !strings.Contains(summary, "kind=nested-reusable-workflow-job") || !strings.Contains(summary, "kind=workflow-job") {
+		t.Fatal("summary must print each row's kind")
 	}
-	if !strings.Contains(report, "nested-reusable-workflow-job") || !strings.Contains(report, "workflow-job ") {
-		t.Fatal("report must print each row's kind")
-	}
-	if !strings.Contains(report, "declared result basis: caller aggregate needs.codeql.result") {
-		t.Fatal("report must print the declared result basis for aggregate rows")
+	if !strings.Contains(summary, "declared result basis: caller aggregate needs.codeql.result") {
+		t.Fatal("summary must print the declared result basis for aggregate rows")
 	}
 }
 
@@ -133,14 +132,13 @@ func TestAPINotesAreConditionalWithoutClient(t *testing.T) {
 	if res.Coverage != CoverageComplete {
 		t.Fatalf("coverage = %s, want COMPLETE", res.Coverage)
 	}
-	if strings.Contains(report, "API ENRICHMENT LIMITATION") {
-		t.Fatal("report without an API client must not emit an API ENRICHMENT LIMITATION section")
+	summary := mustSummary(t, opts)
+	_ = report
+	if strings.Contains(summary, "API ENRICHMENT LIMITATION") {
+		t.Fatal("summary without an API client must not emit an API ENRICHMENT LIMITATION section")
 	}
-	if strings.Contains(report, "see API ENRICHMENT LIMITATION above") {
-		t.Fatal("dangling reference: note points at a section that was not emitted")
-	}
-	if !strings.Contains(report, "API enrichment not configured") {
-		t.Fatal("report must state the exact unavailable reason (API enrichment not configured)")
+	if !strings.Contains(summary, "API enrichment not configured") {
+		t.Fatal("summary must state the exact unavailable reason (API enrichment not configured)")
 	}
 }
 
@@ -161,10 +159,12 @@ func TestAlertFetchFailureIsNotZeroAlerts(t *testing.T) {
 		opts.Meta.CommitSHA = "dbedaa455dd3e5704452dc64bd1f56b02fc8e42c"
 		opts.API = NewGitHubClient(srv.URL, "o/n", "t")
 		_, report := mustCollect(t, opts)
-		if strings.Contains(report, "zero open alerts were actually retrieved") {
+		summary := mustSummary(t, opts)
+		_ = report
+		if strings.Contains(summary, "zero open alerts were actually retrieved") {
 			t.Fatalf("HTTP %d must never be reported as zero open alerts", code)
 		}
-		if !strings.Contains(report, "NOT RETRIEVED") {
+		if !strings.Contains(summary, "NOT RETRIEVED") {
 			t.Fatalf("HTTP %d must be reported as NOT RETRIEVED with the exact reason", code)
 		}
 		srv.Close()

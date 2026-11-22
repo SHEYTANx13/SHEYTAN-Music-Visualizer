@@ -63,6 +63,41 @@ type AudioState struct {
 	// WaveWindow is the waveform envelope window around Time for the
 	// waveform mode (may be empty for other modes).
 	WaveWindow []float32 `json:"waveWindow,omitempty"`
+
+	// ---- v3 composition state (priority-D): filled by the studio from
+	// the Composition time base when the v3 analysis is available. All
+	// fields carry their own availability/confidence semantics; legacy
+	// producers leave them zero and the renderers gate on HasComposition.
+	HasComposition bool `json:"hasComposition,omitempty"`
+	// BandEnvelope / BandShare are the measured 9-band calibrated
+	// envelopes (indexes match dsp.BandNames: 0 sub-bass .. 8 brilliance).
+	BandEnvelope [9]float64 `json:"bandEnvelope,omitempty"`
+	BandShare    [9]float64 `json:"bandShare,omitempty"`
+	// Discrete transient evidence (NOT interpolated): strength 0..1 of
+	// the nearest measured transient within the lookup window,
+	// TransientBand = dominant band or -1 (broadband).
+	Transient     float64 `json:"transient,omitempty"`
+	TransientBand int     `json:"transientBand,omitempty"`
+	// DownbeatSoon: a measured downbeat lands within the next half beat.
+	DownbeatSoon bool `json:"downbeatSoon,omitempty"`
+	// Harmony (discrete segments; no interpolation across boundaries).
+	ChordRoot       string  `json:"chordRoot,omitempty"`
+	ChordQuality    string  `json:"chordQuality,omitempty"`
+	ChordConfidence float64 `json:"chordConfidence,omitempty"`
+	KeyConfidence   float64 `json:"keyConfidence,omitempty"`
+	Tension         float64 `json:"tension,omitempty"`
+	// Vocal-flow state (acoustic estimates with confidence).
+	VocalLikelihood   float64 `json:"vocalLikelihood,omitempty"`
+	VocalDensity      float64 `json:"vocalDensity,omitempty"`
+	VocalPhraseActive bool    `json:"vocalPhraseActive,omitempty"`
+	// Structure: section covering the frame (-1 unknown) + label.
+	SectionIndex int    `json:"sectionIndex,omitempty"`
+	SectionLabel string `json:"sectionLabel,omitempty"`
+	// Stereo + dynamics + availability.
+	StereoWidth   float64 `json:"stereoWidth,omitempty"`
+	Correlation   float64 `json:"correlation,omitempty"`
+	MomentaryLUFS float64 `json:"momentaryLUFS,omitempty"`
+	Confidence    float64 `json:"confidence,omitempty"`
 }
 
 // FrameInput is everything one deterministic render needs.

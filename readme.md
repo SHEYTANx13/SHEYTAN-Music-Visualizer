@@ -28,6 +28,35 @@ machine. No account, no telemetry, no bundled codec binaries.
 >   specialized GPU renderer behind `internal/render`; adapter evidence
 >   states (detected/available/selected/executed/verified) are exact and
 >   software adapters are never labeled GPU.
+## Product build matrix (priority-B publication contract)
+
+| Platform | Required output | Publication |
+|---|---|---|
+| Windows x64 | `SHEYTAN-Music-Visualizer-windows-x64.zip` | VERIFIED-only candidate → workflow-wide publisher |
+| Linux x64 | `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` | VERIFIED-only candidate → workflow-wide publisher |
+| macOS arm64 | `SHEYTAN-Music-Visualizer-macos-arm64.app.zip` (real `.app` bundle; unsigned test build, honestly labeled) | candidate → publisher |
+| Android arm64 | `SHEYTAN-Music-Visualizer-android-arm64.apk` (real APK; debug-signed, honestly labeled) | REQUIRED product gate → publisher |
+| iOS | compile smoke only (`ios-compile-smoke`, informational; no product package) | never published |
+
+Platform jobs never publish under the final public artifact name: they
+produce internal `*-candidate-attemptN` artifacts and the single
+`publish-products` job re-validates and republishes under the final
+names. A red run publishes ONLY the diagnostics artifact. Internal
+candidates and log parts are removed by `cleanup-internal`; a cleanup
+failure makes the final verdict red.
+
+## Music analysis v3
+
+`internal/dsp` measures (streaming, deterministic, chunk-size
+independent): stereo metrics with anti-phase detection, nine
+calibrated frequency bands, spectral descriptors + chroma/tuning,
+multi-resolution spectra, HPSS evidence, rhythm (beats/downbeats/meter
+with honest confidence), key/chords with confidence floors, vocal-like
+phrase/flow estimates, heuristic instrument roles, structural
+sections, and BS.1770-5 loudness. The composition system consumes the
+same measured timeline in preview and export. See
+[docs/ANALYSIS-V3.md](docs/ANALYSIS-V3.md).
+
 > The former Fyne production UI (`ui/fyne`) was removed only after the
 > replacement surface reached parity; no hidden Fyne fallback remains
 > (enforced by `scripts/ci/check-no-fyne.sh` in CI).

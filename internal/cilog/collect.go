@@ -54,14 +54,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/asciilog"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -162,6 +159,12 @@ type Options struct {
 	Meta       RunMeta
 	PartsRoot  string
 	ReportPath string
+	// SummaryPath, when non-empty, receives the human-readable run
+	// summary (metadata, job/gate tables, coverage, CodeQL evidence)
+	// intended for the GitHub Actions job summary. The summary NEVER
+	// contains raw logs; the warning/error-only contract of the final
+	// artifact is unaffected.
+	SummaryPath string
 	// API, when non-nil, is used to fetch authoritative job/step
 	// conclusions and raw job logs for Meta.RunID/Meta.Attempt. Best
 	// effort: failures are recorded in the report, never fatal.
@@ -226,6 +229,19 @@ type Result struct {
 	// (run 42026322748 evidence C/J: "0 failed / 0 skipped / 0 passed" is
 	// NOT a successful preflight).
 	GatesNotReached []string
+	// ReconciledRows records manifest rows an authoritative API
+	// conclusion proved successful (aggregate caller rows), so
+	// reconciliation is visible instead of silent.
+	ReconciledRows []string
+	// ReportBytes is the exact byte size of the written final artifact
+	// (warning/error records only, strict ASCII/LF contract).
+	ReportBytes int64
+	// SummaryPath is the written job-summary path (empty when unset).
+	SummaryPath string
+	// ErrorRecordCount / WarningRecordCount are the record counts of
+	// the final artifact (post-deduplication).
+	ErrorRecordCount   int
+	WarningRecordCount int
 }
 
 type logFile struct {
@@ -386,23 +402,72 @@ func Collect(opts Options) (Result, error) {
 		sc := bufio.NewScanner(fh)
 		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 		lineNo := 0
+		// Command-block awareness (warning/error-only contract): text
+		// inside a PASSING command's captured output is successful-command
+		// chatter (probe text, echoed docs, harmless warnings) and never
+		// becomes a record; the exit code owns the gate status. Output of
+		// a FAILING command stays eligible: its diagnostics are real
+		// evidence. Because the verdict is only known at the block's
+		// EXIT_CODE line, matches are buffered per block and discarded
+		// when the block turns out to be a PASS. The EXIT_CODE line
+		// itself is skipped downstream (the gate record owns it).
+		inCommand := false
+		commandPass := false
+		type pendingMatch struct {
+			line  string
+			where string
+			isErr bool
+		}
+		var pending []pendingMatch
+		flushPending := func() {
+			for _, pm := range pending {
+				if pm.isErr {
+					errFindings = addFinding(errFindings, pm.line, pm.where)
+				} else {
+					warnFindings = addFinding(warnFindings, pm.line, pm.where)
+				}
+			}
+			pending = pending[:0]
+		}
 		for sc.Scan() {
 			lineNo++
 			line := sc.Text()
-			where := fmt.Sprintf("[%s | %s/%s:%d]", f.job.Name, f.artifact, f.rel, lineNo)
-			for _, re := range errorPatterns {
-				if re.MatchString(line) {
-					errFindings = addFinding(errFindings, line, where)
-					break
+			switch {
+			case reRecordBegin.MatchString(line):
+				flushPending()
+				inCommand, commandPass = true, false
+				continue
+			case reRecordEnd.MatchString(line):
+				if !commandPass {
+					flushPending()
+				} else {
+					pending = pending[:0]
 				}
+				inCommand, commandPass = false, false
+				continue
+			case inCommand && reExitCode.MatchString(line):
+				if m := reExitCode.FindStringSubmatch(line); m != nil {
+					commandPass = m[1] == "0" && m[2] == "PASS"
+				}
+				continue
 			}
-			for _, re := range warningPatterns {
-				if re.MatchString(line) {
+			matchedErr := matchAny(errorPatterns, line)
+			matchedWarn := !matchedErr && matchAny(warningPatterns, line)
+			if !matchedErr && !matchedWarn {
+				continue
+			}
+			where := fmt.Sprintf("[%s | %s/%s:%d]", f.job.Name, f.artifact, f.rel, lineNo)
+			if inCommand {
+				pending = append(pending, pendingMatch{line: line, where: where, isErr: matchedErr})
+			} else {
+				if matchedErr {
+					errFindings = addFinding(errFindings, line, where)
+				} else {
 					warnFindings = addFinding(warnFindings, line, where)
-					break
 				}
 			}
 		}
+		flushPending()
 		serr := sc.Err()
 		cerr := fh.Close()
 		if serr != nil {
@@ -620,27 +685,31 @@ func Collect(opts Options) (Result, error) {
 		now = time.Now
 	}
 
-	var b strings.Builder
-	writeReport(&b, opts, meta, res, files, en.jobs, en.logs, en.logErrs, reconciled, alerts, errFindings, warnFindings, overallFailures, red, now().UTC())
+	// API-RECOVERED EVIDENCE: a job whose artifact is missing but whose
+	// raw job log was recovered through the API still contributes its
+	// diagnostic LINES to the record set. The raw text itself never
+	// enters the final artifact (warning/error-only contract); only
+	// matched diagnostic lines with provenance survive.
+	if len(en.logs) > 0 {
+		for _, aj := range en.jobs {
+			if txt := en.logs[aj.ID]; txt != "" {
+				errFindings, warnFindings = scanLogText(txt, aj.Name, "api-recovered-log", errFindings, warnFindings)
+			}
+		}
+		res.FailedCommandRecords = len(errFindings)
+		res.WarningRecords = len(warnFindings)
+	}
 
-	// ASCII LOG CONTRACT (run 44330231458 remediation): the consolidated
-	// artifact is the contract's final authority, so the report body
-	// passes through the canonical byte-level sanitizer immediately
-	// before it is written, and the written bytes are validated. A
-	// validator failure fails the collector (fail closed): a
-	// non-compliant consolidated log is never uploaded silently.
-	report := asciilog.Sanitize([]byte(b.String()))
-	if rep := asciilog.Validate(report); rep.Violations() > 0 {
-		return res, fmt.Errorf("cilog: consolidated report violates the ASCII log contract after sanitization: %+v", rep)
-	}
-	if err := os.WriteFile(opts.ReportPath, report, 0o644); err != nil {
-		return res, fmt.Errorf("cilog: writing report %q: %w", opts.ReportPath, err)
-	}
-	res.ReportPath = opts.ReportPath
 	if len(res.MissingSources) > 0 {
 		res.Coverage = CoverageIncomplete
 	} else {
 		res.Coverage = CoverageComplete
+	}
+	res, err := finalizeReport(opts, meta, res, gates, errFindings, warnFindings,
+		overallFailures, res.FailedSteps, reconciled, res.APIUnavailableLogs,
+		res.NeverStarted, alerts, red, now().UTC())
+	if err != nil {
+		return res, err
 	}
 	return res, nil
 }
@@ -814,511 +883,6 @@ func jobIndex(jobs []JobSpec, name string) int {
 		}
 	}
 	return len(jobs)
-}
-
-const separator = "--------------------------------------------------------------"
-const heavySeparator = "..........................................................."
-
-func writeReport(w *strings.Builder, opts Options, meta RunMeta, res Result, files []logFile, apiJobs []JobConclusion, apiLogs map[int]string, logErrs map[int]error, reconciled []string, alerts []CodeScanningAlert, errs, warns []finding, failedJobs []string, red *Redactor, generated time.Time) {
-	fmt.Fprintf(w, "%s\nSHEYTAN CONSOLIDATED RUN REPORT (log.txt)\n%s\n", heavySeparator, heavySeparator)
-
-	// ---- 1. RUN METADATA ------------------------------------------------
-	start := meta.StartTimeUTC
-	for _, j := range apiJobs {
-		if j.StartedAt != "" && (start == "" || j.StartedAt < start) {
-			start = j.StartedAt
-		}
-	}
-	fmt.Fprintf(w, "\n%s\n1. RUN METADATA\n%s\n", separator, separator)
-	fmt.Fprintf(w, "Product:          %s\n", meta.Product)
-	fmt.Fprintf(w, "Repository:       %s\n", orDash(meta.Repository))
-	fmt.Fprintf(w, "Workflow:         %s\n", meta.Workflow)
-	fmt.Fprintf(w, "Run ID:           %s\n", meta.RunID)
-	fmt.Fprintf(w, "Attempt:          %s\n", meta.Attempt)
-	fmt.Fprintf(w, "Commit SHA:       %s\n", meta.CommitSHA)
-	fmt.Fprintf(w, "Ref:              %s\n", meta.Ref)
-	fmt.Fprintf(w, "Event:            %s\n", meta.Event)
-	fmt.Fprintf(w, "Start time (UTC): %s\n", orNote(start, "not provided by manifest and no API job start times"))
-	fmt.Fprintf(w, "Generated (UTC):  %s\n", generated.Format("2006-01-02T15:04:05Z"))
-	fmt.Fprintf(w, "Runner OS:        %s\n", orDash(meta.RunnerOS))
-	if len(apiJobs) > 0 {
-		fmt.Fprintf(w, "Runners (API):    ")
-		seen := map[string]bool{}
-		var labels []string
-		for _, j := range apiJobs {
-			key := strings.Join(j.Labels, ",")
-			if key != "" && !seen[key] {
-				seen[key] = true
-				labels = append(labels, j.Name+" → ["+key+"]")
-			}
-		}
-		fmt.Fprintf(w, "%s\n", strings.Join(labels, "; "))
-	}
-
-	// ---- 2. JOB STATUS TABLE -------------------------------------------
-	jobsSucceeded, jobsFailed, jobsCancelled, jobsSkipped := 0, 0, 0, 0
-	for _, j := range meta.Jobs {
-		switch j.Result {
-		case ResultSuccess:
-			jobsSucceeded++
-		case ResultFailure:
-			jobsFailed++
-		case ResultCancelled:
-			jobsCancelled++
-		case ResultSkipped:
-			jobsSkipped++
-		}
-	}
-	fmt.Fprintf(w, "\n%s\n2. JOB STATUS TABLE\n%s\n", separator, separator)
-	// Explicit job model (run 42231355353 reconciliation repair): the
-	// manifest declares EVIDENCE RECORDS, which are not the same thing
-	// as the workflow's top-level jobs or the jobs nested inside a
-	// reusable workflow. Every row states its own kind and where its
-	// declared result came from, so an aggregate value is never
-	// presented as a per-job observation.
-	fmt.Fprintf(w, "Manifest evidence records: %d (succeeded %d, failed %d, cancelled %d, skipped %d)\n",
-		res.JobsExpected, jobsSucceeded, jobsFailed, jobsCancelled, jobsSkipped)
-	fmt.Fprintf(w, "Row kinds: workflow-job = top-level job of the calling workflow; nested-reusable-workflow-job = a job\n")
-	fmt.Fprintf(w, "inside a reusable workflow called by this run (the row carries the CALLER's aggregate conclusion; the\n")
-	fmt.Fprintf(w, "per-language conclusion comes from that row's own artifact and/or API observation). The reusable-workflow\n")
-	fmt.Fprintf(w, "caller wrapper and every other API-observed job are listed separately below the declared rows.\n\n")
-	fmt.Fprintf(w, "%-28s %-30s %-9s %-22s %-14s %s\n", "JOB", "KIND", "REQUIRED", "CONCLUSION (workflow)", "API CONCLUSION", "LOG SOURCE")
-	for _, j := range meta.Jobs {
-		req := "yes"
-		if !j.Required {
-			req = "no"
-		}
-		var apiObs *JobConclusion
-		for idx := range apiJobs {
-			if _, ok := matchDeclaredJob([]JobSpec{j}, apiJobs[idx].Name); ok {
-				apiObs = &apiJobs[idx]
-				break
-			}
-		}
-		// Classified LOG SOURCE (run 42026322748 brief §1.I). A skipped
-		// job is NEVER_STARTED, not a missing artifact; a missing artifact
-		// with a recovered raw log states both facts; a completed job's
-		// unavailable log is API_LOG_UNAVAILABLE, never a fake pass.
-		src := "-"
-		switch {
-		case j.Result == ResultSkipped:
-			src = "NEVER_STARTED (skipped; no log expected)"
-		case j.Artifact == "":
-			src = "-"
-		case containsPrefix(res.MissingSources, j.Name):
-			src = j.Artifact + " ARTIFACT_MISSING"
-			if apiObs != nil && apiLogs[apiObs.ID] != "" {
-				src += "; RECOVERED_FROM_API"
-			} else if apiObs != nil && logErrs[apiObs.ID] == errInProgress {
-				src += "; IN_PROGRESS_AT_SNAPSHOT"
-			} else if apiObs != nil && logErrs[apiObs.ID] != nil {
-				src += "; API_LOG_UNAVAILABLE"
-			} else if apiObs == nil {
-				src += "; no API observation"
-			}
-		default:
-			src = j.Artifact
-		}
-		apiConc := "unavailable"
-		if j.Result == ResultSkipped {
-			apiConc = "not run"
-		}
-		if apiObs != nil {
-			apiConc = orNote(apiObs.Conclusion, "none (status "+apiObs.Status+")")
-		}
-		kind := j.Kind
-		if kind == "" {
-			kind = "workflow-job"
-		}
-		fmt.Fprintf(w, "%-28s %-30s %-9s %-22s %-14s %s\n", j.Name, kind, req, j.Result, apiConc, src)
-		if j.ResultBasis != "" {
-			fmt.Fprintf(w, "%-28s %-30s declared result basis: %s\n", "", "", j.ResultBasis)
-		}
-	}
-	if len(apiJobs) > 0 {
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "API-observed workflow jobs NOT represented as manifest evidence records (reusable-workflow caller wrapper, collection job, ...):")
-		for _, aj := range apiJobs {
-			if _, ok := matchDeclaredJob(meta.Jobs, aj.Name); !ok {
-				fmt.Fprintf(w, "OBSERVED (not declared in manifest): %s → conclusion %s\n", aj.Name, orNote(aj.Conclusion, "none (status "+aj.Status+")"))
-			}
-		}
-	}
-	if res.APIError != "" {
-		fmt.Fprintf(w, "\nAPI ENRICHMENT LIMITATION: %s\nJob/step conclusions above fall back to the manifest (needs.*.result) values.\n", res.APIError)
-	}
-
-	// ---- 3. STEP STATUS TABLE ------------------------------------------
-	fmt.Fprintf(w, "\n%s\n3. STEP STATUS TABLE\n%s\n", separator, separator)
-	if len(apiJobs) == 0 {
-		fmt.Fprintf(w, "UNAVAILABLE - no API job/step data for this run. Raw captured logs in section 4 are the\n")
-		fmt.Fprintf(w, "available evidence; a step can fail without emitting any error marker, so absence of error\n")
-		fmt.Fprintf(w, "markers in section 4 must never be read as proof that every step succeeded.\n")
-	} else {
-		for _, aj := range apiJobs {
-			name := aj.Name
-			if declared, ok := matchDeclaredJob(meta.Jobs, aj.Name); ok {
-				name = declared.Name + " (API: " + aj.Name + ")"
-			}
-			fmt.Fprintf(w, "\nJOB: %s - conclusion %s, started %s, completed %s\n",
-				name, orNote(aj.Conclusion, "none (status "+aj.Status+")"), orDash(aj.StartedAt), orDash(aj.CompletedAt))
-			if len(aj.Steps) == 0 {
-				fmt.Fprintf(w, "  (no step list exposed for this job)\n")
-				continue
-			}
-			for _, st := range aj.Steps {
-				fmt.Fprintf(w, "  step #%-2d %-52s %s/%s\n", st.Number, st.Name, st.Status, orNote(st.Conclusion, "none"))
-			}
-		}
-	}
-
-	// ---- 4. RAW LOGS (verbatim, redacted) ------------------------------
-	fmt.Fprintf(w, "\n%s\n4. RAW LOGS (verbatim, untruncated; secrets redacted)\n%s\n", separator, separator)
-	if len(files) == 0 {
-		fmt.Fprintf(w, "(no captured artifact log files were consolidated)\n")
-	}
-	for _, f := range files {
-		fmt.Fprintf(w, "\n#### JOB: %s | ARTIFACT: %s | FILE: %s\n#### LOG CONTENT BEGIN\n", f.job.Name, f.artifact, f.rel)
-		fh, err := os.Open(f.abs)
-		if err != nil {
-			fmt.Fprintf(w, "#### COLLECTOR ERROR: cannot open file: %v\n", err)
-			continue
-		}
-		raw, rerr := io.ReadAll(fh)
-		closeErr := fh.Close()
-		if rerr != nil {
-			fmt.Fprintf(w, "#### COLLECTOR ERROR: cannot read file: %v\n", rerr)
-		} else {
-			w.WriteString(red.Apply(string(raw)))
-			if !strings.HasSuffix(w.String(), "\n") {
-				w.WriteString("\n")
-			}
-		}
-		if closeErr != nil {
-			fmt.Fprintf(w, "#### COLLECTOR ERROR: cannot close file: %v\n", closeErr)
-		}
-		fmt.Fprintf(w, "#### LOG CONTENT END\n")
-	}
-	if len(apiLogs) > 0 {
-		for _, aj := range apiJobs {
-			logText, ok := apiLogs[aj.ID]
-			if !ok || logText == "" {
-				continue
-			}
-			fmt.Fprintf(w, "\n#### API JOB LOG: %s (id %d, complete raw log incl. post steps)\n#### LOG CONTENT BEGIN\n", aj.Name, aj.ID)
-			w.WriteString(red.Apply(logText))
-			if !strings.HasSuffix(w.String(), "\n") {
-				w.WriteString("\n")
-			}
-			fmt.Fprintf(w, "#### LOG CONTENT END\n")
-		}
-	}
-
-	// ---- 5. FAILURE INDEX ----------------------------------------------
-	fmt.Fprintf(w, "\n%s\n5. FAILURE INDEX\n%s\n", separator, separator)
-	authoritativeCount := len(failedJobs) + len(res.FailedSteps)
-	if authoritativeCount > 0 {
-		fmt.Fprintf(w, "A. AUTHORITATIVE JOB CONCLUSIONS (required jobs that did not succeed):\n")
-		for _, f := range failedJobs {
-			fmt.Fprintf(w, "   JOB FAILURE: %s\n", f)
-		}
-		if len(res.FailedSteps) > 0 {
-			fmt.Fprintf(w, "B. AUTHORITATIVE STEP CONCLUSIONS (failed/cancelled steps):\n")
-			for _, f := range res.FailedSteps {
-				fmt.Fprintf(w, "   STEP FAILURE: %s\n", f)
-			}
-		}
-	} else {
-		fmt.Fprintf(w, "A. AUTHORITATIVE JOB CONCLUSIONS: none - every required job succeeded.\n")
-	}
-
-	// B. AUTHORITATIVE GATE / COMMAND STATUS. The single source for
-	// gate status: each gate's own structured EXIT_CODE record. The
-	// summary counts MUST agree with this table - this is the fix for
-	// the run-41915116613 class, where a text-grep summary listed
-	// passing gates (EXIT_CODE: 0 PASS) among failed gates.
-	fmt.Fprintf(w, "\nB. GATE / COMMAND STATUS (authoritative - parsed from structured command records):\n")
-	fmt.Fprintf(w, "   Rule: a gate's status comes ONLY from its own command record's EXIT_CODE line.\n")
-	fmt.Fprintf(w, "   A gate with `EXIT_CODE: 0 PASS` is never listed as failed; `SKIPPED: gate ...` marks an\n")
-	fmt.Fprintf(w, "   intentionally not-run gate, `BLOCKED: gate ...` a missing prerequisite; neither is a\n")
-	fmt.Fprintf(w, "   command failure; the failed-gate count equals the number of distinct failed gates here.\n\n")
-	if len(res.Gates) == 0 {
-		fmt.Fprintf(w, "   (no structured command records found in the captured logs)\n")
-	} else {
-		fmt.Fprintf(w, "   %-22s %-26s %-8s %-5s %s\n", "JOB", "GATE/STEP", "STATUS", "EXIT", "PROVENANCE")
-		for _, g := range res.Gates {
-			exit := "-"
-			if g.Status != GateSkipped && g.Status != GateBlocked {
-				exit = strconv.Itoa(g.ExitCode)
-			}
-			detail := ""
-			if g.Status == GateSkipped || g.Status == GateBlocked {
-				detail = " (" + g.Reason + ")"
-			}
-			fmt.Fprintf(w, "   %-22s %-26s %-8s %-5s %s%s\n",
-				g.Job, g.Step, g.Status, exit, strings.Join(g.Wheres, ", "), detail)
-		}
-	}
-	failedNames := make([]string, 0, res.FailedGateCount)
-	skippedNames := make([]string, 0, res.SkippedGateCount)
-	blockedNames := make([]string, 0, res.BlockedGateCount)
-	for _, g := range res.Gates {
-		switch g.Status {
-		case GateFail:
-			failedNames = append(failedNames, g.Job+"/"+g.Step)
-		case GateSkipped:
-			skippedNames = append(skippedNames, g.Job+"/"+g.Step)
-		case GateBlocked:
-			blockedNames = append(blockedNames, g.Job+"/"+g.Step)
-		}
-	}
-	fmt.Fprintf(w, "\n   Distinct failed gates: %d", res.FailedGateCount)
-	if len(failedNames) > 0 {
-		fmt.Fprintf(w, " (%s)", strings.Join(failedNames, ", "))
-	}
-	fmt.Fprintf(w, "\n   Distinct skipped gates: %d", res.SkippedGateCount)
-	if len(skippedNames) > 0 {
-		fmt.Fprintf(w, " (%s)", strings.Join(skippedNames, ", "))
-	}
-	fmt.Fprintf(w, "\n   Distinct blocked gates: %d", res.BlockedGateCount)
-	if len(blockedNames) > 0 {
-		fmt.Fprintf(w, " (%s)", strings.Join(blockedNames, ", "))
-	}
-	fmt.Fprintf(w, "\n   Distinct passed gates: %d\n", res.PassedGateCount)
-
-	// B2. ROOT-CAUSE GROUPING (run 42939743766 §4.4). One functional
-	// defect can fail several gates; the flat table above preserves
-	// every raw failure, this grouping adds the shared causes. A gate
-	// joins a group ONLY when its own captured output contains the
-	// group's exact failure signature; failures without a known
-	// signature stay unclassified and are never force-fitted.
-	fmt.Fprintf(w, "\n   ROOT-CAUSE GROUPING of failed gates (each gate keeps its raw failure above;\n")
-	fmt.Fprintf(w, "   grouping adds shared causes - membership requires the exact failure signature in\n")
-	fmt.Fprintf(w, "   the gate's own captured output):\n")
-	type causeGroup struct {
-		label string
-		gates []string
-	}
-	var groups []causeGroup
-	var unclassified []string
-	for _, g := range res.Gates {
-		if g.Status != GateFail {
-			continue
-		}
-		if g.RootCause != "" {
-			found := false
-			for i := range groups {
-				if groups[i].label == g.RootCause {
-					groups[i].gates = append(groups[i].gates, g.Job+"/"+g.Step)
-					found = true
-					break
-				}
-			}
-			if !found {
-				groups = append(groups, causeGroup{label: g.RootCause, gates: []string{g.Job + "/" + g.Step}})
-			}
-		} else {
-			unclassified = append(unclassified, g.Job+"/"+g.Step)
-		}
-	}
-	if len(groups) == 0 && len(unclassified) == 0 {
-		fmt.Fprintf(w, "   (no failed gates - nothing to group)\n")
-	}
-	for _, grp := range groups {
-		fmt.Fprintf(w, "   - %s\n", grp.label)
-		fmt.Fprintf(w, "     occurrences: %s\n", strings.Join(grp.gates, "; "))
-	}
-	if len(unclassified) > 0 {
-		fmt.Fprintf(w, "   - UNCLASSIFIED (no known signature in the captured output; inspect the raw records):\n")
-		fmt.Fprintf(w, "     %s\n", strings.Join(unclassified, "; "))
-	}
-
-	// Environment capability limitations (§4.4): recorded facts, not
-	// failures. They are stated once here so a red run is never read
-	// as "the runner had a real GPU and it broke".
-	fmt.Fprintf(w, "\n   ENVIRONMENT CAPABILITY LIMITATIONS (informational, never gate outcomes):\n")
-	fmt.Fprintf(w, "   - hosted runners exercise the project's supported software adapter; no physical\n")
-	fmt.Fprintf(w, "     GPU/NPU/display-driver/audio-device execution is proven by this run\n")
-	fmt.Fprintf(w, "   - Windows hosted runners carry no FFmpeg: Windows MP4 export is NOT exercised\n")
-	fmt.Fprintf(w, "     by hosted CI and must not be claimed as tested\n")
-	fmt.Fprintf(w, "   - GUI smoke is virtual-display (Xvfb) evidence on Linux and a process/window\n")
-	fmt.Fprintf(w, "     fixture on Windows; it is not physical-display evidence\n")
-
-	// GATES NOT REACHED (run 42026322748 evidence C/J): zero parsed gate
-	// records for a required job that did not succeed is NOT a passing
-	// preflight - the gates never executed. This must be distinguishable
-	// from a run with zero failed gates.
-	if len(res.GatesNotReached) > 0 {
-		fmt.Fprintf(w, "\n   GATES NOT REACHED (required jobs that ended without ANY structured gate record -\n")
-		fmt.Fprintf(w, "   this is NOT zero failures and never a pass):\n")
-		for _, name := range res.GatesNotReached {
-			fmt.Fprintf(w, "   - %s: the job did not succeed and captured no gate command record;\n", name)
-			fmt.Fprintf(w, "     its gates were NOT EXECUTED / NOT REACHED (setup or bootstrap failure).\n")
-		}
-	}
-
-	fmt.Fprintf(w, "\nC. TEXT-DERIVED ERROR RECORDS (supplemental; provenance included; copies deduplicated):\n")
-	if len(errs) == 0 {
-		fmt.Fprintf(w, "   (no failed command records, ::error:: lines, failed Go test summaries or ERROR: lines found)\n")
-	} else {
-		for _, f := range errs {
-			fmt.Fprintf(w, "   %s %s\n", strings.Join(f.wheres, ", "), red.Apply(f.line))
-		}
-	}
-	if len(failedJobs) > 0 && len(errs) == 0 {
-		fmt.Fprintf(w, "\n   NOTE: required job(s) failed WITHOUT any textual error marker in the captured logs.\n")
-		fmt.Fprintf(w, "   The failure is real (see section A/2/3); text scanning is not the status authority.\n")
-	}
-
-	// ---- 6. WARNING INDEX ----------------------------------------------
-	fmt.Fprintf(w, "\n%s\n6. WARNING INDEX\n%s\n", separator, separator)
-	if len(warns) == 0 {
-		fmt.Fprintf(w, "(no ::warning:: or WARNING: lines found in the consolidated logs)\n")
-	} else {
-		for _, f := range warns {
-			fmt.Fprintf(w, "%s %s\n", strings.Join(f.wheres, ", "), red.Apply(f.line))
-		}
-	}
-	fmt.Fprintf(w, "Note: GitHub UI annotations (warning toasts) are not exposed by the REST jobs API; only\n")
-	fmt.Fprintf(w, "text markers inside the captured/fetched logs are indexed here. Absence of warnings in this\n")
-	fmt.Fprintf(w, "index does not certify a warning-free run.\n")
-
-	// ---- 7. CODEQL EVIDENCE --------------------------------------------
-	fmt.Fprintf(w, "\n%s\n7. CODEQL EVIDENCE (same commit)\n%s\n", separator, separator)
-	if meta.CodeQL == nil {
-		fmt.Fprintf(w, "No CodeQL evidence was declared for this run (manifest has no codeql section).\n")
-	} else {
-		fmt.Fprintf(w, "Declared workflow/job: %s / %s\n", orDash(meta.CodeQL.Workflow), orDash(meta.CodeQL.Job))
-		fmt.Fprintf(w, "Declared job result:   %s\n", orNote(meta.CodeQL.Result, "not provided"))
-		observed := ""
-		for _, aj := range apiJobs {
-			if strings.Contains(strings.ToLower(aj.Name), "codeql") ||
-				strings.Contains(strings.ToLower(aj.Name), "analyze") {
-				if declared, ok := matchDeclaredJob(meta.Jobs, aj.Name); ok &&
-					(declared.Name == meta.CodeQL.Job || strings.HasPrefix(declared.Name, orDash(meta.CodeQL.Job)+" (")) {
-					// Prefer the worst observed conclusion across the
-					// matched matrix legs (a succeeded leg must not
-					// mask a failed one).
-					if observed == "" || (observed == ResultSuccess && aj.Conclusion != "" && aj.Conclusion != ResultSuccess) {
-						observed = aj.Conclusion
-					}
-				}
-			}
-		}
-		// Classified API-observation note (run 42231355353 repair): the
-		// note must never point at an "API ENRICHMENT LIMITATION" section
-		// that was not actually emitted. The three unavailable reasons are
-		// distinct: an API fetch error (the section above exists), no API
-		// client configured, and an API response that matched no declared
-		// record.
-		note := ""
-		switch {
-		case observed != "":
-			// an authoritative observation exists; no note needed
-		case res.APIError != "":
-			note = "unavailable (see API ENRICHMENT LIMITATION above)"
-		case len(apiJobs) == 0:
-			note = "unavailable (API enrichment not configured - no API client/token for this collection)"
-		default:
-			note = "unavailable (no API-observed job matched this declared record; see the OBSERVED rows above)"
-		}
-		fmt.Fprintf(w, "API-observed conclusion: %s\n", orNote(observed, note))
-		sarif := "unknown"
-		for _, aj := range apiJobs {
-			for _, st := range aj.Steps {
-				if strings.Contains(strings.ToLower(st.Name), "codeql") && strings.Contains(strings.ToLower(st.Name), "analysis") {
-					sarif = st.Conclusion
-				}
-			}
-		}
-		fmt.Fprintf(w, "Analyze/SARIF upload step conclusion: %s\n", orNote(sarif, "unavailable"))
-	}
-	if res.AlertsError != "" {
-		fmt.Fprintf(w, "Open alerts for commit %s: NOT RETRIEVED (%s)\n", meta.CommitSHA, res.AlertsError)
-	} else if alerts == nil {
-		fmt.Fprintf(w, "Open alerts for commit %s: NOT RETRIEVED (API client not configured)\n", meta.CommitSHA)
-	} else {
-		fmt.Fprintf(w, "Open code scanning alerts for commit %s: %d\n", meta.CommitSHA, len(alerts))
-		for _, a := range alerts {
-			fmt.Fprintf(w, "  alert #%d [%s] %s - %s:%d - %s\n", a.Number, orDash(a.Severity), orDash(a.RuleID), orDash(a.FilePath), a.StartLine, orDash(a.RuleDesc))
-		}
-		if len(alerts) == 0 {
-			fmt.Fprintf(w, "  (zero open alerts were actually retrieved from the API for this commit)\n")
-		}
-	}
-
-	// ---- 8. TESTS / BUILD / ARTIFACT / COLLECTION -----------------------
-	fmt.Fprintf(w, "\n%s\n8. TESTS, BUILD, ARTIFACT AND COLLECTION NOTES\n%s\n", separator, separator)
-	fmt.Fprintf(w, "Jobs with captured log parts:  %d\n", res.JobsWithParts)
-	fmt.Fprintf(w, "Captured log files read:       %d\n", res.LogFiles)
-	fmt.Fprintf(w, "API job conclusions fetched:   %d (with step lists: %d)\n", res.APIJobsFetched, res.APIJobsWithSteps)
-	fmt.Fprintf(w, "API raw job logs fetched:      %d\n", res.APILogsFetched)
-	fmt.Fprintf(w, "Failed command/error records:  %d (deduplicated; supplemental - see 5.C)\n", res.FailedCommandRecords)
-	fmt.Fprintf(w, "Warning records:               %d\n", res.WarningRecords)
-	fmt.Fprintf(w, "Distinct gates parsed:         %d (failed %d, skipped %d, blocked %d, passed %d - see 5.B)\n",
-		len(res.Gates), res.FailedGateCount, res.SkippedGateCount, res.BlockedGateCount, res.PassedGateCount)
-	if len(res.NeverStarted) == 0 {
-		fmt.Fprintf(w, "Never-started (skipped) jobs:  (none)\n")
-	} else {
-		for _, name := range res.NeverStarted {
-			fmt.Fprintf(w, "NEVER_STARTED: %s - the job did not run (workflow conclusion: skipped); absence of its logs is not a coverage failure and its API raw-log 404 class is NOT a failure.\n", name)
-		}
-	}
-	if len(res.MissingSources) == 0 {
-		fmt.Fprintf(w, "MISSING LOG SOURCE jobs:       (none)\n")
-	} else {
-		fmt.Fprintf(w, "MISSING LOG SOURCE jobs:       %d\n", len(res.MissingSources))
-		for _, m := range res.MissingSources {
-			fmt.Fprintf(w, "MISSING LOG SOURCE: %s\n", m)
-		}
-	}
-	if len(res.RecoveredFromAPI) == 0 {
-		fmt.Fprintf(w, "Raw-log API recovery:          (none needed)\n")
-	} else {
-		for _, r := range res.RecoveredFromAPI {
-			fmt.Fprintf(w, "RECOVERED_FROM_API: %s\n", r)
-		}
-	}
-	if len(res.APIUnavailableLogs) == 0 {
-		fmt.Fprintf(w, "API-unavailable raw logs:      (none)\n")
-	} else {
-		for _, u := range res.APIUnavailableLogs {
-			fmt.Fprintf(w, "API LOG UNAVAILABLE: %s\n", u)
-		}
-	}
-	if len(reconciled) == 0 {
-		fmt.Fprintf(w, "Reconciled job rows:           0 - no manifest evidence record was an aggregate/stale row that the API proved successful.\n")
-	} else {
-		fmt.Fprintf(w, "Reconciled job rows:           %d (aggregate/stale manifest rows proven successful by the API; never counted as failures)\n", len(reconciled))
-		for _, r := range reconciled {
-			fmt.Fprintf(w, "RECONCILED: %s\n", r)
-		}
-	}
-
-	// ---- 9. COVERAGE + FINAL RESULT ------------------------------------
-	fmt.Fprintf(w, "\n%s\n9. COVERAGE AND FINAL RESULT\n%s\n", separator, separator)
-	if len(res.MissingSources) == 0 {
-		fmt.Fprintf(w, "Evidence coverage: COMPLETE - every job that ran contributed its expected log part.\n")
-		fmt.Fprintf(w, "Note: COMPLETE covers evidence coverage only; it does not mean the build succeeded.\n")
-		fmt.Fprintf(w, "An artifact directory that exists but contains no log files counts as a missing source.\n")
-	} else {
-		fmt.Fprintf(w, "Evidence coverage: INCOMPLETE - log sources are missing (see section 8). This report was\n")
-		fmt.Fprintf(w, "still written and must be uploaded before the collecting job fails. The run must never be\n")
-		fmt.Fprintf(w, "reported green.\n")
-	}
-	if res.Overall == OverallPass {
-		fmt.Fprintf(w, "\nOVERALL RESULT: PASS - every required job succeeded and evidence coverage is complete.\n")
-	} else {
-		fmt.Fprintf(w, "\nOVERALL RESULT: FAIL - truthful result derived from required job conclusions and evidence coverage:\n")
-		for _, f := range failedJobs {
-			fmt.Fprintf(w, "  - required job did not succeed: %s\n", f)
-		}
-		if len(res.MissingSources) > 0 {
-			fmt.Fprintf(w, "  - evidence coverage incomplete (%d missing log source(s))\n", len(res.MissingSources))
-		}
-		fmt.Fprintf(w, "A successful collector run NEVER converts failed build/CodeQL jobs into an overall PASS.\n")
-	}
-	fmt.Fprintf(w, "\n%s\nEND OF CONSOLIDATED RUN REPORT\n%s\n", heavySeparator, heavySeparator)
 }
 
 func orDash(s string) string {

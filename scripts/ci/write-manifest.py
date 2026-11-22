@@ -197,18 +197,22 @@ def build_caller_manifest() -> dict:
                 "result": results["RESULT_ANDROID"],
                 "result_basis": "needs.build-android.result (workflow conclusion)",
                 "artifact": artifacts["android"],
-                # EXPERIMENTAL compile smoke only: no APK, no emulator
-                # or device validation, no GoGPU native backend claim.
-                "required": False,
+                # REQUIRED product target: a real arm64 APK is built,
+                # validated and published through the workflow-wide
+                # publisher. Emulator runtime evidence remains honestly
+                # UNAVAILABLE on hosted runners (no nested
+                # virtualization) and is never claimed.
+                "required": True,
             },
             {
-                "name": "build-ios",
+                "name": "ios-compile-smoke",
                 "kind": "workflow-job",
                 "result": results["RESULT_IOS"],
-                "result_basis": "needs.build-ios.result (workflow conclusion)",
+                "result_basis": "needs.ios-compile-smoke.result (workflow conclusion)",
                 "artifact": artifacts["ios"],
-                # EXPERIMENTAL compile smoke only: no simulator
-                # validation, no signing, no GoGPU native claim.
+                # Informational compile smoke only: no simulator package,
+                # no signing, no product claim. Its result never gates
+                # the final verdict.
                 "required": False,
             },
         ],

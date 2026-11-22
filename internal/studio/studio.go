@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -73,11 +74,16 @@ type Studio struct {
 	cacheDir string
 	cache    *audio.Cache
 
-	track     *audio.ImportedTrack
-	analysis  *dsp.Result
-	dna       *songdna.DNA
-	vizConfig visualizer.Config
-	transport *playback.Transport
+	track    *audio.ImportedTrack
+	analysis *dsp.Result
+	// fullAnalysis is the v3 analysis document (stereo, bands, rhythm,
+	// harmony, vocal-flow, roles, structure, dynamics). nil for legacy
+	// results; the composition lookup derives from it.
+	fullAnalysis *dsp.Analysis
+	composition  *visualizer.Composition
+	dna          *songdna.DNA
+	vizConfig    visualizer.Config
+	transport    *playback.Transport
 
 	// Audio output opens lazily on the first Play and is published
 	// through an atomic pointer: the sync.Once body performs NO
@@ -530,19 +536,66 @@ func (s *Studio) dnaSeedFor() uint64 {
 	return 0
 }
 
-// analyzeTrack streams the canonical PCM through the analyzer with
-// bounded buffers. It honours ctx between chunks so a cancelled or
-// superseded analysis stops promptly without corrupting state.
+// analyzeTrack streams the canonical PCM through the v3 full analyzer
+// (priority-C/D wiring): one pass produces the legacy Result (frames,
+// waveform, coarse tempo) AND every measured layer. Bounded buffers;
+// honours ctx between chunks so a cancelled or superseded analysis
+// stops promptly without corrupting state. The completed document is
+// cached as a versioned sidecar keyed by the content fingerprint:
+// a matching (version, fingerprint) sidecar is reused, a mismatched
+// one is invalidated and regenerated - never reinterpreted.
 func (s *Studio) analyzeTrack(ctx context.Context, track *audio.ImportedTrack) (*dsp.Result, error) {
+	if a := s.loadCachedAnalysis(track.Fingerprint); a != nil {
+		s.mu.Lock()
+		s.fullAnalysis = a
+		s.composition = visualizer.NewComposition(a)
+		s.mu.Unlock()
+		return a.Legacy, nil
+	}
 	f, err := s.cache.Reader(track.Fingerprint)
 	if err != nil {
 		return nil, fmt.Errorf("studio: open canonical pcm: %w", err)
 	}
 	defer f.Close()
+	full, err := dsp.AnalyzeFullReader(ctx, f, track.Fingerprint, "canonical-pcm")
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, err
+		}
+		// Hard analysis error: fall back to the legacy pipeline so the
+		// app stays usable, and record the limitation honestly.
+		f2, ferr := s.cache.Reader(track.Fingerprint)
+		if ferr != nil {
+			return nil, fmt.Errorf("studio: open canonical pcm: %w", err)
+		}
+		defer f2.Close()
+		res, lerr := legacyAnalyze(ctx, f2, int64(track.Frames))
+		if lerr != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.fullAnalysis = nil
+		s.composition = nil
+		s.mu.Unlock()
+		return res, nil
+	}
+	if err := full.Validate(); err != nil {
+		return nil, fmt.Errorf("studio: analysis validation: %w", err)
+	}
+	s.mu.Lock()
+	s.fullAnalysis = full
+	s.composition = visualizer.NewComposition(full)
+	s.mu.Unlock()
+	s.storeCachedAnalysis(track.Fingerprint, full)
+	return full.Legacy, nil
+}
+
+// legacyAnalyze is the pre-v3 path (frames + waveform + coarse tempo).
+func legacyAnalyze(ctx context.Context, f io.Reader, frames int64) (*dsp.Result, error) {
 	a := dsp.NewAnalyzer()
 	byteBuf := make([]byte, 96000*4) // 96000 interleaved samples
 	f32Buf := make([]float32, 96000)
-	targetBytes := int64(track.Frames) * 8
+	targetBytes := frames * 8
 	var read int64
 	for read < targetBytes {
 		if err := ctx.Err(); err != nil {
@@ -563,6 +616,48 @@ func (s *Studio) analyzeTrack(ctx context.Context, track *audio.ImportedTrack) (
 		}
 	}
 	return a.Finish(), nil
+}
+
+// analysisSidecarPath is the versioned analysis cache sidecar.
+func (s *Studio) analysisSidecarPath(fp string) string {
+	return filepath.Join(s.cache.Dir(), fp+".analysis.json")
+}
+
+// loadCachedAnalysis loads the analysis sidecar when its schema version
+// and fingerprint match. Any mismatch means INVALIDATION: the file is
+// removed (never reinterpreted with new semantics) and the caller
+// re-analyzes.
+func (s *Studio) loadCachedAnalysis(fp string) *dsp.Analysis {
+	path := s.analysisSidecarPath(fp)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	a, err := dsp.LoadAnalysis(b)
+	if err != nil {
+		// Safe invalidation: remove the incompatible sidecar.
+		_ = os.Remove(path)
+		return nil
+	}
+	if a.SourceFingerprint != fp {
+		_ = os.Remove(path)
+		return nil
+	}
+	return a
+}
+
+// storeCachedAnalysis atomically persists the analysis document.
+func (s *Studio) storeCachedAnalysis(fp string, a *dsp.Analysis) {
+	blob, err := a.Serialize()
+	if err != nil {
+		return
+	}
+	path := s.analysisSidecarPath(fp)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, blob, 0o644); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, path)
 }
 
 // Playback -------------------------------------------------------------
@@ -846,6 +941,43 @@ func (s *Studio) audioStateAt(analysis *dsp.Result, t float64) visualizer.AudioS
 	st.RMS, st.Bass, st.Mid, st.Treble = f.RMS, f.Bass, f.Mid, f.Treble
 	st.Centroid, st.Flux, st.Onset = f.Centroid, f.Flux, f.Onset
 	st.Bins = visualizer.InterpolateBins(f.Bins, 0)
+	// PRIORITY-D §7.1: the composition lookup is the COMMON time base —
+	// the exact same state feeds preview and export (export goes through
+	// AudioStateProvider -> this function), so the two can never
+	// disagree. Legacy audio fields above stay untouched for existing
+	// renderers.
+	s.mu.RLock()
+	comp := s.composition
+	s.mu.RUnlock()
+	if comp != nil {
+		cs := comp.StateAt(te)
+		st.HasComposition = true
+		st.BandEnvelope = cs.BandEnvelope
+		st.BandShare = cs.BandShare
+		st.Transient = cs.Transient
+		st.TransientBand = cs.TransientBand
+		st.DownbeatSoon = cs.DownbeatSoon
+		st.ChordRoot = cs.ChordRoot
+		st.ChordQuality = cs.ChordQuality
+		st.ChordConfidence = cs.ChordConfidence
+		st.KeyConfidence = cs.KeyConfidence
+		st.Tension = cs.Tension
+		st.VocalLikelihood = cs.VocalLikelihood
+		st.VocalDensity = cs.VocalDensity
+		st.VocalPhraseActive = cs.VocalPhraseActive
+		st.SectionIndex = cs.SectionIndex
+		st.SectionLabel = cs.SectionLabel
+		st.StereoWidth = cs.StereoWidth
+		st.Correlation = cs.Correlation
+		st.MomentaryLUFS = cs.MomentaryLUFS
+		st.Confidence = cs.Confidence
+		// Measured beat phase replaces the synthetic phase when the
+		// measured grid is reliable (the grid IS the measurement; the
+		// phase above was derived from the same tempo estimate).
+		if cs.BeatPhase >= 0 {
+			st.BeatPhase = cs.BeatPhase
+		}
+	}
 	bpm := analysis.BPM
 	reliable := analysis.TempoReliable
 	if tempoOverride > 0 {

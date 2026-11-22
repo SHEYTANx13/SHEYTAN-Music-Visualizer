@@ -34,7 +34,13 @@ const (
 	// Waveform visualizer mode draws a real envelope trace (the ±2 s
 	// window previously carried only 8 points); consumers of Result
 	// JSON can distinguish generations via this field.
-	AnalysisVersion = 2
+	// v3: stereo-preserving multi-resolution analysis (see
+	// analysis_types.go: Analysis document, nine-band timeline,
+	// rhythm/harmony/vocal-flow/role/section layers, BS.1770-5
+	// loudness). Results produced by earlier versions are not
+	// interpreted with v3 semantics; analysis cache sidecars keyed
+	// on this version are invalidated safely on mismatch.
+	AnalysisVersion = 3
 	// WaveformPointsPerSecond fixes the envelope resolution. 60 pts/s
 	// gives the 4-second waveform window 240 points (a visible trace)
 	// while staying bounded (a 2 h track ≈ 1.7 MB of envelope).
@@ -154,6 +160,14 @@ type Analyzer struct {
 	samplesInPoint  int
 	wfMax           float64
 	sampleIdx       int
+
+	// frameHook, when non-nil, is called once per emitted hop with the
+	// RAW magnitude spectrum (FFTSize/2+1 one-sided magnitudes) and the
+	// windowed mono window. The v3 orchestrator (analysis.go) uses it
+	// to feed the band/spectral/chroma/HPSS layers from the SAME FFT
+	// computation the legacy pipeline performs; the hook must not
+	// mutate the slices. nil in the legacy path (no behavior change).
+	frameHook func(mag []float64, windowedMono []float64)
 }
 
 // NewAnalyzer creates an analyzer.
@@ -182,6 +196,7 @@ func (a *Analyzer) Reset() {
 	a.samplesInPoint = 0
 	a.wfMax = 0
 	a.sampleIdx = 0
+	a.frameHook = nil
 }
 
 // Process consumes interleaved stereo float32 samples. Call Finish
@@ -342,6 +357,9 @@ func (a *Analyzer) emitFrame() {
 	a.frames = append(a.frames, fr)
 	if len(a.frames) > maxFrames {
 		a.frames = a.frames[1:]
+	}
+	if a.frameHook != nil {
+		a.frameHook(spec, a.buf)
 	}
 }
 

@@ -144,6 +144,13 @@ type Report struct {
 	SeqEquals  int64 // occurrences of the 3-byte sequence "==="
 	SeqDash    int64 // occurrences of the 3-byte sequence "---"
 	Controls   int64 // C0 controls other than LF/TAB, plus DEL
+	// Tabs and CarriageReturns count TAB (0x09) and CR (0x0D) bytes.
+	// Captured logs allow tabs (they are not counted in Controls by
+	// Validate), but the STRICT final-artifact contract forbids both:
+	// ValidateStrict includes them in Controls as well, so Violations()
+	// reports them as violations.
+	Tabs            int64
+	CarriageReturns int64
 }
 
 // Violations is the number of contract classes violated (zero means

@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 )
 
 // ImportedTrack is the result of a successful import.
@@ -337,7 +339,7 @@ func decodeToCache(
 		Frames:          expected,
 		Decoder:         DecoderIDs[md.Container],
 		Resampler:       resamplerID(needResample),
-		AnalysisVersion: 0,
+		AnalysisVersion: dsp.AnalysisVersion,
 		Warnings:        md.Warnings,
 	}
 	if serr := cache.storeSidecarLocked(sc); serr != nil {

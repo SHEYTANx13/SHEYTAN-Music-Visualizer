@@ -109,6 +109,7 @@ func TestAPIConclusionsAreAuthoritativeWithoutErrorMarkers(t *testing.T) {
 	opts := Options{
 		PartsRoot:    root,
 		ReportPath:   root + "/log.txt",
+		SummaryPath:  root + "/summary.txt",
 		FetchJobLogs: true,
 		Now:          fixedNow,
 		API:          NewGitHubClient(srv.URL, "o/n", "test-token-abc"),
@@ -148,32 +149,39 @@ func TestAPIConclusionsAreAuthoritativeWithoutErrorMarkers(t *testing.T) {
 		t.Fatalf("api logs fetched = %d, want 2", res.APILogsFetched)
 	}
 	for _, want := range []string{
-		"STEP FAILURE: build-windows / step 3 \"Build and verify Windows x64 desktop app\": failure",
+		// The failed STEP is an ERROR record with step provenance.
+		"step conclusion failure",
 		// Deduplicated by stable job id: ONE entry that shows BOTH sources
-		// (run 42026322748 brief §1.J) - never two rows for one failure.
-		"JOB FAILURE: build-windows - workflow conclusion: failure; API job conclusion: failure",
-		"3. STEP STATUS TABLE",
-		"5. FAILURE INDEX",
-		"OVERALL RESULT: FAIL",
+		// (run 42026322748 brief section 1.J) - never two rows for one failure.
+		"message=required job did not succeed: workflow conclusion failure; API job conclusion: failure",
+		// The diagnostic extracted from the API-recovered raw job log.
+		"Process completed with exit code 1.",
 	} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("report missing %q\n---\n%s", want, raw)
 		}
 	}
-	// The API raw job log section must be present.
-	if !strings.Contains(raw, "#### API JOB LOG: build-windows (windows-latest, x64, UCRT64)") {
-		t.Fatal("API job log not embedded in raw section")
+	if !strings.Contains(raw, "step=Build and verify Windows x64 desktop app") {
+		t.Fatalf("failed-step record must carry the step name\n---\n%s", raw)
+	}
+	// NO raw API job log section may exist in the record-only artifact.
+	if strings.Contains(raw, "#### API JOB LOG") || strings.Contains(raw, "everything looks quiet") {
+		t.Fatal("API raw job log text must never enter the artifact")
 	}
 	// The token must never appear in the report.
 	if strings.Contains(raw, "test-token-abc") {
 		t.Fatal("report leaked the API token")
+	}
+	summary := readFile(t, opts.SummaryPath)
+	if !strings.Contains(summary, "build-windows") {
+		t.Fatalf("summary must carry the job status evidence:\n%s", summary)
 	}
 }
 
 func TestAlertsFetchedForSameCommit(t *testing.T) {
 	srv := apiServer(t)
 	root := t.TempDir()
-	opts := Options{PartsRoot: root, ReportPath: root + "/log.txt", Now: fixedNow}
+	opts := Options{PartsRoot: root, ReportPath: root + "/log.txt", SummaryPath: root + "/summary.txt", Now: fixedNow}
 	opts.API = NewGitHubClient(srv.URL, "o/n", "")
 	opts.Meta.CommitSHA = "7c830c0"
 	opts.Meta.Jobs = []JobSpec{{Name: "build", Result: ResultSuccess, Required: true}}
@@ -184,9 +192,12 @@ func TestAlertsFetchedForSameCommit(t *testing.T) {
 	if res.AlertsFetched != 1 {
 		t.Fatalf("alerts fetched = %d, want 1", res.AlertsFetched)
 	}
-	raw := readFile(t, opts.ReportPath)
-	if !strings.Contains(raw, "alert #7 [medium] go/insecure-landing - cmd/x/main.go:42") {
-		t.Fatalf("alert summary not rendered: %s", raw)
+	summary := readFile(t, opts.SummaryPath)
+	if !strings.Contains(summary, "alert #7 [medium] go/insecure-landing - cmd/x/main.go:42") {
+		t.Fatalf("alert summary not rendered in job summary: %s", summary)
+	}
+	if raw := readFile(t, opts.ReportPath); raw != "" {
+		t.Fatalf("alerts are CodeQL evidence, not build diagnostics; artifact must be empty, got %q", raw)
 	}
 }
 
@@ -197,7 +208,7 @@ func TestAPIFailureRecordedAsLimitation(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	root := t.TempDir()
-	opts := Options{PartsRoot: root, ReportPath: root + "/log.txt", Now: fixedNow}
+	opts := Options{PartsRoot: root, ReportPath: root + "/log.txt", SummaryPath: root + "/summary.txt", Now: fixedNow}
 	opts.API = NewGitHubClient(srv.URL, "o/n", "")
 	opts.Meta.Jobs = []JobSpec{{Name: "build", Result: ResultSuccess, Artifact: "build-part", Required: true}}
 	dir := root + "/build-part"
@@ -214,14 +225,17 @@ func TestAPIFailureRecordedAsLimitation(t *testing.T) {
 	if res.APIJobsFetched != 0 || res.APIError == "" {
 		t.Fatalf("expected recorded API limitation, got jobs=%d err=%q", res.APIJobsFetched, res.APIError)
 	}
-	raw := readFile(t, opts.ReportPath)
-	if !strings.Contains(raw, "API ENRICHMENT LIMITATION: access denied (HTTP 403)") {
-		t.Fatalf("limitation not recorded truthfully:\n%s", raw)
+	summary := readFile(t, opts.SummaryPath)
+	if !strings.Contains(summary, "API ENRICHMENT LIMITATION: access denied") {
+		t.Fatalf("limitation not recorded truthfully in the summary:\n%s", summary)
 	}
 	// The manifest-based evidence still stands and the run stays green
 	// on its own conclusions.
-	if !strings.Contains(raw, "OVERALL RESULT: PASS") {
+	if !strings.Contains(summary, "PASS") {
 		t.Fatal("manifest success with complete coverage must remain PASS when the API is unavailable")
+	}
+	if raw := readFile(t, opts.ReportPath); raw != "" {
+		t.Fatalf("an API limitation is summary evidence, not a build diagnostic; artifact must be empty, got %q", raw)
 	}
 }
 

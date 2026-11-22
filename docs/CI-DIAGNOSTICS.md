@@ -8,7 +8,17 @@ Every `build` run (the canonical workflow build.yml, renamed from
 build-desktop.yml in the run 44449832903 repair) uploads exactly ONE user-facing diagnostics
 artifact:
 
-- **`SHEYTAN-Music-Visualizer-all-logs.txt`** — a single plain-text file,
+- **`SHEYTAN-Music-Visualizer-all-logs.txt`** — a single plain-text file
+  containing ONLY `WARNING|`/`ERROR|` records in the stable schema
+  (platform/job/step/gate/command/exit/tool/file/line/column/source/
+  message), strict printable-ASCII + LF byte contract (no tabs, no CR,
+  no BOM, no ANSI, no `===`/`---` runs), an EMPTY file on a clean run,
+  and a 256 KiB ceiling enforced fail-closed (records are never
+  truncated; an overflow fails the collector). Metadata, job/step/gate
+  tables and success summaries live in the GitHub Actions job summary
+  (written via `ci-log-collector --summary`), never in this file; raw
+  job logs never enter it either (the API-recovered logs contribute
+  their diagnostic LINES only).
   uploaded directly (artifact mode `archive: false`). Download it and open
   it in any editor; there is no ZIP wrapper. It contains run/attempt/commit
   metadata, the authoritative job/step conclusions, the per-gate status

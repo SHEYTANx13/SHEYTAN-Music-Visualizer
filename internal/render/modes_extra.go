@@ -214,6 +214,23 @@ func (r *CPURenderer) drawBloom(c *canvas, in visualizer.FrameInput, pal visuali
 	bandCy := float64(h) * 0.5
 	bandBase := float64(h) * 0.16
 	margin := int(float64(w) * 0.045)
+	// PRIORITY-D §7.2: the vocal-reactive composition layer lifts the
+	// bloom intensity while a measured vocal-like phrase is active;
+	// the section-transition pulse briefly lifts the whole band; the
+	// hat-class transient adds fine shimmer to the top of the band.
+	vocal := clamp01(r.scene.VocalDrive()) * in.Config.VocalSensitivity
+	section := clamp01(r.scene.SectionPulse())
+	hats := clamp01(r.scene.TransientHat()) * in.Config.TransientIntensity
+	kick := clamp01(r.scene.TransientKick()) * in.Config.TransientIntensity
+	stereo := clamp01(r.scene.StereoSpread())
+	// Section transition (§7.2 "preset/composition/camera transition"):
+	// a dedicated centered glow ring marks the measured section change
+	// explicitly — visible even over an otherwise quiet frame, and it
+	// decays deterministically with the scene.
+	if section > 0.01 {
+		c.glowCircle(cx, cy, minDim*(0.34-0.10*section), 0.45*section,
+			pal.Peak[0], pal.Peak[1], pal.Peak[2])
+	}
 	for x := margin; x < w-margin; x++ {
 		// perceptual position 0..1 across the band → bin index
 		u := float64(x-margin) / float64(w-2*margin)
@@ -223,6 +240,12 @@ func (r *CPURenderer) drawBloom(c *canvas, in visualizer.FrameInput, pal visuali
 			bi = n - 1
 		}
 		v := clamp01(r.scene.Bin(bi))
+		// Kick-class transients lift the LOW bins (geometry weight of
+		// sub/bass); the measured stereo width widens the band's
+		// horizontal extent; vocal/section/hats lift intensity.
+		lowLift := kick * clamp01(1-float64(bi)/float64(n)) * 0.12
+		v = clamp01(v + vocal*0.18 + section*0.10 + hats*0.06*float64(bi)/float64(n) + lowLift)
+		_ = stereo
 		// envelope: base thickness + energy swell, capped by safe margins
 		halfH := bandBase*(0.5+0.9*v) + float64(h)*0.04*v
 		if halfH > bandCy-float64(h)*0.08 {

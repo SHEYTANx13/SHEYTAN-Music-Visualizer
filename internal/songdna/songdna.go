@@ -23,7 +23,10 @@ import (
 )
 
 // Version bumps when DNA derivation changes; it is stored in projects.
-const Version = 1
+// v2 (priority-D): derivation consumes the v3 measured analysis
+// document (bands, rhythm, harmony, vocal-flow, structure, BS.1770-5
+// loudness); projects holding v1 DNA re-derive on next analysis.
+const Version = 2
 
 // DNA is the per-track visual identity.
 type DNA struct {

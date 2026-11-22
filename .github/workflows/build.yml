@@ -563,8 +563,13 @@ jobs:
             $evidence | & $env:CI_SANITIZER_EXE | Tee-Object -FilePath ci-logs/windows-compiler.log
           }
           else {
-            [Console]::Error.WriteLine('[ci_capture] SANITIZER UNAVAILABLE — raw output preserved; the strict validator will fail this log')
-            $evidence | Tee-Object -FilePath ci-logs/windows-compiler.log
+            # FAIL CLOSED (priority-A repair of the raw-passthrough
+            # bypass): a sanitizer-unavailable path must never write raw
+            # output into a file bound for the strict log contract. The
+            # real exit code is preserved, so the failure keeps its
+            # origin instead of becoming a validator catch later.
+            [Console]::Error.WriteLine('ERROR|platform=windows-x64|job=build-windows|step=verify-ucrt64|gate=desktop-build|command=verify-ucrt64|tool=capture-pipeline|source=NOT_PROVIDED_BY_TOOL|message=sanitizer unavailable; raw compiler evidence is NOT written to the strict log (fail closed)')
+            exit $rc
           }
           exit $rc
 
@@ -697,10 +702,17 @@ jobs:
           "package_uploaded=$(if ($upload) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
           "package_status=$status" >> $env:GITHUB_OUTPUT
 
-      - name: Upload the canonical Windows x64 package (single artifact)
-        if: always() && steps.win_package_decision.outputs.package_uploaded == 'true'
+      - name: Upload the Windows CANDIDATE package (internal; final naming only by publish-products)
+        # PRIORITY-B PUBLICATION DAG: platform jobs never publish under
+        # the final public artifact name. The VERIFIED package travels as
+        # an internal candidate the workflow-wide publisher validates and
+        # republishes; TEST-ONLY and UNAVAILABLE packages are not even
+        # candidates (an unverified package is never one retry away from
+        # being visible under the final name).
+        if: always() && steps.win_package_decision.outputs.package_uploaded == 'true' && steps.win_package_decision.outputs.package_status == 'VERIFIED'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          name: windows-candidate-attempt${{ github.run_attempt }}
           path: dist/SHEYTAN-Music-Visualizer-windows-x64.zip
           archive: false
           if-no-files-found: error
@@ -1110,14 +1122,15 @@ jobs:
           echo "upload_decision=$upload"
           echo "package_status=$status" >> "$GITHUB_OUTPUT"
 
-      - name: Upload the canonical Linux x64 package (single artifact)
+      - name: Upload the Linux CANDIDATE package (internal; final naming only by publish-products)
+        # PRIORITY-B PUBLICATION DAG: same candidate contract as Windows.
         # The tar.gz preserves the executable bit (a plain binary upload
-        # would not) and archive: false delivers the prebuilt archive
-        # directly — no artifact ZIP wrapper; the artifact name is the
-        # file's basename.
-        if: always() && steps.linux_package_decision.outputs.package_uploaded == 'true'
+        # would not); archive: false delivers the prebuilt archive
+        # directly. Only a VERIFIED package is a candidate.
+        if: always() && steps.linux_package_decision.outputs.package_uploaded == 'true' && steps.linux_package_decision.outputs.package_status == 'VERIFIED'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          name: linux-candidate-attempt${{ github.run_attempt }}
           path: dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz
           archive: false
           if-no-files-found: error
@@ -1356,28 +1369,57 @@ jobs:
           grep -q "self-check PASS renderer-frame" ci-logs/gpu-validation-macos.log || { echo "ERROR: renderer-frame self-check did not pass"; exit 1; }
           echo "gpu-validation status: $status"
 
-      - name: Parity gate gui-smoke (macOS, best-effort windowed run)
+      - name: Parity gate gui-smoke (macOS, portable bounded windowed run)
+        # PRIORITY-B REPAIR: the smoke no longer depends on GNU coreutils
+        # `timeout` (absent on macOS runners) - the application-owned
+        # cmd/timedrun bounds the run AND propagates the child's REAL
+        # exit code. The gate result FAILS THE JOB: a failed or
+        # unavailable smoke is a red parity gate, never a swallowed
+        # EXPERIMENTAL_TEST_FAILED note on a green job (the exact
+        # best-effort escape the spec forbids).
         run: |
           set -Eeuo pipefail
-          status=EXPERIMENTAL_TEST
+          status=UNAVAILABLE
           if [ -x /tmp/app-gogui ]; then
-            if timeout 120 /tmp/app-gogui --smoke 30 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/gui-smoke-macos.log; then
-              status=EXPERIMENTAL_TEST_PASSED
+            set +e
+            go run ./cmd/timedrun -timeout 120s -- /tmp/app-gogui --smoke 30 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/gui-smoke-macos.log
+            rc=${PIPESTATUS[0]}
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              status=GUI_SMOKE_PASSED
             else
-              status=EXPERIMENTAL_TEST_FAILED
+              status=GUI_SMOKE_FAILED
             fi
           else
-            echo "app-gogui binary unavailable; smoke recorded UNAVAILABLE" | tee -a ci-logs/gui-smoke-macos.log
-            status=UNAVAILABLE
+            echo "app-gogui binary unavailable; the smoke gate is BLOCKED, not passed" | tee -a ci-logs/gui-smoke-macos.log
+            status=GUI_SMOKE_BLOCKED
           fi
           printf '{\n  "gate": "gogui-smoke-macos",\n  "status": "%s",\n  "note": "windowed runtime evidence on a hosted macOS runner; not physical-display validation"\n}\n' "$status" > ci-logs/shell-smoke-macos.json
           echo "gogui macOS smoke status: $status"
+          case "$status" in
+            GUI_SMOKE_PASSED) exit 0 ;;
+            *) echo "ERROR: required macOS GUI smoke gate did not pass (status=$status; exit code preserved above)"; exit 1 ;;
+          esac
 
       - name: Validate ASCII log contract (byte-level gate)
         if: always()
         run: |
           set -Eeuo pipefail
           go run ./cmd/civalidate ci-logs/*.log
+
+      - name: Upload the macOS CANDIDATE app package (internal; final naming only by publish-products)
+        # PRIORITY-B: the REAL .app bundle (Contents/MacOS executable +
+        # Info.plist) archived as the canonical macos-arm64.app.zip; an
+        # unsigned TEST build, honestly labeled. Candidate only — the
+        # workflow-wide publisher owns the final artifact name.
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-candidate-attempt${{ github.run_attempt }}
+          path: dist/SHEYTAN-Music-Visualizer-macos-arm64.app.zip
+          archive: false
+          if-no-files-found: error
+          overwrite: true
 
       - name: Upload macOS log part
         if: always()
@@ -1393,7 +1435,7 @@ jobs:
     # is documented as planned, not shipped. No APK, no emulator or
     # device validation, no GPU claim. Not a required gate; failures
     # keep the run red (honest) without blocking desktop evidence.
-    name: build-android (EXPERIMENTAL compile smoke)
+    name: build-android (REQUIRED product APK arm64)
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -1443,50 +1485,86 @@ jobs:
           set -Eeuo pipefail
           bash scripts/build/build-android.sh
 
-      # Experimental real-package attempt: gomobile can package the
-      # Go-Gui native shell as an arm64 APK on this runner (NDK is
-      # pre-installed). The gomobile version is pinned to the exact
-      # golang.org/x/mobile revision the pinned go-gui v0.98.0 release
-      # requires (v0.2.0 does not exist upstream and failed with
-      # "unknown revision cmd/gomobile/v0.2.0" in run 44648357437).
-      # The attempt is RECORDED, never faked: success and failure both
-      # produce a status file the collector surfaces. No emulator claim:
-      # hosted runners without nested virtualization cannot install/launch,
-      # and that limitation is recorded as UNAVAILABLE rather than hidden.
-      - name: Android APK package attempt (gomobile, experimental, recorded)
+      # REQUIRED product package (priority-B): a real arm64 APK built
+      # with the pinned gomobile revision (the go-gui v0.98.0-pinned
+      # x/mobile revision). The gate is authoritative: a missing,
+      # invalid or signature-failing APK fails the job. Validation
+      # covers archive structure, manifest, arm64 ABI native libraries
+      # and signature verification when apksigner is available.
+      # Emulator runtime evidence is honestly UNAVAILABLE (no nested
+      # virtualization on hosted runners) and is never claimed; a
+      # successful APK build is never described as an emulator test.
+      - name: Android arm64 APK build (required product gate)
         run: |
           set -Eeuo pipefail
-          # SC2030/SC2031 repair (run 44648357437): the piped brace
-          # group below runs in a SUBSHELL, so any variable it mutates
-          # is invisible to the parent. The authoritative status lives
-          # in a result FILE the parent reads after the pipeline; the
-          # pipeline's own exit code still propagates via pipefail.
           status_file="$(mktemp)"
           trap 'rm -f "$status_file"' EXIT
-          echo "EXPERIMENTAL_TEST" > "$status_file"
+          echo "APK_BUILD_FAILED" > "$status_file"
           {
             echo "[section] gomobile install (go-gui-pinned x/mobile revision)"
             if go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261117202452-47699113848a && gomobile init >/dev/null 2>&1; then
               echo "gomobile: installed"
-              echo "[section] APK build attempt (arm64)"
-              if CGO_ENABLED=1 gomobile build -target android -androidapi 31 -o /tmp/app-gogui-android.apk ./cmd/app-gogui; then
+              echo "[section] APK build (arm64, api 31)"
+              if CGO_ENABLED=1 gomobile build -target android -androidapi 31 -o /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk ./cmd/app-gogui; then
                 echo "APK build: OK"
-                ls -la /tmp/app-gogui-android.apk
-                echo "TEST_PACKAGE_READY_BUILD_ONLY" > "$status_file"
+                ls -la /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk
+                echo "APK_BUILD_OK" > "$status_file"
               else
-                echo "APK build: FAILED (recorded honestly; see log above)"
-                echo "EXPERIMENTAL_TEST_FAILED" > "$status_file"
+                echo "APK build: FAILED (the required product gate is red)"
               fi
             else
-              echo "gomobile: INSTALL FAILED (attempt recorded, never faked)"
-              echo "BLOCKED_TOOLCHAIN" > "$status_file"
+              echo "gomobile: INSTALL FAILED (the required product gate is red; the toolchain absence is the real origin)"
             fi
-            echo "[section] emulator/device validation"
-            echo "emulator: UNAVAILABLE (no nested virtualization on this hosted runner; no install/launch claim is made)"
-          } 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/android-apk-attempt.log
+          } 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/android-apk-build.log
           status="$(cat "$status_file")"
-          printf '{\n  "gate": "android-apk-attempt",\n  "status": "%s"\n}\n' "$status" > ci-logs/shell-apk-android.json
-          echo "android apk attempt status: $status"
+          printf '{\n  "gate": "android-apk-build",\n  "status": "%s"\n}\n' "$status" > ci-logs/shell-apk-android.json
+          if [ "$status" != "APK_BUILD_OK" ]; then
+            echo "ERROR: required Android APK build failed (status=$status); the job fails with its real origin."
+            exit 1
+          fi
+
+      - name: Android APK package validation (structure, identity, ABI, signature)
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          apk=/tmp/SHEYTAN-Music-Visualizer-android-arm64.apk
+          {
+            echo "[section] APK validation"
+            test -s "$apk" || { echo "ERROR: APK missing or empty"; exit 1; }
+            size=$(wc -c < "$apk")
+            echo "apk_size_bytes=$size"
+            python3 scripts/ci/validate-apk.py "$apk"
+            if command -v apkanalyzer >/dev/null 2>&1; then
+              pkgid="$(apkanalyzer manifest package-id "$apk" 2>/dev/null || true)"
+              echo "apkanalyzer package-id=${pkgid:-unavailable}"
+            else
+              echo "apkanalyzer: UNAVAILABLE (identity re-verified by the publisher's archive inspection)"
+            fi
+            if command -v apksigner >/dev/null 2>&1; then
+              apksigner verify --verbose "$apk" || { echo "ERROR: apksigner verify failed"; exit 1; }
+              echo "apksigner verify: PASS (debug-signed test build, honestly labeled)"
+            else
+              echo "apksigner: UNAVAILABLE on this runner (a gomobile build is debug-signed; that nature is recorded, never claimed as release-signed)"
+            fi
+            echo "emulator/device validation: UNAVAILABLE (no nested virtualization on this hosted runner; no install/launch claim is made)"
+            echo "APK_VALIDATION_OK"
+          } 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/android-apk-validation.log
+          grep -q "APK_VALIDATION_OK" ci-logs/android-apk-validation.log || {
+            echo "ERROR: APK validation failed; the required product gate is red."
+            exit 1
+          }
+          mkdir -p dist
+          cp /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk dist/
+
+      - name: Upload the Android CANDIDATE APK (internal; final naming only by publish-products)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-candidate-attempt${{ github.run_attempt }}
+          path: dist/SHEYTAN-Music-Visualizer-android-arm64.apk
+          archive: false
+          if-no-files-found: error
+          overwrite: true
 
 
       - name: Validate ASCII log contract (byte-level gate)
@@ -1503,13 +1581,13 @@ jobs:
           path: ci-logs
           if-no-files-found: error
 
-  build-ios:
+  ios-compile-smoke:
     # EXPERIMENTAL (run 44330231458 update): compile smoke only. iOS
     # requires macOS and full Xcode; Wails classifies iOS as
     # experimental and the GoGPU native CAMetalLayer backend is
     # documented as planned, not shipped. No simulator validation, no
     # signing, no GPU claim. Not a required gate.
-    name: build-ios (EXPERIMENTAL compile smoke)
+    name: ios-compile-smoke (informational compile smoke; NO product package)
     runs-on: macos-26
     timeout-minutes: 30
     steps:
@@ -1651,7 +1729,7 @@ jobs:
     # reached a TERMINAL state before this job starts — the collector
     # never observes an in_progress/pending job conclusion (a defensive
     # IN_PROGRESS classification still exists in the collector).
-    needs: [preflight, build-windows, build-linux, build-macos, build-android, build-ios]
+    needs: [preflight, build-windows, build-linux, build-macos, build-android, ios-compile-smoke]
     # if: always() - plain valid form (run 44449832903 repair). The
     # collector is the central always-runs job: it must execute after
     # success, failure, skip AND cancellation (while a runner remains
@@ -1770,7 +1848,7 @@ jobs:
           RESULT_LINUX: ${{ needs.build-linux.result }}
           RESULT_MACOS: ${{ needs.build-macos.result }}
           RESULT_ANDROID: ${{ needs.build-android.result }}
-          RESULT_IOS: ${{ needs.build-ios.result }}
+          RESULT_IOS: ${{ needs.ios-compile-smoke.result }}
           DOWNLOAD_PREFLIGHT: ${{ steps.download_preflight.outcome }}
           DOWNLOAD_WINDOWS: ${{ steps.download_windows.outcome }}
           DOWNLOAD_LINUX: ${{ steps.download_linux.outcome }}
@@ -1966,24 +2044,23 @@ jobs:
           } | tee ci-logs/final-artifact.txt
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
             {
-              echo "### Consolidated report"
-              echo "- Artifact: SHEYTAN-Music-Visualizer-all-logs.txt (plain text, non-archived direct upload)"
+              echo "### Consolidated diagnostics artifact"
+              echo "- Artifact: SHEYTAN-Music-Visualizer-all-logs.txt (warning/error records only; strict ASCII/LF; plain text, non-archived direct upload)"
               echo "- artifact id: ${ARTIFACT_ID:-not-reported}"
               echo "- [download URL](${ARTIFACT_URL:-not-reported})"
               # Gate table excerpt (run-42921967187 §5.I): surface the
               # report's own parsed gate section on the run page. The
               # report remains the authoritative, complete evidence; a
-              # missing section is stated honestly instead of guessed.
               echo ""
-              echo "### Gate status (excerpt from the consolidated report)"
+              echo "### Run summary (metadata home; the final artifact is warning/error records only)"
               echo ""
               echo '```'
-              if grep -q "GATE / COMMAND STATUS" ci-out/SHEYTAN-Music-Visualizer-all-logs.txt 2>/dev/null; then
-                awk '/GATE \/ COMMAND STATUS/{flag=1} flag{print} /^C\. |^D\. |^E\. |^=====/ && flag && !/GATE \/ COMMAND STATUS/{if (++n>1) exit}' ci-out/SHEYTAN-Music-Visualizer-all-logs.txt | head -60
+              if [ -f ci-out/SHEYTAN-run-summary.txt ]; then
+                cat ci-out/SHEYTAN-run-summary.txt
               else
-                echo "(gate-status section not found in the report — see the full report for the raw evidence)"
+                echo "(collector summary absent - the collector hard-errored; no metadata is fabricated here)"
               fi
-              echo '```'
+              echo '```' 
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -2077,9 +2154,173 @@ jobs:
   # report was produced and uploaded, so a red collector always means a
   # COLLECTION problem (actionable), never an upstream test/build
   # failure (reported by the failing job itself and here).
+  publish-products:
+    # PRIORITY-B: the ONE workflow-wide product publisher. Platform jobs
+    # only produce internal candidates; this job is the only place a
+    # final public artifact name is ever attached. It runs ONLY when
+    # every required platform job and the diagnostics collection
+    # succeeded - a red run publishes ONLY the diagnostics artifact.
+    name: publish-products (single final publisher)
+    needs: [preflight, build-windows, build-linux, build-macos, build-android, collect-logs]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' && needs.build-macos.result == 'success' && needs.build-android.result == 'success' && needs.collect-logs.result == 'success' }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (publisher source)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the Windows candidate package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-candidate-attempt${{ github.run_attempt }}
+          path: candidates/
+
+      - name: Download the Linux candidate package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: linux-candidate-attempt${{ github.run_attempt }}
+          path: candidates/
+
+      - name: Download the macOS candidate package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-candidate-attempt${{ github.run_attempt }}
+          path: candidates/
+
+      - name: Download the Android candidate package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: android-candidate-attempt${{ github.run_attempt }}
+          path: candidates/
+
+      - name: Re-validate every candidate and stage the final names
+        run: |
+          set -Eeuo pipefail
+          fail=0
+          find candidates -type f -printf '%P %s bytes\n' | sort
+          echo "[section] re-validation"
+          wz="candidates/SHEYTAN-Music-Visualizer-windows-x64.zip"
+          lt="candidates/SHEYTAN-Music-Visualizer-linux-x64.tar.gz"
+          mt="candidates/SHEYTAN-Music-Visualizer-macos-arm64.app.zip"
+          at="candidates/SHEYTAN-Music-Visualizer-android-arm64.apk"
+          python3 scripts/ci/validate-candidates.py "$wz" "$lt" "$mt" "$at" || fail=1
+          if [ "$fail" -ne 0 ]; then
+            echo "PUBLICATION REFUSED: candidates invalid; a failed run publishes ONLY the diagnostics artifact."
+            exit 1
+          fi
+          mkdir -p final
+          cp "$wz" final/SHEYTAN-Music-Visualizer-windows-x64.zip
+          cp "$lt" final/SHEYTAN-Music-Visualizer-linux-x64.tar.gz
+          cp "$mt" final/SHEYTAN-Music-Visualizer-macos-arm64.app.zip
+          cp "$at" final/SHEYTAN-Music-Visualizer-android-arm64.apk
+
+      - name: Publish the Windows x64 product
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SHEYTAN-Music-Visualizer-windows-x64.zip
+          path: final/SHEYTAN-Music-Visualizer-windows-x64.zip
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Publish the Linux x64 product
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SHEYTAN-Music-Visualizer-linux-x64.tar.gz
+          path: final/SHEYTAN-Music-Visualizer-linux-x64.tar.gz
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Publish the macOS arm64 product
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SHEYTAN-Music-Visualizer-macos-arm64.app.zip
+          path: final/SHEYTAN-Music-Visualizer-macos-arm64.app.zip
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Publish the Android arm64 product
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: SHEYTAN-Music-Visualizer-android-arm64.apk
+          path: final/SHEYTAN-Music-Visualizer-android-arm64.apk
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Record the publication outcome
+        if: always()
+        run: |
+          {
+            echo "publisher outcome: four final product artifacts published (Windows ZIP, Linux tar.gz, macOS app.zip, Android APK)."
+            echo "On any earlier failure this job is skipped and ONLY the diagnostics artifact remains (by design)."
+            date -u '+published_utc=%Y-%m-%dT%H:%M:%SZ'
+          } | tee ci-logs/publish-products.log
+
+  cleanup-internal:
+    # PRIORITY-B: the cleanup job runs even when publication was skipped
+    # or failed, and removes every temporary artifact (candidates AND
+    # per-job log parts). The final diagnostics artifact always remains.
+    # A cleanup failure makes the final verdict RED.
+    name: cleanup-internal (temporary artifacts removed)
+    needs: [collect-logs, publish-products]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Delete every temporary artifact (candidates and log parts)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          cleanup_failed=0
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
+          tmp=$(mktemp)
+          trap 'rm -f "$tmp"' EXIT
+          if ! curl -sfL --retry 2 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${api}?per_page=100" -o "$tmp"; then
+            echo "ERROR: could not list artifacts for cleanup; temporary artifacts may remain visible."
+            cleanup_failed=1
+          elif ! jq -e '.artifacts | type == "array"' "$tmp" >/dev/null; then
+            echo "ERROR: artifact-list API response was not a valid artifacts array."
+            cleanup_failed=1
+          else
+            ids=$(jq -r '.artifacts[]? | select(.name != "SHEYTAN-Music-Visualizer-all-logs.txt") | select(.name != "SHEYTAN-Music-Visualizer-windows-x64.zip") | select(.name != "SHEYTAN-Music-Visualizer-linux-x64.tar.gz") | select(.name != "SHEYTAN-Music-Visualizer-macos-arm64.app.zip") | select(.name != "SHEYTAN-Music-Visualizer-android-arm64.apk") | .id' "$tmp")
+            for id in $ids; do
+              url="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
+              if curl -sf -X DELETE \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "$url"; then
+                echo "deleted temporary artifact ${id}"
+              else
+                echo "ERROR: deleting artifact ${id} failed; it may remain visible."
+                cleanup_failed=1
+              fi
+            done
+          fi
+          if [ "$cleanup_failed" -ne 0 ]; then
+            echo "ERROR: temporary-artifact cleanup incomplete; the final verdict is RED by contract."
+            exit 1
+          fi
+          echo "cleanup complete: only the diagnostics artifact and (on green runs) the four final products remain."
+
   final-verdict:
     name: final-verdict (all required gates must be green)
-    needs: [preflight, build-windows, build-linux, build-macos, build-android, build-ios, collect-logs]
+    needs: [preflight, build-windows, build-linux, build-macos, build-android, ios-compile-smoke, collect-logs, publish-products, cleanup-internal]
     # Braced valid form, deliberately kept for cancellation (latest-update
     # override section A justification): after a user cancellation the
     # collector (if: always()) has already recorded every cancelled job
@@ -2111,38 +2352,44 @@ jobs:
           # cannot shadow any Actions context name.
           # scripts/ci/tests/test-verdict-expression.sh asserts this
           # shape statically for every workflow file in preflight.
-          # build-macos is REQUIRED (desktop parity target, reduced
-          # parity set documented in-job). build-android and build-ios
-          # are EXPERIMENTAL compile-smoke evidence jobs: their results
-          # are reported truthfully here and in the consolidated report,
-          # but they do not turn the final verdict red (they claim no
-          # runtime parity; see the job headers).
-          for gate in preflight build-windows build-linux build-macos build-android build-ios collect-logs; do
+          # PRIORITY-B FINAL VERDICT CONTRACT: every REQUIRED gate must
+          # have succeeded, every required package must have been
+          # published by the single workflow-wide publisher, and the
+          # internal-artifact cleanup must have completed. A skipped or
+          # blocked required gate is not a pass; if: always() on the
+          # verdict only guarantees the truthful report, never success.
+          # REQUIRED: preflight, build-windows, build-linux, build-macos,
+          # build-android (real arm64 APK), collect-logs,
+          # publish-products, cleanup-internal. INFORMATIONAL:
+          # ios-compile-smoke (compile smoke only; no product package).
+          for gate in preflight build-windows build-linux build-macos build-android ios-compile-smoke collect-logs publish-products cleanup-internal; do
             case "$gate" in
-              preflight)     result="${{ needs.preflight.result }}" ;;
-              build-windows) result="${{ needs.build-windows.result }}" ;;
-              build-linux)   result="${{ needs.build-linux.result }}" ;;
-              build-macos)   result="${{ needs.build-macos.result }}" ;;
-              build-android) result="${{ needs.build-android.result }}" ;;
-              build-ios)     result="${{ needs.build-ios.result }}" ;;
-              collect-logs)  result="${{ needs.collect-logs.result }}" ;;
-              *)             result="unknown" ;;
+              preflight)         result="${{ needs.preflight.result }}" ;;
+              build-windows)     result="${{ needs.build-windows.result }}" ;;
+              build-linux)       result="${{ needs.build-linux.result }}" ;;
+              build-macos)       result="${{ needs.build-macos.result }}" ;;
+              build-android)     result="${{ needs.build-android.result }}" ;;
+              ios-compile-smoke) result="${{ needs.ios-compile-smoke.result }}" ;;
+              collect-logs)      result="${{ needs.collect-logs.result }}" ;;
+              publish-products)  result="${{ needs.publish-products.result }}" ;;
+              cleanup-internal)  result="${{ needs.cleanup-internal.result }}" ;;
+              *)                 result="unknown" ;;
             esac
             echo "${gate}: ${result}"
-            if [ "$gate" = "build-android" ] || [ "$gate" = "build-ios" ]; then
+            if [ "$gate" = "ios-compile-smoke" ]; then
               if [ "$result" != "success" ]; then
-                echo "::warning title=EXPERIMENTAL gate ${gate} did not succeed::result=${result} — experimental compile smoke is non-required; the result is reported truthfully in the consolidated report"
+                echo "::warning title=Informational gate ${gate} did not succeed::result=${result} - the iOS compile smoke is non-required and claims no product package; the result is reported truthfully in the run summary"
               fi
               continue
             fi
             if [ "$result" != "success" ]; then
-              echo "::error title=Required gate ${gate} did not succeed::result=${result} — see the ${gate} job log and the consolidated report artifact SHEYTAN-Music-Visualizer-all-logs.txt"
+              echo "::error title=Required gate ${gate} did not succeed::result=${result} - see the ${gate} job log and the diagnostics artifact SHEYTAN-Music-Visualizer-all-logs.txt"
               failed=1
             fi
           done
           if [ "$failed" -ne 0 ]; then
-            echo "FINAL VERDICT: RED — one or more required gates failed; the consolidated report was still collected and uploaded (see collect-logs)."
+            echo "FINAL VERDICT: RED - one or more required gates failed; the diagnostics artifact was still collected and uploaded (see collect-logs)."
             exit 1
           fi
-          echo "FINAL VERDICT: GREEN — preflight, Windows, Linux and the consolidated report are all green."
+          echo "FINAL VERDICT: GREEN - preflight, all four product platforms, diagnostics, publication and cleanup are all green."
           echo "CodeQL runs as the independent codeql workflow (.github/workflows/codeql.yml); its results are reported there and do not gate this build."

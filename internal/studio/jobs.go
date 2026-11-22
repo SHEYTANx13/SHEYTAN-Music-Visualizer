@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/jobs"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna"
@@ -187,7 +188,18 @@ func (s *Studio) runAnalysisJob(ctx context.Context, h *jobs.JobHandle) {
 	cfg := s.vizConfig
 	seed := s.dnaSeedFor()
 	s.mu.Unlock()
-	dna := songdna.Derive(track.Fingerprint, res, seed)
+	// PRIORITY-D: v2 DNA derives from the full measured analysis when
+	// available (nil full → the v1 legacy derivation still applies).
+	var full *dsp.Analysis
+	s.mu.RLock()
+	full = s.fullAnalysis
+	s.mu.RUnlock()
+	var dna *songdna.DNA
+	if full != nil {
+		dna = songdna.DeriveFromAnalysis(track.Fingerprint, full, seed)
+	} else {
+		dna = songdna.Derive(track.Fingerprint, res, seed)
+	}
 	s.mu.Lock()
 	s.dna = dna
 	// adopt DNA artistic defaults when the user has not customized

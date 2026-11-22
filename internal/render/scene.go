@@ -24,6 +24,19 @@ type SceneState struct {
 	hasLast    bool
 	onsetFlash float64
 
+	// ---- v3 composition layers (priority-D §7.2): driven by measured
+	// analysis features, all confidence-gated and deterministic.
+	vocalDrive     float64 // smoothed vocal-reactive energy (0..1)
+	sectionPulse   float64 // decaying pulse on a section change (0..1)
+	sectionIndex   int     // last seen section (transition detection)
+	stereoSpread   float64 // measured stereo width mapped to 0..1
+	transientKick  float64 // decaying kick-class reaction
+	transientSnare float64 // decaying snare-class reaction
+	transientHat   float64 // decaying hat-class reaction
+	chordRotation  int     // palette rotation index from chord changes
+	chordRootPrev  string  // last chord root (change detection)
+	keyHue         float64 // measured key mapped into the brand hue ramp
+
 	// Spectrogram history (run 43612608237 waterfall mode): a bounded
 	// ring of captured spectrum rows, oldest first. Bounded memory: one
 	// row per captured frame, capped at SpecHistoryFrames entries.
@@ -74,6 +87,16 @@ func (s *SceneState) Reset() {
 	s.pCount = 0
 	s.particleInit = false
 	s.phasePrev = 0 // stale phase after a resize must not fake a beat
+	s.vocalDrive = 0
+	s.sectionPulse = 0
+	s.sectionIndex = -1
+	s.stereoSpread = 0
+	s.transientKick = 0
+	s.transientSnare = 0
+	s.transientHat = 0
+	s.chordRotation = 0
+	s.chordRootPrev = ""
+	s.keyHue = 0
 }
 
 // Update advances the scene to in.Time and returns derived values the
@@ -157,6 +180,80 @@ func (s *SceneState) Update(in *visualizer.FrameInput) {
 	}
 	s.onsetFlash *= math.Pow(0.01, dt)
 
+	// ---- v3 composition layers (priority-D §7.2/§7.3): every layer is
+	// confidence-gated (below the configured threshold the feature has
+	// NO effect rather than a degraded guess), smoothed with the same
+	// deterministic attack/release scheme, and driven ONLY by media
+	// time and measured analysis values.
+	if in.Audio.HasComposition {
+		// Discrete transient classes drive separate decays: kick-like
+		// (sub/bass geometry), snare-like (rings/sparks), hat-like
+		// (fine shimmer). Discrete events are never interpolated.
+		band := in.Audio.TransientBand
+		switch {
+		case band == 0 || band == 1:
+			s.transientKick = math.Max(s.transientKick, in.Audio.Transient)
+		case band == 2 || band == 3:
+			s.transientSnare = math.Max(s.transientSnare, in.Audio.Transient)
+		case band >= 4:
+			s.transientHat = math.Max(s.transientHat, in.Audio.Transient)
+		default:
+			// broadband: contributes to all three at reduced weight
+			s.transientKick = math.Max(s.transientKick, in.Audio.Transient*0.6)
+			s.transientSnare = math.Max(s.transientSnare, in.Audio.Transient*0.5)
+			s.transientHat = math.Max(s.transientHat, in.Audio.Transient*0.4)
+		}
+		decay := math.Pow(0.04, dt)
+		s.transientKick *= decay
+		s.transientSnare *= math.Pow(0.06, dt)
+		s.transientHat *= math.Pow(0.10, dt)
+
+		// Measured stereo width -> spatial spread (0..1).
+		if in.Audio.Confidence >= cfg.ConfidenceThreshold {
+			wt := clamp01(in.Audio.StereoWidth * cfg.StereoWidthGain * 2)
+			s.stereoSpread += (wt - s.stereoSpread) * (1 - math.Pow(0.05, dt))
+		}
+
+		// Vocal-reactive layer (measured acoustic estimate; gated by
+		// the user layer toggle and confidence).
+		if cfg.VocalLayerEnabled && in.Audio.Confidence >= cfg.ConfidenceThreshold {
+			vt := clamp01(in.Audio.VocalLikelihood*cfg.VocalSensitivity*0.7 +
+				clamp01(in.Audio.VocalDensity/6)*cfg.VocalSensitivity*0.3)
+			if vt > s.vocalDrive {
+				s.vocalDrive += (vt - s.vocalDrive) * attack
+			} else {
+				s.vocalDrive += (vt - s.vocalDrive) * release * 0.5
+			}
+		} else {
+			s.vocalDrive *= math.Pow(0.05, dt)
+		}
+
+		// Section transition pulse (discrete change detection on the
+		// measured section index).
+		if in.Audio.SectionIndex != s.sectionIndex {
+			if s.sectionIndex >= 0 && in.Audio.SectionIndex >= 0 {
+				s.sectionPulse = cfg.SectionIntensity
+			}
+			s.sectionIndex = in.Audio.SectionIndex
+		}
+		s.sectionPulse *= math.Pow(0.12, dt)
+
+		// Chord rotation: discrete chord-root changes rotate the
+		// palette mapping inside the SHEYTAN black/red identity.
+		if cfg.ChordReactivity > 0 && in.Audio.ChordRoot != "" && in.Audio.ChordRoot != "N" {
+			if s.chordRootPrev != "" && in.Audio.ChordRoot != s.chordRootPrev &&
+				in.Audio.ChordConfidence >= cfg.ConfidenceThreshold {
+				s.chordRotation = (s.chordRotation + 1) % 4
+			}
+			s.chordRootPrev = in.Audio.ChordRoot
+		}
+		// Key hue: the measured key candidate mapped into the ramp
+		// (confidence-gated; unknown key leaves the hue at 0).
+		if in.Audio.KeyConfidence >= cfg.ConfidenceThreshold && in.Audio.KeyConfidence > 0 {
+			s.keyHue = clamp01(in.Audio.KeyConfidence * cfg.ChordReactivity)
+		}
+	}
+
 	// Spectrogram capture: one bounded row per advanced media-time
 	// step. The row is a COPY of the smoothed bins (the array above is
 	// mutated by the next frame), so the waterfall history is stable.
@@ -202,6 +299,16 @@ func (s *SceneState) Peak(i int) float64  { return s.peaks[i] }
 func (s *SceneState) BassDrive() float64  { return s.bassDrive }
 func (s *SceneState) BeatPulse() float64  { return s.beatPulse }
 func (s *SceneState) OnsetFlash() float64 { return s.onsetFlash }
+
+// ---- v3 composition layer accessors (deterministic per frame).
+func (s *SceneState) VocalDrive() float64     { return s.vocalDrive }
+func (s *SceneState) SectionPulse() float64   { return s.sectionPulse }
+func (s *SceneState) StereoSpread() float64   { return s.stereoSpread }
+func (s *SceneState) TransientKick() float64  { return s.transientKick }
+func (s *SceneState) TransientSnare() float64 { return s.transientSnare }
+func (s *SceneState) TransientHat() float64   { return s.transientHat }
+func (s *SceneState) ChordRotation() int      { return s.chordRotation }
+func (s *SceneState) KeyHue() float64         { return s.keyHue }
 
 func clamp01(v float64) float64 {
 	if v < 0 {

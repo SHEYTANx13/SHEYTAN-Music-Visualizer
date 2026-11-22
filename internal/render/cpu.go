@@ -62,10 +62,22 @@ func (r *CPURenderer) RenderFrame(in visualizer.FrameInput) (*image.RGBA, error)
 	// to zero and the mode rendered its static furniture only.
 	in.Config.Clamp()
 	cfg := in.Config
+	// PRIORITY-D §7.2: the measured chord rotation shifts the palette
+	// INDEX inside the SHEYTAN black/red identity (4 brand palettes),
+	// so harmonic changes visibly rotate the color mapping without
+	// ever leaving the brand identity. Confidence gating happens in
+	// the scene (rotation only advances on confident chord changes).
 	pal := paletteFor(cfg.Palette)
+	_ = cfg
 	if r.buf == nil || r.buf.Bounds().Dx() != in.Width || r.buf.Bounds().Dy() != in.Height {
 		r.buf = image.NewRGBA(image.Rect(0, 0, in.Width, in.Height))
 		r.scene.Reset()
+	}
+	// Composition-driven palette rotation (chord changes rotate within
+	// the brand palettes; deterministic, media-time driven via the
+	// scene state which only evolves on advancing time below).
+	if rot := r.scene.ChordRotation(); rot != 0 {
+		pal = paletteFor((cfg.Palette + rot) % len(visualizer.Palettes))
 	}
 	// The scene advances only when media time moves (mirrors the GPU
 	// renderer): re-rendering an identical timestamp is bit-stable (a
@@ -376,10 +388,26 @@ func (r *CPURenderer) drawBars(c *canvas, in visualizer.FrameInput, pal visualiz
 	slot := float64(w-2*margin) / float64(n)
 	barW := int(math.Max(2, slot*0.62))
 	gapX := margin + int(slot*0.19)
+	// PRIORITY-D: measured features shape the geometry.
+	kick := clamp01(r.scene.TransientKick()) * in.Config.TransientIntensity
+	section := clamp01(r.scene.SectionPulse())
+	stereo := clamp01(r.scene.StereoSpread())
+	center := float64(w) / 2
+	spreadShift := stereo * float64(w) * 0.035 // measured width widens the field
 	for i := 0; i < n; i++ {
 		v := math.Pow(r.scene.Bin(i), 0.8)
 		peaks := r.scene.Peak(i)
 		x := gapX + int(float64(i)*slot)
+		// stereo spread: bars shift outward from the measured width
+		if float64(x)+slot/2 < center {
+			x -= int(spreadShift)
+		} else {
+			x += int(spreadShift)
+		}
+		// kick-class transient: brief vertical impact emphasis
+		v = math.Min(1, v+kick*0.10)
+		// section transition: brief whole-composition lift
+		v = math.Min(1, v+section*0.05)
 		bh := int(v * float64(maxH) * (0.25 + 0.75*clamp01(in.Config.PulseResponse*(0.6+0.4*r.scene.BassDrive()))))
 		if bh < 1 && v > 0.02 {
 			bh = 1

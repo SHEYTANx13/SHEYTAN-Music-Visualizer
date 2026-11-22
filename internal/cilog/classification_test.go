@@ -30,16 +30,19 @@ import (
 	"testing"
 )
 
-func collectWithMeta(t *testing.T, opts Options, meta RunMeta) (Result, string) {
+func collectWithMeta(t *testing.T, opts *Options, meta RunMeta) (Result, string) {
 	t.Helper()
 	opts.Meta = meta
 	if opts.ReportPath == "" {
 		opts.ReportPath = t.TempDir() + "/log.txt"
 	}
+	if opts.SummaryPath == "" {
+		opts.SummaryPath = t.TempDir() + "/summary.txt"
+	}
 	if opts.Now == nil {
 		opts.Now = fixedNow
 	}
-	res, err := Collect(opts)
+	res, err := Collect(*opts)
 	if err != nil {
 		t.Fatalf("Collect returned hard error: %v", err)
 	}
@@ -66,7 +69,7 @@ func TestSkippedJobNeverFetchesRawLog(t *testing.T) {
 
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
-	res, raw := collectWithMeta(t, opts, RunMeta{
+	res, raw := collectWithMeta(t, &opts, RunMeta{
 		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-linux", Result: ResultSkipped, Artifact: "linux-logs-part", Required: true}},
 	})
@@ -77,10 +80,13 @@ func TestSkippedJobNeverFetchesRawLog(t *testing.T) {
 	if len(res.NeverStarted) != 1 || res.NeverStarted[0] != "build-linux" {
 		t.Fatalf("never started = %v, want [build-linux]", res.NeverStarted)
 	}
-	if !strings.Contains(raw, "NEVER_STARTED (skipped; no log expected)") {
-		t.Fatal("report must classify the skipped job's log source as NEVER_STARTED")
+	if !strings.Contains(raw, "message=job never started (declared skipped in the manifest)") {
+		t.Fatalf("artifact must classify the skipped job as a never-started WARNING record:\n%s", raw)
 	}
-	if strings.Contains(raw, "API LOG UNAVAILABLE: build-linux") {
+	if strings.Contains(raw, "missing required log source: build-linux") {
+		t.Fatal("a skipped job must not be reported as a missing log source")
+	}
+	if strings.Contains(raw, "API_LOG_UNAVAILABLE") {
 		t.Fatal("a skipped job's missing log must not be classified as API-unavailable")
 	}
 	if res.Overall != OverallFail {
@@ -103,7 +109,7 @@ func TestInProgressJobClassifiedNotFailed(t *testing.T) {
 
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
-	res, raw := collectWithMeta(t, opts, RunMeta{
+	res, raw := collectWithMeta(t, &opts, RunMeta{
 		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-linux", Result: ResultSuccess, Artifact: "linux-logs-part", Required: true}},
 	})
@@ -134,14 +140,14 @@ func TestRecoveredFromAPI(t *testing.T) {
                         "steps":[{"number":1,"name":"Build and verify Windows x64 desktop app","status":"completed","conclusion":"failure"}]}]}`))
 	})
 	mux.HandleFunc("/repos/o/n/actions/jobs/53/logs", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("2026-11-05T12:24Z step failed: compile error in ui/fyne/studio.go\n"))
+		_, _ = w.Write([]byte("2026-11-05T12:24Z build step output\n::error::compile error in ui/gogui/studio.go\n"))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
 	root := t.TempDir() // NO artifact part at all
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
-	res, raw := collectWithMeta(t, opts, RunMeta{
+	res, raw := collectWithMeta(t, &opts, RunMeta{
 		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-windows", Result: ResultFailure, Artifact: "windows-logs-part", Required: true}},
 	})
@@ -149,11 +155,17 @@ func TestRecoveredFromAPI(t *testing.T) {
 	if len(res.RecoveredFromAPI) != 1 {
 		t.Fatalf("recovered = %v, want exactly one RECOVERED_FROM_API entry", res.RecoveredFromAPI)
 	}
-	if !strings.Contains(raw, "ARTIFACT_MISSING; RECOVERED_FROM_API") {
-		t.Fatal("report must state ARTIFACT_MISSING and RECOVERED_FROM_API together")
+	if !strings.Contains(raw, "message=missing required log source: build-windows") {
+		t.Fatal("artifact must state the missing artifact as an ERROR record")
 	}
-	if !strings.Contains(raw, "compile error in ui/fyne/studio.go") {
-		t.Fatal("recovered raw log must be consolidated verbatim")
+	if !strings.Contains(raw, "diagnostics recovered from the API job log") {
+		t.Fatal("artifact must state the RECOVERED_FROM_API fact as a WARNING record")
+	}
+	if !strings.Contains(raw, "compile error in ui/gogui/studio.go") {
+		t.Fatalf("diagnostics extracted from the recovered API log must appear as records:\n%s", raw)
+	}
+	if strings.Contains(raw, "#### API JOB LOG") || strings.Contains(raw, "2026-11-05T12:24Z build step output") {
+		t.Fatal("recovered RAW log text must never enter the artifact; only its diagnostic records")
 	}
 	if res.Overall != OverallFail {
 		t.Fatalf("failed upstream job must stay red after recovery; overall=%s", res.Overall)
@@ -178,7 +190,7 @@ func TestCompletedJob404IsAPIUnavailable(t *testing.T) {
 
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
-	res, raw := collectWithMeta(t, opts, RunMeta{
+	res, raw := collectWithMeta(t, &opts, RunMeta{
 		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{{Name: "build-linux", Result: ResultFailure, Artifact: "linux-logs-part", Required: true}},
 	})
@@ -192,8 +204,8 @@ func TestCompletedJob404IsAPIUnavailable(t *testing.T) {
 	if !found {
 		t.Fatalf("404 for a completed job must classify API_LOG_UNAVAILABLE: %v", res.APIUnavailableLogs)
 	}
-	if !strings.Contains(raw, "API LOG UNAVAILABLE: build-linux") {
-		t.Fatal("report must list the unavailable raw-log source")
+	if !strings.Contains(raw, "API_LOG_UNAVAILABLE") {
+		t.Fatalf("artifact must list the unavailable raw-log source as a WARNING record:\n%s", raw)
 	}
 	if res.Coverage != CoverageIncomplete {
 		t.Fatalf("coverage = %s, want INCOMPLETE", res.Coverage)
@@ -208,7 +220,7 @@ func TestDeduplicatedFailureShowsBothSources(t *testing.T) {
 	srv := apiServer(t) // preflight success + build-windows failure + collect-logs success
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, FetchJobLogs: true, API: NewGitHubClient(srv.URL, "o/n", "")}
-	res, raw := collectWithMeta(t, opts, RunMeta{
+	res, raw := collectWithMeta(t, &opts, RunMeta{
 		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		Jobs: []JobSpec{
 			{Name: "preflight", Result: ResultSuccess, Artifact: "preflight-logs-part", Required: true},
@@ -216,15 +228,12 @@ func TestDeduplicatedFailureShowsBothSources(t *testing.T) {
 		},
 	})
 
-	count := strings.Count(raw, "JOB FAILURE: build-windows")
+	count := strings.Count(raw, "message=required job did not succeed: workflow conclusion failure; API job conclusion: failure")
 	if count != 1 {
-		t.Fatalf("JOB FAILURE: build-windows appears %d times; dedup rule requires exactly 1\n---\n%s", count, raw)
+		t.Fatalf("the build-windows failure record appears %d times; dedup rule requires exactly 1\n---\n%s", count, raw)
 	}
 	if len(res.FailedJobs) != 1 {
 		t.Fatalf("failed jobs = %v, want exactly one entry", res.FailedJobs)
-	}
-	if !strings.Contains(raw, "workflow conclusion: failure; API job conclusion: failure") {
-		t.Fatal("the single entry must show BOTH evidence sources")
 	}
 }
 
@@ -245,7 +254,7 @@ func TestReconciledAggregateRow(t *testing.T) {
 
 	root := t.TempDir()
 	opts := Options{PartsRoot: root, API: NewGitHubClient(srv.URL, "o/n", "")}
-	res, raw := collectWithMeta(t, opts, RunMeta{
+	res, raw := collectWithMeta(t, &opts, RunMeta{
 		Workflow: "build.yml", RunID: "1", Attempt: "1",
 		CodeQL: &CodeQLSpec{Workflow: "codeql.yml", Job: "analyze", Result: "failure"},
 		Jobs: []JobSpec{
@@ -261,8 +270,14 @@ func TestReconciledAggregateRow(t *testing.T) {
 		t.Fatalf("unexpected recovery entries: %v", res.RecoveredFromAPI)
 	}
 	// The succeeded actions leg is reconciled, not reported as a failure.
-	if !strings.Contains(raw, "RECONCILED: analyze (actions)") {
-		t.Fatalf("succeeded leg must be reconciled from the aggregate row\n---\n%s", raw)
+	summary := readFile(t, opts.SummaryPath)
+	if !strings.Contains(summary, "analyze (actions)") || !strings.Contains(summary, "reconciled") {
+		t.Fatal("succeeded leg must be reconciled from the aggregate row in the summary")
+	}
+	// Exactly ONE authoritative job-failure record exists: the failed go
+	// leg. The reconciled actions leg must never produce one.
+	if n := strings.Count(raw, "message=required job did not succeed"); n != 1 {
+		t.Fatalf("required-job-failure records = %d, want exactly 1 (only the go leg)\n---\n%s", n, raw)
 	}
 	if res.Overall != OverallFail {
 		t.Fatalf("the failed go leg must keep the run red; overall=%s", res.Overall)
@@ -290,15 +305,12 @@ func TestGatesNotReachedStatement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, raw := collectWithMeta(t, opts, meta)
+	res, raw := collectWithMeta(t, &opts, meta)
 	if len(res.GatesNotReached) != 1 || res.GatesNotReached[0] != "preflight" {
 		t.Fatalf("gates not reached = %v, want [preflight]", res.GatesNotReached)
 	}
-	if !strings.Contains(raw, "GATES NOT REACHED") {
-		t.Fatal("report must state GATES NOT REACHED for the record-less failed job")
-	}
-	if !strings.Contains(raw, "NOT zero failures and never a pass") {
-		t.Fatal("the statement must explicitly deny the zero-failure reading")
+	if !strings.Contains(raw, "required job failed before reaching any gate; gate results are unknown, not passed") {
+		t.Fatalf("artifact must state GATES NOT REACHED as an ERROR record:\n%s", raw)
 	}
 }
 
@@ -322,7 +334,7 @@ func TestBlockedGateIsDistinctState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, raw := collectWithMeta(t, opts, meta)
+	res, raw := collectWithMeta(t, &opts, meta)
 	if res.BlockedGateCount != 2 {
 		t.Fatalf("blocked gates = %d, want 2", res.BlockedGateCount)
 	}
@@ -365,12 +377,16 @@ func TestSilentCodeQLBuildRecordIsPass(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, raw := collectWithMeta(t, opts, meta)
+	res, raw := collectWithMeta(t, &opts, meta)
 	if res.PassedGateCount != 1 || res.FailedGateCount != 0 {
 		t.Fatalf("silent build must be exactly one PASS gate (passed=%d failed=%d)", res.PassedGateCount, res.FailedGateCount)
 	}
-	if !strings.Contains(raw, "codeql-go-build-traced") || !strings.Contains(raw, "PASS") {
-		t.Fatal("gate table must show the traced build as PASS")
+	if raw != "" {
+		t.Fatalf("a PASS gate produces no record; artifact must be empty, got:\n%s", raw)
+	}
+	summary := readFile(t, opts.SummaryPath)
+	if !strings.Contains(summary, "codeql-go-build-traced") || !strings.Contains(summary, "PASS") {
+		t.Fatal("summary gate table must show the traced build as PASS")
 	}
 }
 
@@ -394,17 +410,17 @@ func TestOverlayWarningStaysDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, raw := collectWithMeta(t, opts, meta)
+	res, raw := collectWithMeta(t, &opts, meta)
 	if res.Overall != OverallPass {
 		t.Fatalf("warning-only run must stay PASS; overall=%s", res.Overall)
 	}
 	if res.WarningRecords != 1 {
 		t.Fatalf("warnings = %d, want 1", res.WarningRecords)
 	}
-	if !strings.Contains(raw, "WARNING: improved incremental analysis was skipped") {
-		t.Fatal("warning index must preserve the overlay diagnostic verbatim")
+	if !strings.Contains(raw, "improved incremental analysis was skipped") {
+		t.Fatalf("warning record must preserve the overlay diagnostic:\n%s", raw)
 	}
-	if !strings.Contains(raw, "does not certify a warning-free run") {
-		t.Fatal("the warning index must keep the UI-annotation limitation explicit")
+	if !strings.Contains(readFile(t, opts.SummaryPath), "does not certify a warning-free run") {
+		t.Fatal("the summary must keep the UI-annotation limitation explicit")
 	}
 }

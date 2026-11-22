@@ -123,30 +123,34 @@ func TestFourFailuresWhileFiveGatesPassRegression(t *testing.T) {
 			t.Fatalf("passing gate toolchain-report must be PASS, got %s", g.Status)
 		}
 	}
-	// The summary must agree with the listed gates.
-	if !strings.Contains(report, "Distinct failed gates: 4 (") {
-		t.Fatal("report must list exactly four distinct failed gates")
-	}
-	for _, step := range []string{"go-test", "go-vet", "go-build-packages", "build-executable"} {
-		if !strings.Contains(report, "build-windows/"+step) {
-			t.Fatalf("failed-gate list must contain build-windows/%s", step)
+	// The artifact carries one ERROR record per failed gate and one per
+	// skipped gate of the required job - exactly four failed and five
+	// skipped, never the nine-gate summary, never the passing gates.
+	failedRecs := 0
+	skippedRecs := 0
+	for _, line := range strings.Split(report, "\n") {
+		if strings.Contains(line, "gate go-test failed with exit code 1") ||
+			strings.Contains(line, "gate go-vet failed with exit code 1") ||
+			strings.Contains(line, "gate go-build-packages failed with exit code 1") ||
+			strings.Contains(line, "gate build-executable failed with exit code 1") {
+			failedRecs++
+		}
+		if strings.Contains(line, "gate SKIPPED: ") && strings.Contains(line, "job=build-windows") {
+			skippedRecs++
 		}
 	}
-	for _, step := range []string{"toolchain-report", "desktop-env-check", "gofmt-verify", "go-mod-tidy-verify", "go-mod-verify", "run-version", "stage-portable"} {
-		if strings.Contains(report, "build-windows/"+step+" ") && strings.Contains(report, "failed gates: "+fmt.Sprint(9)) {
-			t.Fatalf("passing/skipped gate %s must never appear in the failed-gate list", step)
-		}
+	if failedRecs != 4 {
+		t.Fatalf("failed-gate ERROR records = %d, want exactly 4\n---\n%s", failedRecs, report)
 	}
-	if !strings.Contains(report, "Distinct skipped gates: 5") {
-		t.Fatal("report must count the five skipped gates distinctly")
+	if skippedRecs != 5 {
+		t.Fatalf("skipped-gate ERROR records = %d, want exactly 5 (required job)", skippedRecs)
 	}
-	if !strings.Contains(report, "neither is a") && !strings.Contains(report, "not a command failure") {
-		t.Fatal("report must state the skip rule")
+	summary := mustSummary(t, opts)
+	if !strings.Contains(summary, "Gates passed=5 failed=4 skipped=5 blocked=0") {
+		t.Fatalf("summary gate counters must agree with the authoritative table:\n%s", summary)
 	}
-	// The gate table must show the passing gates as PASS (name, then
-	// the STATUS column).
-	if !strings.Contains(report, "toolchain-report           PASS     0") {
-		t.Fatal("gate table must show toolchain-report as PASS")
+	if strings.Contains(report, "RUN SUMMARY") || strings.Contains(report, "FAILURE INDEX") {
+		t.Fatal("artifact must not contain summary sections")
 	}
 	// Overall: the required Windows job failed -> FAIL.
 	if res.Overall != OverallFail {
@@ -166,8 +170,8 @@ func TestOneWindowsCommandFails(t *testing.T) {
 	if res.FailedGateCount != 1 || res.Gates[0].Step != "go-test" || res.Gates[0].ExitCode != 2 {
 		t.Fatalf("gate table wrong: failed=%d gates=%+v", res.FailedGateCount, res.Gates)
 	}
-	if !strings.Contains(report, "[build-windows | windows-logs-part/phase2-build.log:") {
-		t.Fatal("gate provenance must point at the namespaced file")
+	if !strings.Contains(report, "job=build-windows") || !strings.Contains(report, "gate go-test failed with exit code 2") {
+		t.Fatalf("gate ERROR record must carry job and step provenance:\n%s", report)
 	}
 	if res.Overall != OverallFail {
 		t.Fatalf("overall = %s, want FAIL", res.Overall)
@@ -191,8 +195,11 @@ func TestErrorTextInsidePassingCommandIsNotAGateFailure(t *testing.T) {
 	if res.Gates[0].Status != GatePass {
 		t.Fatalf("gate status = %s, want PASS", res.Gates[0].Status)
 	}
-	if !strings.Contains(report, "ERROR: no such option --verbose") {
-		t.Fatal("the ERROR text must remain visible in the supplemental text index / raw logs")
+	if strings.Contains(report, "no such option --verbose") {
+		t.Fatal("ordinary ERROR text inside a PASSING gate's output must not become a record (the exit code is the authority)")
+	}
+	if report != "" {
+		t.Fatalf("all gates passed; artifact must be empty, got:\n%s", report)
 	}
 	if res.Overall != OverallPass {
 		t.Fatalf("overall = %s, want PASS", res.Overall)
@@ -225,14 +232,13 @@ func TestRepeatedLogCopiesDeduplicatedWithProvenance(t *testing.T) {
 	if res.FailedCommandRecords != 1 {
 		t.Fatalf("FailedCommandRecords = %d, want 1 (identical text deduplicated across files)", res.FailedCommandRecords)
 	}
-	// The deduped finding must keep EVERY provenance: the record line
-	// in phase2-build.log, the trailing copy there, and both copies in
-	// copy.log.
-	if !strings.Contains(report, "windows-logs-part/copy.log:1], [build-windows | windows-logs-part/copy.log:2]") {
-		t.Fatal("deduped finding must preserve every provenance of the repeated copies")
+	// The raw EXIT_CODE text itself must never enter the artifact
+	// (the authoritative gate record carries the failure once).
+	if strings.Contains(report, "EXIT_CODE: 1 FAIL") {
+		t.Fatal("raw EXIT_CODE copies must not leak into the artifact")
 	}
-	if !strings.Contains(report, "phase2-build.log:") {
-		t.Fatal("deduped finding must keep the original record provenance")
+	if n := strings.Count(report, "gate go-test failed with exit code 1"); n != 1 {
+		t.Fatalf("authoritative gate record must exist exactly once, got %d:\n%s", n, report)
 	}
 	// Gate status is unaffected by the copies: exactly one failed gate.
 	if res.FailedGateCount != 1 || res.Gates[0].Step != "go-test" {
@@ -264,8 +270,11 @@ func TestGateTableOnAllGreenRun(t *testing.T) {
 	if res.Overall != OverallPass {
 		t.Fatalf("overall = %s, want PASS", res.Overall)
 	}
-	if !strings.Contains(report, "Distinct failed gates: 0\n") {
-		t.Fatal("report must state zero failed gates on a green run")
+	if report != "" {
+		t.Fatalf("green run artifact must be empty, got:\n%s", report)
+	}
+	if !strings.Contains(mustSummary(t, opts), "Gates passed=2 failed=0 skipped=0 blocked=0") {
+		t.Fatal("summary must state zero failed gates on a green run")
 	}
 }
 
@@ -292,8 +301,8 @@ func TestSkippedGatesAreNotFailedGates(t *testing.T) {
 			t.Fatalf("run-version must be SKIPPED, got %s", g.Status)
 		}
 	}
-	if !strings.Contains(report, "run-version") && !strings.Contains(report, "SKIPPED") {
-		t.Fatal("report must show the skipped gates")
+	if !strings.Contains(report, "gate SKIPPED: run-version (executable build failed)") {
+		t.Fatalf("artifact must show the skipped gates distinctly:\n%s", report)
 	}
 }
 
@@ -323,15 +332,11 @@ func TestCodeQLMatrixLogsConsolidated(t *testing.T) {
 		}},
 	})
 	res, report := mustCollect(t, opts)
-	if res.LogFiles != 2 {
-		t.Fatalf("log files = %d, want 2", res.LogFiles)
+	if res.LogFiles != 2 || res.Coverage != CoverageComplete {
+		t.Fatalf("log files=%d coverage=%s, want 2/COMPLETE (both matrix namespaces consolidated)", res.LogFiles, res.Coverage)
 	}
-	if !strings.Contains(report, "ARTIFACT: codeql-logs-part-go | FILE: go/codeql-go-build.log") ||
-		!strings.Contains(report, "ARTIFACT: codeql-logs-part-actions | FILE: actions/codeql-actions.log") {
-		t.Fatal("both CodeQL matrix namespaces must be consolidated namespaced")
-	}
-	if res.Coverage != CoverageComplete {
-		t.Fatalf("coverage = %s, want COMPLETE", res.Coverage)
+	if strings.Contains(report, "ARTIFACT:") || strings.Contains(report, "#### LOG CONTENT") {
+		t.Fatal("record-only artifact must not embed raw log listings")
 	}
 }
 
@@ -368,8 +373,11 @@ func TestWorkflowCommandAnnotationFormsAreIndexed(t *testing.T) {
 	if res.WarningRecords != 1 {
 		t.Fatalf("warning records = %d, want 1 (##[warning] form must be indexed)", res.WarningRecords)
 	}
-	if !strings.Contains(report, "##[error]Process completed with exit code 1.") {
-		t.Fatal("report must contain the ##[error] line")
+	if !strings.Contains(report, "Process completed with exit code 1.") {
+		t.Fatalf("report must contain the ##[error] diagnostic as a record:\n%s", report)
+	}
+	if strings.Contains(report, "##[") {
+		t.Fatal("raw workflow-command syntax must not leak into the record message")
 	}
 }
 
