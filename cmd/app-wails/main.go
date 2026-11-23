@@ -20,7 +20,7 @@
 // purego build tag on linux/darwin (upstream buildguard). The repo
 // canonical link configuration additionally applies -tags goffi_static
 // because the core links the wgpu/goffi FFI stack together with
-// CGO-based dependencies (see ai-notes.md "Critical linker discovery").
+// CGO-based dependencies (see docs/ai-notes.md "Critical linker discovery").
 //
 //	linux:   CGO_ENABLED=1 go build -tags "goffi_static purego" ./cmd/app-wails
 //	windows: CGO_ENABLED=0 go build -tags purego               ./cmd/app-wails

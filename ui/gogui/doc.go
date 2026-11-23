@@ -53,7 +53,9 @@
 //     Where a platform has no native picker, go-gui falls back to its
 //     in-window file browser — the dialogs never fake success. The
 //     in-app path entry fields plus a recent-paths list remain as the
-//     manual fallback, and their unavailability is stated in the UI.
+//     manual fallback (the list persists across restarts through the
+//     versioned workspace-layout store), and their unavailability is
+//     stated in the UI.
 //     File authorization checks stay in the Go core (fileaccess);
 //     dialog results are only ever user-mediated path selections.
 //   - The reveal-in-folder action (CmdLogsReveal) is the only action

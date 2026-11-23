@@ -12,14 +12,18 @@ package cilog
 // in the fixed field order
 //
 //	<SEVERITY>|platform=<p>|job=<j>|step=<s>|gate=<g>|command=<c>|
-//	exit=<n>|tool=<t>|file=<f>|line=<n>|column=<n>|source=<s>|message=<m>
+//	exit=<n>|tool=<t>|file=<f>|line=<n>|column=<n>|source=<s>|
+//	hint=<h>|message=<m>
 //
 // Fields that are genuinely unavailable are omitted. The source field
 // is always emitted: EXACT (file+line+column reported by the tool),
 // FILE_AND_LINE (file+line only; a column is never invented), or
-// NOT_PROVIDED_BY_TOOL. Two distinct failures that mention the same
-// file stay distinct (the normalized message is part of the dedupe
-// key); identical records collapse deterministically.
+// NOT_PROVIDED_BY_TOOL. hint= is emitted only when the diagnostic
+// matches a known root-cause pattern (hints.go): it carries the next
+// action so triage does not re-derive it from the message text
+// (run-45042834042 format upgrade). Two distinct failures that mention
+// the same file stay distinct (the normalized message is part of the
+// dedupe key); identical records collapse deterministically.
 
 import (
 	"fmt"
@@ -59,7 +63,9 @@ type Record struct {
 	Line     int // 0 = not reported
 	Column   int // 0 = not reported (never invented)
 	// Source is SourceExact, SourceFileLine or SourceNotProvided.
-	Source  string
+	Source string
+	// Hint is the known-root-cause next action (hints.go); empty = none.
+	Hint    string
 	Message string
 }
 
@@ -109,6 +115,12 @@ func (r Record) SchemaLine() string {
 		r.Source = SourceNotProvided
 	}
 	add("source", r.Source)
+	if r.Hint == "" {
+		r.Hint = hintFor(r.Tool, r.Message)
+	}
+	if r.Hint != "" {
+		add("hint", asciiField(r.Hint))
+	}
 	msg := singleLineMessage(r.Message)
 	if msg == "" {
 		msg = "unspecified diagnostic"
@@ -206,12 +218,18 @@ var (
 	reGenericDiag = regexp.MustCompile(`^(\S{1,512}?):([0-9]+):([0-9]+): (?:fatal |)(error|warning): (.+)$`)
 	// Go tools without a column (vet, some linker forms): path.go:LINE: text
 	reGoLineOnly = regexp.MustCompile(`^(\S{1,512}?\.go):([0-9]+): (.+)$`)
-	// GitHub workflow annotations.
-	// Raw API job logs prefix annotation lines with a timestamp; both
-	// bare and timestamp-prefixed forms are recognized and the wrapper
-	// syntax never reaches the record message.
-	reAnnotation  = regexp.MustCompile(`^(?:[0-9TZ:.\-]+ )?::(error|warning)(?:[ ][^:]*)?::(.*)$`)
+	// GitHub workflow annotations. Raw API job logs prefix annotation
+	// lines with a timestamp; both bare and timestamp-prefixed forms
+	// are recognized and the wrapper syntax never reaches the record
+	// message. The file/line/col/endLine/endColumn/title properties
+	// are captured separately and become structured location fields
+	// (run-45042834042 format upgrade).
+	reAnnotation  = regexp.MustCompile(`^(?:[0-9TZ:.\-]+ )?::(error|warning)(?:(?: |::)(.*))?$`)
 	reWorkflowCmd = regexp.MustCompile(`^(?:[0-9TZ:.\-]+ )?##\[(error|warning)\]\s*(.*)$`)
+	// Compiler positions WITHOUT a severity token (go build prints
+	// errors as path:LINE:COL: text; gcc/clang use the same shape).
+	reGoPosNoSev      = regexp.MustCompile(`^(\S{1,512}?\.go):([0-9]{1,6}):([0-9]{1,6}): (.+)$`)
+	reGenericPosNoSev = regexp.MustCompile(`^(\S{1,512}?):([0-9]{1,6}):([0-9]{1,6}): (.+)$`)
 	// Plain severity prefixes.
 	rePlainError   = regexp.MustCompile(`(?i)^error:\s*(.+)$`)
 	rePlainWarning = regexp.MustCompile(`(?i)^warning:\s*(.+)$`)
@@ -242,29 +260,48 @@ func extractDiag(line string) (Record, bool) {
 		if m[1] == "warning" {
 			sev = SevWarning
 		}
-		return Record{Severity: sev, Tool: "github-annotation", Source: SourceNotProvided, Message: m[2]}, true
+		r := Record{Severity: sev, Tool: "github-annotation", ExitCode: -1, Source: SourceNotProvided}
+		// Standard shape: ::<level> properties ::<message>. Lines that
+		// merely START with ::error/::warning (no closing '::') are kept
+		// too: the whole remainder is the message (a lost diagnostic is
+		// worse than an unparsed one).
+		rest := m[2]
+		if i := strings.Index(rest, "::"); i >= 0 && strings.Contains(rest[:i], "=") {
+			r.Message = rest[i+2:]
+			applyAnnotationProps(&r, rest[:i])
+		} else {
+			r.Message = rest
+			applyEmbeddedPosition(&r)
+		}
+		return r, true
 	}
 	if m := reWorkflowCmd.FindStringSubmatch(trim); m != nil {
 		sev := SevError
 		if m[1] == "warning" {
 			sev = SevWarning
 		}
-		return Record{Severity: sev, Tool: "github-workflow-command", Source: SourceNotProvided, Message: m[2]}, true
+		r := Record{Severity: sev, Tool: "github-workflow-command", ExitCode: -1, Source: SourceNotProvided, Message: m[2]}
+		applyEmbeddedPosition(&r)
+		return r, true
 	}
 	if m := reGoTestFail.FindStringSubmatch(trim); m != nil {
-		return Record{Severity: SevError, Tool: "go-test", Source: SourceNotProvided, Message: "test failure: " + m[1]}, true
+		return Record{Severity: SevError, Tool: "go-test", ExitCode: -1, Source: SourceNotProvided, Message: "test failure: " + m[1]}, true
 	}
 	if m := reGoPkgFail.FindStringSubmatch(trim); m != nil {
-		return Record{Severity: SevError, Tool: "go-test", Source: SourceNotProvided, Message: "package build failed: " + m[1]}, true
+		return Record{Severity: SevError, Tool: "go-test", ExitCode: -1, Source: SourceNotProvided, Message: "package build failed: " + m[1]}, true
 	}
 	if m := reGoPkgFail2.FindStringSubmatch(trim); m != nil {
-		return Record{Severity: SevError, Tool: "go-test", Source: SourceNotProvided, Message: "package failed: " + m[1]}, true
+		return Record{Severity: SevError, Tool: "go-test", ExitCode: -1, Source: SourceNotProvided, Message: "package failed: " + m[1]}, true
 	}
 	if m := rePlainError.FindStringSubmatch(trim); m != nil {
-		return Record{Severity: SevError, Tool: "generic", Source: SourceNotProvided, Message: m[1]}, true
+		r := Record{Severity: SevError, Tool: "generic", ExitCode: -1, Source: SourceNotProvided, Message: m[1]}
+		applyEmbeddedPosition(&r)
+		return r, true
 	}
 	if m := rePlainWarning.FindStringSubmatch(trim); m != nil {
-		return Record{Severity: SevWarning, Tool: "generic", Source: SourceNotProvided, Message: m[1]}, true
+		r := Record{Severity: SevWarning, Tool: "generic", ExitCode: -1, Source: SourceNotProvided, Message: m[1]}
+		applyEmbeddedPosition(&r)
+		return r, true
 	}
 	return Record{}, false
 }
@@ -284,6 +321,7 @@ func toolRecord(tool, file, lineS, colS, severity, message string) Record {
 	r := Record{
 		Severity: sev,
 		Tool:     tool,
+		ExitCode: -1, // the diagnostic line carries no process exit code
 		File:     file,
 		Line:     line,
 		Source:   SourceFileLine,
@@ -320,6 +358,82 @@ func toolFromPath(path string) string {
 		return "actionlint"
 	default:
 		return "generic-compiler"
+	}
+}
+
+// applyAnnotationProps parses GitHub annotation properties
+// (file=,line=,col=,endLine=,endColumn=,title=) into structured
+// location fields. When no usable properties are present the message
+// itself is probed for an embedded compiler position instead.
+func applyAnnotationProps(r *Record, props string) {
+	var file string
+	line, col := 0, 0
+	for _, kv := range strings.Split(props, ",") {
+		i := strings.Index(kv, "=")
+		if i <= 0 {
+			continue
+		}
+		k, v := kv[:i], kv[i+1:]
+		switch k {
+		case "file":
+			file = v
+		case "line":
+			line, _ = strconv.Atoi(v)
+		case "col":
+			col, _ = strconv.Atoi(v)
+		}
+	}
+	if file == "" || line <= 0 {
+		applyEmbeddedPosition(r)
+		return
+	}
+	r.File = file
+	r.Line = line
+	r.Source = SourceFileLine
+	if col > 0 {
+		r.Column = col
+		r.Source = SourceExact
+	}
+}
+
+// applyEmbeddedPosition extracts an embedded compiler position
+// (path.go:LINE:COL: text / path:LINE:COL: text / path.go:LINE: text)
+// from the record message into structured fields (run-45042834042:
+// the Go compile error surfaced only as raw text with
+// source=NOT_PROVIDED_BY_TOOL). URLs are never treated as positions.
+func applyEmbeddedPosition(r *Record) {
+	if r.File != "" {
+		return // already located (annotation properties)
+	}
+	m := reGoPosNoSev.FindStringSubmatch(r.Message)
+	if m == nil {
+		m = reGenericPosNoSev.FindStringSubmatch(r.Message)
+	}
+	if m != nil {
+		if strings.Contains(m[1], "://") || !strings.Contains(m[1], ".") {
+			return // URL or extension-less token, not a source position
+		}
+		line, _ := strconv.Atoi(m[2])
+		col, _ := strconv.Atoi(m[3])
+		r.File = m[1]
+		r.Line = line
+		r.Source = SourceFileLine
+		if col > 0 {
+			r.Column = col
+			r.Source = SourceExact
+		}
+		if !strings.HasSuffix(r.Tool, "-compiler") && r.Tool != "go-tool" {
+			r.Tool = toolFromPath(m[1])
+		}
+		r.Message = m[4]
+		return
+	}
+	if m := reGoLineOnly.FindStringSubmatch(r.Message); m != nil {
+		line, _ := strconv.Atoi(m[2])
+		r.File = m[1]
+		r.Line = line
+		r.Source = SourceFileLine
+		r.Message = m[3]
 	}
 }
 

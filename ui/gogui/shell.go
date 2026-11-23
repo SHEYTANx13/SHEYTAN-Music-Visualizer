@@ -213,6 +213,10 @@ func Run(opts RunOptions) error {
 		formats:     svc.SupportedFormats(),
 		smokeTarget: opts.SmokeFrames,
 	}
+	// Seed the MRU import-path list from the persisted workspace
+	// layout (run-45042834042 UX readiness: the manual fallback
+	// list now survives restarts).
+	sh.seedRecentPaths(tabs)
 	sh.disp = newDispatcher(sh)
 	sh.initControlValues()
 
@@ -623,6 +627,13 @@ func (sh *shell) saveLayout() {
 	}
 }
 
+// seedRecentPaths initializes the in-memory MRU import-path list from
+// the loaded workspace layout. Kept as a seam so the persistence
+// behavior is unit-testable without a display.
+func (sh *shell) seedRecentPaths(tabs TabState) {
+	sh.recentPaths = append([]string(nil), tabs.Layout.RecentPaths...)
+}
+
 // rememberImportPath keeps a small bounded recent-paths list.
 func (sh *shell) rememberImportPath(path string) {
 	for _, p := range sh.recentPaths {
@@ -631,9 +642,14 @@ func (sh *shell) rememberImportPath(path string) {
 		}
 	}
 	sh.recentPaths = append([]string{path}, sh.recentPaths...)
-	if len(sh.recentPaths) > recentPathsMax {
-		sh.recentPaths = sh.recentPaths[:recentPathsMax]
+	if len(sh.recentPaths) > presentation.RecentPathsMax {
+		sh.recentPaths = sh.recentPaths[:presentation.RecentPathsMax]
 	}
+	// Persist the MRU list through the workspace layout so the
+	// manual path fallback survives restarts (bounded atomic
+	// writes on the frame thread, same store as the tab state).
+	sh.tabs.Layout.RecentPaths = append([]string(nil), sh.recentPaths...)
+	sh.saveLayout()
 }
 
 // ensureFFmpegDetection runs the (potentially blocking) FFmpeg probe
@@ -761,7 +777,8 @@ func clampPreviewSize(w, h int) (int, int) {
 
 // constants shared with the panels.
 const (
-	recentPathsMax     = 5
+	// recentPathsMax moved to presentation.RecentPathsMax so the
+	// shell and the persisted layout share one bound.
 	jobsPollInterval   = time.Second
 	smokeTimeout       = 45 * time.Second
 	previewMaxWidthPx  = 640

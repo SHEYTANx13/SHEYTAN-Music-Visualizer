@@ -90,6 +90,12 @@ type WorkspaceLayoutDTO struct {
 	ActiveTab     Destination   `json:"activeTab"`
 	SplitVertical bool          `json:"splitVertical"`
 	Collapsed     []Destination `json:"collapsed"`
+	// RecentPaths is the bounded most-recently-used import-path list
+	// backing the documented manual path fallback (run-45042834042
+	// UX readiness: the list now survives restarts). Additive
+	// optional v1 field: older builds ignore it, older files load
+	// unchanged. Sanitized on load and save by SanitizeRecentPaths.
+	RecentPaths []string `json:"recentPaths,omitempty"`
 }
 
 // DefaultLayout returns the canonical default workspace layout.

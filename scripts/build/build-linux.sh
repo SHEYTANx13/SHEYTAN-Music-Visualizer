@@ -37,7 +37,7 @@
 # its own fakecgo/dlopen stubs that the Go internal linker cannot place
 # into a CGO binary; -tags goffi_static selects goffi's static dlopen
 # path and is REQUIRED for every build that links the Go-Gui shell + wgpu together
-# (see ai-notes.md). The tag is harmless on Windows.
+# (see docs/ai-notes.md). The tag is harmless on Windows.
 
 # Justifications (shellcheck):
 #   SC2086: unquoted $GO_TAGS splitting is the documented argv contract
@@ -118,7 +118,7 @@ note "=============================================================="
 
 GO_TAGS="-tags goffi_static"
 
-# Missing-prerequisite honesty (agent.md §4 vocabulary): without the Go
+# Missing-prerequisite honesty (docs/agent.md §4 vocabulary): without the Go
 # toolchain NOTHING in this script can be verified. Dependent gates are
 # recorded BLOCKED (never passed, never failed-with-fake-output) and the
 # script fails so the CI job stays red with truthful evidence.
@@ -311,7 +311,7 @@ if [ "$MODE" = "desktop" ]; then
   mkdir -p "$STAGE_APP/tools/ffmpeg/bin" "$STAGE_APP/data"
   if [ "$EXE_OK" -eq 1 ]; then
     install -m 0755 bin/sheytan-music-visualizer "$STAGE_APP/sheytan-music-visualizer"
-    install -m 0644 license.md "$STAGE_APP/license.md"
+    install -m 0644 docs/license.md "$STAGE_APP/license.md"
     install -m 0644 readme.md "$STAGE_APP/readme.md"
     install -m 0644 packaging/portable.mode "$STAGE_APP/portable.mode"
     install -m 0644 packaging/DATA-FOLDERS.txt "$STAGE_APP/data/DATA-FOLDERS.txt"
@@ -357,7 +357,7 @@ if [ "$MODE" = "desktop" ]; then
 
     # BYTE-FOR-BYTE license identity gate (pre-archive): cmp on raw
     # bytes between the canonical tracked file and the staged copy.
-    CI_TOOL_CONTEXT="gate:license-identity (staged)" ci_capture "$JOB" verify-package-license cmp license.md "$STAGE_APP/license.md" ||
+    CI_TOOL_CONTEXT="gate:license-identity (staged)" ci_capture "$JOB" verify-package-license cmp docs/license.md "$STAGE_APP/license.md" ||
       fail_gate verify-package-license
 
     # Tar.gz creation preserving permissions, then POST-ARCHIVE
@@ -379,7 +379,7 @@ if [ "$MODE" = "desktop" ]; then
         VERIFY_DIR="$1"
         tar -xzf "dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz" -C "$VERIFY_DIR"
         APP="$VERIFY_DIR/SHEYTAN-Music-Visualizer-linux-x64"
-        cmp license.md "$APP/license.md" || { echo "ERROR: DISTRIBUTED license.md differs from canonical (post-archive)"; exit 1; }
+        cmp docs/license.md "$APP/license.md" || { echo "ERROR: DISTRIBUTED license.md differs from canonical (post-archive)"; exit 1; }
         test -x "$APP/sheytan-music-visualizer" || { echo "ERROR: executable bit lost in tarball"; exit 1; }
         test -f "$APP/portable.mode" || { echo "ERROR: portable.mode missing in tarball"; exit 1; }
         test -s "$APP/tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md" || { echo "ERROR: ffmpeg licensing doc missing in tarball"; exit 1; }

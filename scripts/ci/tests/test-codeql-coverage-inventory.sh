@@ -111,20 +111,16 @@ else
   echo "INVENTORY MISMATCH AT THE RUN COMMIT — re-derive the coverage claim."
   status=1
 fi
-# Worktree expectation: HEAD inventory plus THIS session's documented
-# additions only. Session history between run2 (1487628) and HEAD moved
-# the production count beyond the run2+9 note (multiple BETA commits),
-# so the run2-relative expectation went stale and silently red; the
-# auditable anchor is now HEAD itself.
-#
-# Run 44094081531 added 12 files: internal/ghreq catalog.go, github.go,
-# assets.go, policy.go, integrity.go, download.go (production) and
-# catalog_test.go, github_test.go, assets_test.go, policy_test.go,
-# integrity_test.go, download_test.go (tests).
-if [ "$cur_prod_count" -eq $((head_prod_count + 6)) ] && [ "$cur_test_count" -eq $((head_test_count + 6)) ]; then
-  echo "CURRENT TREE: worktree == HEAD ($head_prod_count prod + $head_test_count test) + this session's internal/ghreq (+6 prod, +6 test) — expected."
+# Worktree expectation (run-45042834042 repair of the stale +6 ghreq
+# delta): this tripwire runs against the COMMITTED tree — CI checks out
+# a commit, and local sessions must commit their Go files before the
+# coverage note can be derived from a pinned tree. worktree == HEAD
+# exactly; any Go-file delta between the two means uncommitted source
+# and keeps the fixture red until the session commits.
+if [ "$cur_prod_count" -eq "$head_prod_count" ] && [ "$cur_test_count" -eq "$head_test_count" ]; then
+  echo "CURRENT TREE: worktree == HEAD ($head_prod_count prod + $head_test_count test Go files) — expected; session additions are committed before this tripwire runs."
 else
-  echo "CURRENT TREE: worktree ($cur_prod_count prod + $cur_test_count test) != HEAD ($head_prod_count + $head_test_count) + ghreq (6+6) — update the CodeQL coverage note."
+  echo "CURRENT TREE: worktree ($cur_prod_count prod + $cur_test_count test) != HEAD ($head_prod_count + $head_test_count) — commit the session's Go files (or update the CodeQL coverage note) before this tripwire runs."
   status=1
 fi
 if [ "$run2_all_count" -eq 92 ] && [ "$run2_prod_count" -eq 56 ] && [ "$run2_test_count" -eq 36 ]; then

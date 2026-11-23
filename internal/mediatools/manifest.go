@@ -36,7 +36,10 @@ type PlatformPack struct {
 	// Platform identity, e.g. "windows/amd64".
 	Platform string `json:"platform"`
 	// Version is the exact upstream build identity, e.g.
-	// "n9.0.2-48-gd4070a14ce".
+	// "n9.0.2-61-gd59078794d". BtbN rotates dated autobuild releases away
+	// after a rolling window; when a pin 404s, rotate every pin site
+	// together (manifest.json, MediaTools-Pinned.ps1,
+	// ensure-pinned-media-tools.sh, packaging/FFMPEG-TOOLS-PROVENANCE.md).
 	Version string `json:"version"`
 	// URL is the exact upstream release asset URL (HTTPS only).
 	URL string `json:"url"`

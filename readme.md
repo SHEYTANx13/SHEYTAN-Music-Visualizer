@@ -77,8 +77,8 @@ same measured timeline in preview and export. See
 > and root-cause grouping ([docs/CI-DIAGNOSTICS.md](docs/CI-DIAGNOSTICS.md)),
 > and GitHub Actions now produces EXACTLY ONE Windows and ONE Linux
 > application package plus the plain-text diagnostics report — no
-> recovery/duplicate builds. See [roadmap.md](roadmap.md) for the honest
-> status of every capability and [ai-notes.md](ai-notes.md) for the
+> recovery/duplicate builds. See [docs/roadmap.md](docs/roadmap.md) for the honest
+> status of every capability and [docs/ai-notes.md](docs/ai-notes.md) for the
 > evidence trail. The 2026-11-13 session (run 43090342995) repaired the playback clock contract, delivered one authoritative shutdown path with a close confirmation, a responsive breakpoint shell (320×568 phone → 3840×2160 ultrawide), first-frame deferral of the renderer probe and audio-device open, and machine-readable build identity (`--build-info-json`) as the package commit authority.
 
 ---
@@ -182,7 +182,7 @@ decoders are never shared across goroutines.
   built-in import/playback/preview.
 - Build tag: `-tags goffi_static` is **required** for binaries that link
   Fyne (CGO) and wgpu (goffi FFI) together; the build scripts and CI apply
-  it automatically. See `ai-notes.md` for the linker-conflict evidence.
+  it automatically. See `docs/ai-notes.md` for the linker-conflict evidence.
 
 ## Build and verify
 
@@ -230,7 +230,7 @@ Start from [docs/INDEX.md](docs/INDEX.md) — the canonical index of every maint
 - [docs/performance-baseline.md](docs/performance-baseline.md) —
   measured baselines and before/after records of every accepted
   optimization.
-- [CHANGELOG.md](CHANGELOG.md) — what changed, grouped by session.
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — what changed, grouped by session.
 - [.github/SECURITY.md](.github/SECURITY.md) — private security
   reporting; [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) —
   ground rules and workflow.
@@ -346,7 +346,7 @@ Keyboard: **Space** play/pause, **←/→** seek, **F11** fullscreen toggle,
 
 ## License
 
-Proprietary — see [license.md](license.md) (Parsaetak Proprietary License
+Proprietary — see [docs/license.md](docs/license.md) (Parsaetak Proprietary License
 v1.1). SHEYTAN™ is a trademark of Parsaetak; third-party dependencies remain
 under their own licenses as inventoried there.
 

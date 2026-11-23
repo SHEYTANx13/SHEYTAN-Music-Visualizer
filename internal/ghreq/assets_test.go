@@ -116,23 +116,26 @@ func TestSelectAssetFromEmbeddedCatalogRealAssets(t *testing.T) {
 		t.Skip("no embedded requirement in this build")
 	}
 	req := &cat.Requirements[0]
+	// Fixture assets mirror the CURRENT pinned release (rotated in the
+	// run-45042834042 repair; keep in sync with
+	// internal/mediatools/manifest.json when the pin rotates again).
 	rel := relWithAssets(
-		Asset{Name: "ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip", State: "uploaded", Size: 192 * 1 << 20},
-		Asset{Name: "ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz", State: "uploaded", Size: 143 * 1 << 20},
+		Asset{Name: "ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip", State: "uploaded", Size: 189 * 1 << 20},
+		Asset{Name: "ffmpeg-n9.0.2-61-gd59078794d-linux64-gpl-9.0.tar.xz", State: "uploaded", Size: 147 * 1 << 20},
 		Asset{Name: "some-source-code.tar.gz", State: "uploaded"},
 	)
 	a, err := SelectAsset(rel, req, "windows/amd64")
 	if err != nil {
 		t.Fatalf("windows asset selection failed: %v", err)
 	}
-	if a.Name != "ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip" {
+	if a.Name != "ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip" {
 		t.Fatalf("wrong windows asset: %q", a.Name)
 	}
 	a, err = SelectAsset(rel, req, "linux/amd64")
 	if err != nil {
 		t.Fatalf("linux asset selection failed: %v", err)
 	}
-	if a.Name != "ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz" {
+	if a.Name != "ffmpeg-n9.0.2-61-gd59078794d-linux64-gpl-9.0.tar.xz" {
 		t.Fatalf("wrong linux asset: %q", a.Name)
 	}
 }

@@ -7,7 +7,7 @@
 # step (which contained the only mkdir) was skipped, and the always() artifact
 # upload then failed with "No files were found with the provided path".
 #
-# Contract (scripts/ci logging contract, agent.md §6):
+# Contract (scripts/ci logging contract, docs/agent.md §6):
 #   - EVERY evidence-producing job runs this immediately after checkout and
 #     BEFORE any step that redirects into ci-logs/ (runner-image capture,
 #     gate runners, CodeQL vet/build capture, collector evidence).

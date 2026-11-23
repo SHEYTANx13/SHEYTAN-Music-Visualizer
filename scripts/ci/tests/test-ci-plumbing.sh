@@ -202,7 +202,7 @@ check("B7-no-needs-preflight-linux",
 # consolidated report must still be produced after a user cancellation,
 # so && !cancelled() must not return there).
 check("B11-collector-needs-all",
-      "needs: [preflight, build-windows, build-linux, build-macos, build-android, build-ios]" in bd
+      "needs: [preflight, build-windows, build-linux, build-macos, build-android, ios-compile-smoke]" in bd
       and "needs: [preflight, build-windows, build-linux, codeql]" not in bd)
 check("B11-collector-always", "\n    if: always()\n" in bd)
 
@@ -282,7 +282,7 @@ check("E-no-24.04", "ubuntu-24.04" not in bd and "ubuntu-24.04" not in cq)
 
 # never classify skipped as missing: collector has the classification states
 col = open("internal/cilog/collect.go").read()
-check("G-never-started-classification", "NEVER_STARTED (skipped; no log expected)" in col)
+check("G-never-started-classification", "NEVER_STARTED (conclusion: skipped)" in col)
 check("G-recovered-from-api", "RECOVERED_FROM_API" in col)
 check("G-in-progress-classification", "IN_PROGRESS_AT_SNAPSHOT" in col)
 check("G-api-unavailable-classification", "API_LOG_UNAVAILABLE" in col)
@@ -407,11 +407,19 @@ JSONX
     --out ci-out/log.txt --parts-root parts --manifest parts/manifest.json \
     --reason "fixture: collector binary build failed" >/dev/null 2>&1
 ) >/dev/null 2>&1
+# Run-45042834040 contract: the fallback emits PRIORITY-A record lines
+# ONLY (every line starts with WARNING| or ERROR|), states the fallback
+# usage, and derives job conclusions from the DECLARED manifest jobs
+# (preflight=success yields nothing; build-windows=failure yields one
+# ERROR record with the hint field). Raw part content is never embedded.
 if [ -s "$T/ci-out/log.txt" ] \
-   && grep -q "EMERGENCY FALLBACK PATH" "$T/ci-out/log.txt" \
-   && grep -q "OVERALL RESULT: FAIL" "$T/ci-out/log.txt" \
-   && grep -q "EXIT_CODE: 1 FAIL" "$T/ci-out/log.txt"; then
-  report PASS "E43" "fallback report written, truthful red result, parts embedded (collector-binary-unavailable path)"
+   && grep -q "emergency fallback report in use" "$T/ci-out/log.txt" \
+   && grep -q 'job=build-windows' "$T/ci-out/log.txt" \
+   && grep -q 'workflow conclusion: failure' "$T/ci-out/log.txt" \
+   && grep -q 'hint=required-job-did-not-succeed' "$T/ci-out/log.txt" \
+   && [ "$(grep -cv -E '^(ERROR|WARNING)\|' "$T/ci-out/log.txt")" -eq 0 ] \
+   && ! grep -q 'EXIT_CODE: 1 FAIL' "$T/ci-out/log.txt"; then
+  report PASS "E43" "fallback report written as warning/error records only, truthful red result from declared manifest jobs, no raw part embedding (collector-binary-unavailable path)"
 else
   report FAIL "E43" "emergency fallback report missing or untruthful"
 fi
@@ -528,10 +536,10 @@ assert doc["event"] == "workflow_dispatch"
 assert doc["start_time_utc"] == ""
 results = {j["name"]: j["result"] for j in doc["jobs"]}
 assert results == {"preflight": "success", "build-windows": "skipped", "build-linux": "failure",
-                   "build-macos": "success", "build-android": "skipped", "build-ios": "skipped"}, results
+                   "build-macos": "success", "build-android": "skipped", "ios-compile-smoke": "skipped"}, results
 required = {j["name"]: j["required"] for j in doc["jobs"]}
 assert required == {"preflight": True, "build-windows": True, "build-linux": True,
-                    "build-macos": True, "build-android": False, "build-ios": False}, required
+                    "build-macos": True, "build-android": True, "ios-compile-smoke": False}, required
 # run 43612608237: CodeQL is an independent workflow — the caller manifest
 # records that fact without declaring CodeQL evidence rows.
 assert doc.get("codeql", {}).get("job") == "independent-workflow", doc.get("codeql")
@@ -590,9 +598,9 @@ fi
     --manifest empty-parts/manifest.json --reason "fixture: missing manifest" >/dev/null 2>&1
   cp ci-out2/log2.txt report-missing.txt
 )
-if grep -q "MANIFEST FILE EMPTY (0 bytes)" "$T/report-empty.txt" \
-   && grep -q "Run 42376176493 signature class" "$T/report-empty.txt" \
-   && grep -q "MANIFEST FILE MISSING" "$T/report-missing.txt"; then
+if grep -q "run manifest EMPTY (0 bytes)" "$T/report-empty.txt" \
+   && grep -q "run 42376176493 signature class" "$T/report-empty.txt" \
+   && grep -q "run manifest MISSING" "$T/report-missing.txt"; then
   report PASS "H32" "emergency report distinguishes empty vs missing manifest with the run-42376176493 signature called out"
 else
   report FAIL "H32" "emergency report diagnosis fixtures failed"

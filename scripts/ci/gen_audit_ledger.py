@@ -99,7 +99,7 @@ for p in allfiles:
     is_go = p.endswith(".go")
     in_scope = (is_go or p.startswith("scripts/") or p.startswith(".github/")
                 or p.endswith(".md") or p.startswith("packaging/")
-                or p in ("go.mod", "go.sum", "license.md", ".gitignore", ".gitattributes"))
+                or p in ("go.mod", "go.sum", "docs/license.md", ".gitignore", ".gitattributes"))
     status = "read-full" if in_scope else "not-audited(historical artifact)"
     if in_scope:
         audited_lines += n

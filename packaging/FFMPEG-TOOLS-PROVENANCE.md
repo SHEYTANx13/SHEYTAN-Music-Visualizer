@@ -21,12 +21,12 @@ a scrubbed PATH — the binaries never enter the uploaded archives.
 | Field | Value |
 | --- | --- |
 | Upstream version | FFmpeg n9.0.2 (9.0.2 release branch; latest stable of the 9.0 line at execution time) |
-| Build source | BtbN/FFmpeg-Builds release tag `autobuild-2026-11-08-12-35`, git source snapshot `n9.0.2-48-gd4070a14ce` |
-| Linux x64 asset | `ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz` |
-| Linux SHA-256 | `bf5e935a51afb65ddd14bf67104361508bcc7c77026a66d7e193a05a56ab8d77` |
-| Windows x64 asset | `ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip` |
-| Windows SHA-256 | `40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae` |
-| Observed binary version string | `ffmpeg version n9.0.2-48-gd4070a14ce-20261108` (verified locally for the Linux build; the Windows zip is verified by the Windows packaging gate from the extracted binaries) |
+| Build source | BtbN/FFmpeg-Builds release tag `autobuild-2026-11-22-12-36`, git source snapshot `n9.0.2-61-gd59078794d` (run-45042834042 rotation: the previous `autobuild-2026-11-08-12-35` pin was removed upstream and every download 404'd) |
+| Linux x64 asset | `ffmpeg-n9.0.2-61-gd59078794d-linux64-gpl-9.0.tar.xz` |
+| Linux SHA-256 | `12b0097290a6289794d34c3b65e23962afc55c4bf03efca273bd6f052ff46811` |
+| Windows x64 asset | `ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip` |
+| Windows SHA-256 | `438a2555f30ab84368e888b654c7e30fa8797d02ecb8da67d67f3afefc4ce64e` |
+| Observed binary version string | `ffmpeg version n9.0.2-61-gd59078794d-20261122` (verified locally for the Linux build on 2026-11-23 from the pinned archive itself; the Windows zip is verified by the Windows packaging gate from the extracted binaries) |
 | Build configuration (observed, Linux) | `--enable-gpl --enable-version3`; **no `--enable-nonfree`**; `libx264` and `libopenh264` H.264 encoders present |
 
 ## Why this build

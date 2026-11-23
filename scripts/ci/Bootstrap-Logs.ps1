@@ -1,7 +1,7 @@
 # Bootstrap-Logs.ps1 — guaranteed CI log-directory bootstrap (PowerShell
 # side, for the Windows runner). Mirror of scripts/ci/bootstrap-logs.sh.
 #
-# Contract (scripts/ci logging contract, agent.md §6):
+# Contract (scripts/ci logging contract, docs/agent.md §6):
 #   - The build-windows job runs this immediately after checkout and BEFORE
 #     any step that writes into ci-logs/ (toolchain identity gate, gate
 #     runner, portable packaging logs).

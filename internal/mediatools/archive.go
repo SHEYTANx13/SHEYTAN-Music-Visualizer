@@ -57,10 +57,17 @@ import (
 )
 
 // Extraction bounds (documented, deliberately generous for FFmpeg packs).
+//
+// maxTotalBytes is deliberately TYPED int64: 3 GiB does not fit a 32-bit
+// int (3221225472 > 2147483647), so the untyped constant broke every
+// 32-bit-ABI build (android armeabi-v7a/x86 inside the universal APK) at
+// the fmt.Errorf call sites — run 45042834042, build-android. The bound
+// itself is unchanged; only its type is widened to the width of
+// ExtractResult.Bytes (int64), which every comparison target already uses.
 const (
 	maxEntryCount  = 50000
-	maxEntryBytes  = 512 << 20 // 512 MiB per file
-	maxTotalBytes  = 3 << 30   // 3 GiB expanded total (archive-bomb bound)
+	maxEntryBytes  = 512 << 20      // 512 MiB per file
+	maxTotalBytes  = int64(3) << 30 // 3 GiB expanded total (archive-bomb bound)
 	copyBufferSize = 1 << 20
 	licenseNameCap = 64
 	// maxEntryNameLen bounds untrusted archive entry names long before

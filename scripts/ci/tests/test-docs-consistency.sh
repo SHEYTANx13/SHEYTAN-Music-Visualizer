@@ -45,7 +45,7 @@ check_links_in() {
     fi
   done < <(sed -nE "s/.*$link_re.*/\1/p" "$f")
 }
-for f in readme.md agent.md roadmap.md ai-notes.md CHANGELOG.md docs/*.md; do
+for f in readme.md docs/*.md; do
   [ -f "$f" ] || continue
   check_links_in "$f"
 done

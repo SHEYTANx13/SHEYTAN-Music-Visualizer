@@ -284,6 +284,7 @@ func appendRecordFromFinding(recs []Record, f finding, sev Severity, redact func
 		// generic records with the raw (redacted, single-line) text.
 		r = Record{
 			Severity: sev,
+			ExitCode: -1, // a raw marker line carries no process exit code
 			Tool:     "log-marker",
 			Source:   SourceNotProvided,
 			Message:  strings.TrimPrefix(f.line, "ERROR: "),

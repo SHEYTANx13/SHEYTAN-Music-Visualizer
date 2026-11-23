@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // LayoutStore persists the versioned workspace layout with migration
@@ -55,6 +56,7 @@ func (s *LayoutStore) Load() (WorkspaceLayoutDTO, error) {
 			return DefaultLayout(), ErrRecovered
 		}
 		lay.Version = 1
+		lay.RecentPaths = SanitizeRecentPaths(lay.RecentPaths)
 		if lay.ActiveTab == "" {
 			lay.ActiveTab = DestHome
 		}
@@ -95,6 +97,7 @@ func (s *LayoutStore) Save(lay WorkspaceLayoutDTO) error {
 		return err
 	}
 	lay.Version = 1
+	lay.RecentPaths = SanitizeRecentPaths(lay.RecentPaths)
 	b, err := json.MarshalIndent(lay, "", "  ")
 	if err != nil {
 		return fmt.Errorf("presentation: encode layout: %w", err)
@@ -123,4 +126,35 @@ func (s *LayoutStore) Save(lay WorkspaceLayoutDTO) error {
 		return fmt.Errorf("presentation: close layout temp: %w", err)
 	}
 	return os.Rename(tmp, s.path)
+}
+
+// RecentPathsMax is the persisted bound of the MRU import-path
+// list (mirrors the shell's in-memory bound).
+const RecentPathsMax = 5
+
+// recentPathMaxBytes bounds one persisted path entry.
+const recentPathMaxBytes = 1024
+
+// SanitizeRecentPaths normalizes a persisted MRU list: non-empty
+// entries only, each byte-bounded, deduplicated (first occurrence
+// wins), capped at RecentPathsMax. Invalid entries are dropped,
+// never fatal: a hostile or corrupt list cannot break layout load.
+func SanitizeRecentPaths(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, p := range in {
+		p = strings.TrimSpace(p)
+		if p == "" || len(p) > recentPathMaxBytes || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+		if len(out) == RecentPathsMax {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

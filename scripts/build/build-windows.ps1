@@ -109,7 +109,7 @@ $job = "phase2-windows-build"
 if (-not $env:SHEYTAN_LOG_DIR)  { $env:SHEYTAN_LOG_DIR  = Join-Path $logDir "app-logs" }
 if (-not $env:SHEYTAN_DATA_DIR) { $env:SHEYTAN_DATA_DIR = Join-Path $logDir "app-data" }
 # goffi_static: required when Fyne (CGO) and wgpu (goffi FFI) link in one
-# binary; harmless on Windows (see ai-notes.md).
+# binary; harmless on Windows (see docs/ai-notes.md).
 #
 # SINGLE DOCUMENTED TAG SOURCE: $env:SHEYTAN_GO_TAGS. Every Go gate runs in
 # a CHILD pwsh process (Capture-Step serializes each gate to its own
@@ -151,7 +151,7 @@ $script:failures = 0
 $script:failedGates = @()
 $script:skippedGates = @()
 
-# Missing-prerequisite honesty (agent.md §4 vocabulary): without the Go
+# Missing-prerequisite honesty (docs/agent.md §4 vocabulary): without the Go
 # toolchain NOTHING in this script can be verified. Dependent gates are
 # recorded BLOCKED (never passed, never failed-with-fake-output) and the
 # script exits non-zero so the CI job stays red with truthful evidence.
@@ -566,7 +566,7 @@ if ($exeOk) {
         New-Item -ItemType Directory -Force -Path (Join-Path $appDir "tools\ffmpeg\bin") | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $appDir "data") | Out-Null
         Copy-Item "bin\sheytan-music-visualizer.exe" $appDir
-        Copy-Item "license.md" $appDir
+        Copy-Item "docs/license.md" $appDir
         Copy-Item "readme.md" $appDir
         Copy-Item "packaging\portable.mode" $appDir
         Copy-Item "packaging\DATA-FOLDERS.txt" (Join-Path $appDir "data")
@@ -584,7 +584,7 @@ if ($exeOk) {
     # exactly, before archive creation. SHA-256 equality on raw bytes;
     # any mismatch fails the package gate.
     $rc = Capture-Step -Job $job -Step "verify-package-license" -ToolContext "gate:license-identity" -Command {
-        $canonical = Get-FileHash -Algorithm SHA256 "license.md"
+        $canonical = Get-FileHash -Algorithm SHA256 "docs/license.md"
         $stagedPath = "dist\windows-x64-stage\SHEYTAN-Music-Visualizer-windows-x64\license.md"
         $staged = Get-FileHash -Algorithm SHA256 $stagedPath
         Write-Output ("canonical sha256: {0}" -f $canonical.Hash)

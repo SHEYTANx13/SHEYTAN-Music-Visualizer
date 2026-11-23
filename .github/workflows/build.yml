@@ -284,7 +284,7 @@ jobs:
       # zizmor") — is structurally impossible here: no system interpreter
       # is invoked, and a failed install/version/audit step fails the gate.
       # Online audits are disabled (deterministic, no network-dependent
-      # findings); that exact limitation is documented in note.md and
+      # findings); that exact limitation is documented in docs/note.md and
       # docs/CI-DIAGNOSTICS.md.
       #
       # The TWO actionlint -ignore patterns are narrowly scoped to
@@ -1977,8 +1977,19 @@ jobs:
         run: |
           set -Eeuo pipefail
           mkdir -p ci-out ci-parts ci-logs
-          if [ -s ci-out/SHEYTAN-Music-Visualizer-all-logs.txt ]; then
-            echo "collector report present; emergency fallback not needed"
+          report=ci-out/SHEYTAN-Music-Visualizer-all-logs.txt
+          # Run-45042834040 repair: a ZERO-BYTE report from a collector
+          # that exited 0 is a VALID "zero diagnostics" report (the record
+          # contract says clean runs produce an empty file), not a missing
+          # report. Without this, a fully green run would fail its own
+          # collection job on the empty-report contract mismatch.
+          rc="$(cat collector.rc 2>/dev/null || echo 2)"
+          if [ -f "$report" ] && [ "$rc" = "0" ]; then
+            echo "collector report present (0 bytes = zero diagnostics is valid); emergency fallback not needed"
+            exit 0
+          fi
+          if [ -s "$report" ]; then
+            echo "collector report present and non-empty; emergency fallback not needed"
             exit 0
           fi
           reason="collector rc=$(cat collector.rc 2>/dev/null || echo unknown); build rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
@@ -1997,10 +2008,16 @@ jobs:
         if: always()
         run: |
           set -Eeuo pipefail
-          test -s ci-out/SHEYTAN-Music-Visualizer-all-logs.txt || { echo "ERROR: consolidated report missing or empty"; exit 1; }
+          report=ci-out/SHEYTAN-Music-Visualizer-all-logs.txt
+          test -f "$report" || { echo "ERROR: consolidated report missing"; exit 1; }
+          rc="$(cat collector.rc 2>/dev/null || echo 2)"
+          size=$(stat -c%s "$report")
+          if [ "$size" -eq 0 ] && { [ "$rc" != "0" ] || [ -f collector-fallback.used ]; }; then
+            echo "ERROR: consolidated report is empty but collector rc=$rc (fallback used: $([ -f collector-fallback.used ] && echo yes || echo no))"
+            exit 1
+          fi
           test "$(find ci-out -maxdepth 1 -type f | wc -l)" -eq 1 || { echo "ERROR: ci-out must contain exactly one file (the consolidated report)"; exit 1; }
-          size=$(stat -c%s ci-out/SHEYTAN-Music-Visualizer-all-logs.txt)
-          echo "consolidated report validated: $size bytes"
+          echo "consolidated report validated: $size bytes (collector rc=$rc; empty = zero diagnostics is valid)"
           # Direct-delivery contract: the artifact must be PLAIN TEXT —
           # never a ZIP. A ZIP signature (PK\x03\x04) here would mean
           # the consolidated report got wrapped and the direct

@@ -8,9 +8,17 @@
 # Pinned asset (packaging/FFMPEG-TOOLS-PROVENANCE.md is the documented
 # record; internal/mediatools/manifest.json is the machine-readable
 # source of truth consumed by the in-app Media Tools & Codecs manager):
-#   URL:    https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz
-#   SHA256: bf5e935a51afb65ddd14bf67104361508bcc7c77026a66d7e193a05a56ab8d77
-#   inner:  ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0/bin/ (ffmpeg, ffprobe)
+#   URL:    https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-22-12-36/ffmpeg-n9.0.2-61-gd59078794d-linux64-gpl-9.0.tar.xz
+#   SHA256: 12b0097290a6289794d34c3b65e23962afc55c4bf03efca273bd6f052ff46811
+#   inner:  ffmpeg-n9.0.2-61-gd59078794d-linux64-gpl-9.0/bin/ (ffmpeg, ffprobe)
+#
+# Run-45042834042 repair: the previously pinned autobuild-2026-11-08-12-35
+# release was ROTATED AWAY upstream (BtbN keeps a rolling window of dated
+# autobuild releases), so every download 404'd and both desktop lanes
+# failed the media-tools-pinned-install and verify-extracted-path-with-
+# spaces gates. The pin was rotated to the newest existing autobuild and
+# the 404 diagnostic below now names the rotation cause and the exact
+# re-pin procedure so the next rotation is a two-line fix, not a mystery.
 #
 # The download is CACHED: a second call (the packaged-export proof gate)
 # reuses the verified archive and extraction instead of downloading
@@ -29,9 +37,9 @@
 # partial "trust me" result).
 set -Eeuo pipefail
 
-URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz"
-SHA256="bf5e935a51afb65ddd14bf67104361508bcc7c77026a66d7e193a05a56ab8d77"
-INNER_BIN="ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0/bin"
+URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-22-12-36/ffmpeg-n9.0.2-61-gd59078794d-linux64-gpl-9.0.tar.xz"
+SHA256="12b0097290a6289794d34c3b65e23962afc55c4bf03efca273bd6f052ff46811"
+INNER_BIN="ffmpeg-n9.0.2-61-gd59078794d-linux64-gpl-9.0/bin"
 
 if [ -n "${SHEYTAN_MEDIA_TOOLS_CACHE_DIR:-}" ]; then
   BASE="$SHEYTAN_MEDIA_TOOLS_CACHE_DIR"
@@ -42,14 +50,19 @@ else
 fi
 mkdir -p "$BASE"
 
-ARCHIVE="$BASE/ffmpeg-n9.0.2-48-gd4070a14ce-linux64-gpl-9.0.tar.xz"
+ARCHIVE="$BASE/ffmpeg-n9.0.2-61-gd59078794d-linux64-gpl-9.0.tar.xz"
 
 if [ -s "$ARCHIVE" ] && echo "$SHA256  $ARCHIVE" | sha256sum -c - >/dev/null 2>&1; then
   echo "pinned FFmpeg archive already cached and SHA-256-verified: $ARCHIVE" >&2
 else
   rm -f "$ARCHIVE"
   echo "downloading pinned FFmpeg archive: $URL" >&2
-  curl -fsSL --retry 2 -o "$ARCHIVE" "$URL" || { echo "ERROR: pinned FFmpeg download failed: $URL" >&2; exit 1; }
+  if ! curl -fsSL --retry 2 -o "$ARCHIVE" "$URL"; then
+    echo "ERROR: pinned FFmpeg download failed (HTTP error, most likely 404): $URL" >&2
+    echo "ERROR: cause: the pinned BtbN autobuild release was rotated away upstream (dated autobuild releases are removed after a rolling window)." >&2
+    echo "ERROR: fix: pick the newest existing tag from https://github.com/BtbN/FFmpeg-Builds/releases, then update URL/SHA256/INNER_BIN here, in scripts/ci/MediaTools-Pinned.ps1, internal/mediatools/manifest.json and packaging/FFMPEG-TOOLS-PROVENANCE.md (they must stay identical)." >&2
+    exit 1
+  fi
   echo "$SHA256  $ARCHIVE" | sha256sum -c - >&2 || { echo "ERROR: pinned FFmpeg download SHA-256 mismatch: $ARCHIVE" >&2; rm -f "$ARCHIVE"; exit 1; }
 fi
 

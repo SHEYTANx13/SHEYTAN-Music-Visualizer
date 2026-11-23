@@ -22,7 +22,10 @@ name: codeql
 #
 # The analyze jobs deliberately have read-only Actions permission. The
 # standalone collector needs actions:write only to delete its temporary
-# evidence artifacts after log.txt has been uploaded. Every job keeps
+# evidence artifacts after the single consolidated diagnostics artifact
+# (SHEYTAN-Music-Visualizer-all-logs.txt, plain text, archive: false —
+# run-45042834040 user request: the CodeQL log downloads as a plain
+# .txt exactly like the build log) has been uploaded. Every job keeps
 # explicit least-privilege permissions; the workflow-level default is
 # contents: read.
 
@@ -408,7 +411,7 @@ jobs:
             cap="$(mktemp)"
             start_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             ./bin/ci-log-collector \
-              --report ci-out/log.txt \
+              --report ci-out/SHEYTAN-Music-Visualizer-all-logs.txt \
               --parts-root ci-parts \
               --manifest ci-parts/manifest.json \
               --github-repo "$GITHUB_REPOSITORY" \
@@ -417,7 +420,7 @@ jobs:
             rc=$?
             end_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
             {
-              echo "command: ./bin/ci-log-collector --report ci-out/log.txt --parts-root ci-parts --manifest ci-parts/manifest.json --github-repo $GITHUB_REPOSITORY --run-id $GITHUB_RUN_ID --attempt $GITHUB_RUN_ATTEMPT"
+              echo "command: ./bin/ci-log-collector --report ci-out/SHEYTAN-Music-Visualizer-all-logs.txt --parts-root ci-parts --manifest ci-parts/manifest.json --github-repo $GITHUB_REPOSITORY --run-id $GITHUB_RUN_ID --attempt $GITHUB_RUN_ATTEMPT"
               echo "cwd: $PWD"
               echo "manifest_path_absolute: $PWD/ci-parts/manifest.json"
               echo "manifest_bytes: $(wc -c < ci-parts/manifest.json)"
@@ -455,8 +458,19 @@ jobs:
           RESULT_ANALYZE_ACTIONS: ${{ needs.analyze_actions.result }}
         run: |
           set -Eeuo pipefail
-          if [ -s ci-out/log.txt ]; then
-            echo "collector report present; emergency fallback not needed"
+          report=ci-out/SHEYTAN-Music-Visualizer-all-logs.txt
+          # Run-45042834040 repair: a ZERO-BYTE report from a collector
+          # that exited 0 is a VALID "zero diagnostics" report (the record
+          # contract says clean runs produce an empty file), not a missing
+          # report. The fallback engages only when the report file is
+          # absent or the collector did not complete cleanly.
+          rc="$(cat collector.rc 2>/dev/null || echo 2)"
+          if [ -f "$report" ] && [ "$rc" = "0" ]; then
+            echo "collector report present (0 bytes = zero diagnostics is valid); emergency fallback not needed"
+            exit 0
+          fi
+          if [ -s "$report" ]; then
+            echo "collector report present and non-empty; emergency fallback not needed"
             exit 0
           fi
 
@@ -467,33 +481,62 @@ jobs:
           fi
           reason="collector_rc=$(cat collector.rc 2>/dev/null || echo unknown); collector_build_rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
 
+          # Profile-aware fallback (run-45042834040 repair): only THIS
+          # workflow's analyze jobs are passed; the script no longer
+          # invents build.yml job-conclusion records. The manifest (when
+          # readable) remains the authoritative primary source.
           bash scripts/ci/emergency-report.sh \
-            --out ci-out/log.txt \
+            --out "$report" \
             --parts-root ci-parts \
             --manifest ci-parts/manifest.json \
             --reason "$reason" \
-            --result-codeql "$result_codeql"
+            --result-analyze-go "$RESULT_ANALYZE_GO" \
+            --result-analyze-actions "$RESULT_ANALYZE_ACTIONS"
           printf 'used\n' > collector-fallback.used
 
-      - name: Validate final log.txt before upload
+      - name: Validate the final consolidated report before upload
         id: validate_report
         if: ${{ !cancelled() }}
         run: |
           set -Eeuo pipefail
-          test -s ci-out/log.txt || { echo "ERROR: consolidated log.txt missing or empty"; exit 1; }
+          report=ci-out/SHEYTAN-Music-Visualizer-all-logs.txt
+          test -f "$report" || { echo "ERROR: consolidated report missing"; exit 1; }
           file_count=$(find ci-out -mindepth 1 -maxdepth 1 -type f | wc -l)
-          test "$file_count" -eq 1 || { echo "ERROR: ci-out must contain exactly one file (log.txt); found $file_count"; exit 1; }
-          size=$(stat -c%s ci-out/log.txt)
-          echo "log.txt validated: $size bytes"
+          test "$file_count" -eq 1 || { echo "ERROR: ci-out must contain exactly one file (the consolidated report); found $file_count"; exit 1; }
+          size=$(stat -c%s "$report")
+          # Run-45042834040 repair: 0 bytes is VALID exactly when the
+          # collector completed (rc=0) and no emergency fallback was used
+          # (a clean run with zero warnings/errors).
+          rc="$(cat collector.rc 2>/dev/null || echo 2)"
+          if [ "$size" -eq 0 ] && { [ "$rc" != "0" ] || [ -f collector-fallback.used ]; }; then
+            echo "ERROR: consolidated report is empty but collector rc=$rc (fallback used: $([ -f collector-fallback.used ] && echo yes || echo no))"
+            exit 1
+          fi
+          echo "consolidated report validated: $size bytes (collector rc=$rc; empty = zero diagnostics is valid)"
+          # Direct-delivery contract: the artifact must be PLAIN TEXT -
+          # never a ZIP. A ZIP signature (PK\x03\x04) here would mean the
+          # consolidated report got wrapped and the direct-download
+          # contract is broken.
+          sig=$(head -c 2 "$report")
+          if [ "$sig" = $'PK\x03\x04' ] || [ "$sig" = "PK" ]; then
+            echo "ERROR: the consolidated report carries a ZIP signature - plain-text contract violated"
+            exit 1
+          fi
+          head -3 "$report"
 
-      - name: Upload the single consolidated diagnostics artifact
+      - name: Upload the single consolidated diagnostics artifact (plain text, no outer ZIP)
         id: upload_report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: log.txt
-          path: ci-out/log.txt
+          name: SHEYTAN-Music-Visualizer-all-logs.txt
+          path: ci-out/SHEYTAN-Music-Visualizer-all-logs.txt
+          # archive: false uploads the single file DIRECTLY: the downloaded
+          # artifact is plain text (UTF-8), not a ZIP containing the report
+          # - the same direct-delivery contract build.yml already uses.
+          archive: false
           if-no-files-found: error
+          overwrite: true
 
       # Treat cleanup as part of the single-artifact contract: a failed list
       # or deletion is not silently reported as a clean run.
@@ -539,7 +582,7 @@ jobs:
           if [ "$cleanup_failed" -ne 0 ]; then
             exit 1
           fi
-          echo "temporary CodeQL artifact cleanup completed; preserved log.txt"
+          echo "temporary CodeQL artifact cleanup completed; preserved SHEYTAN-Music-Visualizer-all-logs.txt"
 
       - name: Fail closed after the report upload attempt
         if: ${{ !cancelled() }}
@@ -565,7 +608,7 @@ jobs:
             fail=1
           fi
           if [ "$UPLOAD_OUTCOME" != success ]; then
-            echo "ERROR: log.txt artifact upload did not succeed (outcome=$UPLOAD_OUTCOME)."
+            echo "ERROR: consolidated report artifact upload did not succeed (outcome=$UPLOAD_OUTCOME)."
             fail=1
           fi
           if [ "$CLEANUP_OUTCOME" != success ]; then

@@ -9,10 +9,10 @@ not exist. Links are verified by `scripts/ci/tests/test-docs-consistency.sh`.
 | Document | Scope |
 | --- | --- |
 | [readme.md](../readme.md) | Product scope, features, install/run, platform support, honest hardware/encoder notes, quick user guide. |
-| [license.md](../license.md) | Canonical licensing document (byte-identical inside every distributed package). |
-| [CHANGELOG.md](../CHANGELOG.md) | Notable application and engineering changes per session. |
-| [roadmap.md](../roadmap.md) | Full product direction; active/upcoming work only (stale completed tasks are removed). |
-| [ai-notes.md](../ai-notes.md) | Historical engineering archive: durable facts, constraints and per-run session records (append-only). |
+| [license.md](license.md) | Canonical licensing document (byte-identical inside every distributed package). |
+| [CHANGELOG.md](CHANGELOG.md) | Notable application and engineering changes per session. |
+| [roadmap.md](roadmap.md) | Full product direction; active/upcoming work only (stale completed tasks are removed). |
+| [ai-notes.md](ai-notes.md) | Historical engineering archive: durable facts, constraints and per-run session records (append-only). |
 
 ## Engineering reference (`docs/`)
 

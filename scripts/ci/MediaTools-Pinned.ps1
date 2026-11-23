@@ -10,9 +10,14 @@
 # Pinned asset (packaging/FFMPEG-TOOLS-PROVENANCE.md is the documented
 # record; internal/mediatools/manifest.json is the machine-readable
 # source of truth consumed by the in-app Media Tools & Codecs manager):
-#   URL:    https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip
-#   SHA256: 40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae
-#   inner:  ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0/bin/ (ffmpeg.exe, ffprobe.exe)
+#   URL:    https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-22-12-36/ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip
+#   SHA256: 438a2555f30ab84368e888b654c7e30fa8797d02ecb8da67d67f3afefc4ce64e
+#   inner:  ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0/bin/ (ffmpeg.exe, ffprobe.exe)
+#
+# Run-45042834042 repair: the previously pinned autobuild-2026-11-08-12-35
+# release was rotated away upstream, so Invoke-WebRequest failed with 404
+# and both media-tools gates went red. The download failure now THROWS a
+# diagnostic that names the rotation cause and the exact re-pin procedure.
 #
 # The download is CACHED: a second call reuses the verified archive and
 # extraction instead of downloading twice. The caller owns cleanup —
@@ -141,10 +146,10 @@ function Get-SheytanPinnedMediaTools {
     param()
 
     # Pinned trust anchors (source-pinned; never taken from a response).
-    $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip"
-    $sha256 = "40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae"
-    $version = "n9.0.2-48-gd4070a14ce"
-    $innerBin = "ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0/bin"
+    $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-22-12-36/ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip"
+    $sha256 = "438a2555f30ab84368e888b654c7e30fa8797d02ecb8da67d67f3afefc4ce64e"
+    $version = "n9.0.2-61-gd59078794d"
+    $innerBin = "ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0/bin"
     $platform = "windows/amd64"
     $archiveFormat = "zip"
     if ($url -notlike "*$version*") {
@@ -163,7 +168,7 @@ function Get-SheytanPinnedMediaTools {
     }
     New-Item -ItemType Directory -Force -Path $base | Out-Null
 
-    $archive = Join-Path $base "ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip"
+    $archive = Join-Path $base "ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip"
     $needDownload = $true
     if ((Test-Path -LiteralPath $archive -PathType Leaf) -and ((Get-Item -LiteralPath $archive).Length -gt 0)) {
         $cachedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
@@ -178,7 +183,16 @@ function Get-SheytanPinnedMediaTools {
     }
     if ($needDownload) {
         Write-Host "downloading pinned FFmpeg archive: $url"
-        Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+        try {
+            Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+        }
+        catch {
+            # Run-45042834042 repair: name the rotation cause and the exact
+            # re-pin procedure instead of a bare HTTP status exception.
+            throw ("pinned FFmpeg download failed: {0}
+Cause: the pinned BtbN autobuild release was rotated away upstream (dated autobuild releases are removed after a rolling window); HTTP failure: {1}
+Fix: pick the newest existing tag from https://github.com/BtbN/FFmpeg-Builds/releases, then update the pinned URL/SHA256/version/innerBin here, in scripts/ci/ensure-pinned-media-tools.sh, internal/mediatools/manifest.json and packaging/FFMPEG-TOOLS-PROVENANCE.md (they must stay identical)." -f $url, $_.Exception.Message)
+        }
         $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
         if ($hash -ne $sha256) {
             Remove-Item -Force -LiteralPath $archive -ErrorAction SilentlyContinue

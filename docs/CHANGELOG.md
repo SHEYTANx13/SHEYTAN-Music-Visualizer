@@ -1,5 +1,67 @@
 # Changelog
 
+## Runs 45042834040 + 45042834042 repair — build/CodeQL green, diagnostic format upgrade, UI readiness (2026-11-23)
+
+- **Android universal-APK compile repair (`internal/mediatools/archive.go`)**:
+  the untyped `3 << 30` archive-bomb bound overflowed a 32-bit `int` at
+  both `fmt.Errorf` call sites, breaking every 32-bit-ABI leg of the
+  gomobile universal build (run 45042834042, build-android). The bound is
+  now typed `int64` (unchanged value; `ExtractResult.Bytes` was already
+  `int64`), verified by cross-compiling `android/arm`, `windows/386` and
+  `linux/arm64`.
+- **Rotated FFmpeg pin repair (all four pin sites)**: the pinned BtbN
+  autobuild release `autobuild-2026-11-08-12-35` was removed upstream, so
+  both desktop lanes 404'd `media-tools-pinned-install` and
+  `verify-extracted-path-with-spaces` (run 45042834042). The pin moved to
+  the newest existing autobuild `2026-11-22-12-36`
+  (`ffmpeg-n9.0.2-61-gd59078794d`, new SHA-256 digests) in
+  `scripts/ci/ensure-pinned-media-tools.sh`, `scripts/ci/MediaTools-Pinned.ps1`,
+  `internal/mediatools/manifest.json` and `packaging/FFMPEG-TOOLS-PROVENANCE.md`;
+  the observed binary (`ffmpeg version n9.0.2-61-gd59078794d-20261122`,
+  GPL buildconf, no nonfree, libx264/x265 present) was verified from the
+  archive itself. A 404 now names the rotation cause and the exact re-pin
+  procedure in both provisioners.
+- **CodeQL collection repair (run 45042834040)**: a zero-byte consolidated
+  report from a collector that exited 0 (a clean run with zero
+  diagnostics) was misclassified as a missing report, tripping the
+  emergency fallback and failing the collection job; the fallback then
+  emitted bogus `workflow conclusion: unknown` records for build.yml jobs
+  that do not exist in the codeql workflow (profile-blind
+  `emergency-report.sh`). The empty report is now valid exactly when the
+  collector completed, and the fallback derives job conclusions from the
+  declared manifest jobs (profile-correct) plus explicitly passed
+  `--result-*` arguments only.
+- **CodeQL artifact parity (run-45042834040 user request)**: the CodeQL
+  consolidated report is now named `SHEYTAN-Music-Visualizer-all-logs.txt`
+  and uploaded with `archive: false` — a plain-text download, identical to
+  the build log delivery, no ZIP wrapper.
+- **Diagnostic format upgrade (`internal/cilog`)**: the "better output
+  format for faster and more accurate updates" pass — records now carry a
+  `hint=` field with the known-root-cause next action (overflow, rotated
+  pin, missing APK, missing artifact path, CodeQL no-compile), compiler
+  positions from GitHub annotation properties and embedded
+  `path:line:col` forms are extracted into structured
+  `file`/`line`/`column` fields with `source=EXACT`, and finding records
+  no longer invent a misleading `exit=0` (exit is omitted when the
+  diagnostic carries no process exit code). Enforced by new contract
+  tests; the emergency fallback emits the same schema.
+- **Stale CI fixture repair (`scripts/ci/tests/test-ci-plumbing.sh`)**:
+  four pre-existing red fixtures repaired to assert the implemented
+  contracts (the renamed `ios-compile-smoke` job in the collector
+  `needs`/manifest assertions, the record-format emergency report, the
+  current `NEVER_STARTED` message, the required build-android manifest
+  flag): 20 pass / 0 fail.
+- **UI/UX readiness (`ui/gogui`, `internal/presentation`)**: the MRU
+  import-path list — the documented manual fallback next to the native
+  file dialogs — now persists across restarts through the versioned
+  workspace-layout store (additive optional v1 field, sanitized on load
+  and save: bounded, deduplicated, hostile entries dropped, never
+  fatal). Race-tested.
+- **Documentation relocation**: all root `.md` files moved into `docs/`
+  (the repository root keeps only `readme.md`), with every packaging,
+  workflow, test and comment reference updated; the package still stages
+  the canonical `license.md` (now sourced from `docs/license.md`).
+
 ## Run 44462492262 work order — Go-Gui + GoGPU + Wails shell architecture (2026-11-19/20)
 
 - **Shell architecture**: one toolkit-free Go application core

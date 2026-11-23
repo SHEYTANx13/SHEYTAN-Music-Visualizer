@@ -5,25 +5,34 @@ Status: current as of run 42939743766 repair (2026-11-11).
 ## The one consolidated report
 
 Every `build` run (the canonical workflow build.yml, renamed from
-build-desktop.yml in the run 44449832903 repair) uploads exactly ONE user-facing diagnostics
-artifact:
+build-desktop.yml in the run 44449832903 repair) and every independent
+`codeql` run uploads exactly ONE user-facing diagnostics artifact, under
+the SAME name and the SAME direct-delivery mode (run-45042834040 parity
+repair: the CodeQL report used to be a ZIP-wrapped `log.txt` artifact;
+both workflows now deliver a plain-text download):
 
 - **`SHEYTAN-Music-Visualizer-all-logs.txt`** — a single plain-text file
   containing ONLY `WARNING|`/`ERROR|` records in the stable schema
   (platform/job/step/gate/command/exit/tool/file/line/column/source/
-  message), strict printable-ASCII + LF byte contract (no tabs, no CR,
-  no BOM, no ANSI, no `===`/`---` runs), an EMPTY file on a clean run,
+  hint/message; `hint=` carries the known-root-cause next action when a
+  record matches a signature in `internal/cilog/hints.go` — the
+  run-45042834042 "faster and more accurate updates" format upgrade),
+  strict printable-ASCII + LF byte contract (no tabs, no CR, no BOM, no
+  ANSI, no `===`/`---` runs), an EMPTY file on a clean run (zero
+  diagnostics is a valid report; the collector exits 0 and the
+  collection job stays green — the run-45042834040 empty-report repair),
   and a 256 KiB ceiling enforced fail-closed (records are never
-  truncated; an overflow fails the collector). Metadata, job/step/gate
-  tables and success summaries live in the GitHub Actions job summary
-  (written via `ci-log-collector --summary`), never in this file; raw
-  job logs never enter it either (the API-recovered logs contribute
-  their diagnostic LINES only).
-  uploaded directly (artifact mode `archive: false`). Download it and open
-  it in any editor; there is no ZIP wrapper. It contains run/attempt/commit
-  metadata, the authoritative job/step conclusions, the per-gate status
-  table, the root-cause grouping, the CodeQL evidence and the full raw
-  per-job logs with secrets redacted.
+  truncated; an overflow fails the collector). Compiler positions are
+  extracted into the structured `file`/`line`/`column` fields with
+  `source=EXACT` wherever the raw diagnostic carries them (GitHub
+  annotation properties or embedded `path:line:col` positions), so a
+  red run names the exact source location instead of prose. Metadata,
+  job/step/gate tables and success summaries live in the GitHub Actions
+  job summary (written via `ci-log-collector --summary`), never in this
+  file; raw job logs never enter it either (the API-recovered logs
+  contribute their diagnostic LINES only). The artifact is uploaded
+  with `archive: false`: download it and open it in any editor; there
+  is no ZIP wrapper.
 
 Temporary per-job log-part artifacts (`*-logs-part-attempt*`) are internal
 collector inputs. The collector deletes them only after the consolidated

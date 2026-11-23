@@ -68,10 +68,10 @@ foreach ($f in @($archive, $ff, $fp)) { Set-Content -Path $f -Value "fixture-byt
 
 function New-ValidResult {
     [pscustomobject][ordered]@{
-        Version       = "n9.0.2-48-gd4070a14ce"
-        AssetURL      = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-08-12-35/ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip"
+        Version       = "n9.0.2-61-gd59078794d"
+        AssetURL      = "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-22-12-36/ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip"
         ArchivePath   = $archive
-        SHA256        = ("40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae")
+        SHA256        = ("438a2555f30ab84368e888b654c7e30fa8797d02ecb8da67d67f3afefc4ce64e")
         BinaryDir     = (Join-Path $work "bin dir")
         FFmpegPath    = $ff
         FFprobePath   = $fp
@@ -170,9 +170,9 @@ $fnStart = $resolverText.IndexOf("function Get-SheytanPinnedMediaTools")
 $fnBody = if ($fnStart -ge 0) { $resolverText.Substring($fnStart) } else { "" }
 $noWriteOutput = ($fnBody -notmatch "(?m)^\s*Write-Output\b")
 $schemaFnPresent = ($resolverText -match "function Test-SheytanToolsResultSchema")
-$pinnedHash = "40608cfdd40b0e7929704059daee4af369f7a9984ea7aa8ee416d78cce2e8aae"
+$pinnedHash = "438a2555f30ab84368e888b654c7e30fa8797d02ecb8da67d67f3afefc4ce64e"
 $hashPinned = $resolverText.Contains($pinnedHash)
-$urlVersionCoherent = $resolverText.Contains("ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip") -and $resolverText.Contains('"n9.0.2-48-gd4070a14ce"')
+$urlVersionCoherent = $resolverText.Contains("ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip") -and $resolverText.Contains('"n9.0.2-61-gd59078794d"')
 $ver10 = $noWriteOutput -and $schemaFnPresent -and $hashPinned -and $urlVersionCoherent
 if (-not $ver10) {
     Write-Output ("        MX10 detail: noWriteOutput={0} schemaFn={1} hashPinned={2} urlCoherent={3}" -f $noWriteOutput, $schemaFnPresent, $hashPinned, $urlVersionCoherent)
@@ -182,7 +182,7 @@ Verdict "MX10" ($(if ($ver10) { "PASS" } else { "FAIL" })) "resolver source: no 
 # --- MX11: env-gated dynamic contract (CI cache) ------------------------------
 $cache = $env:SHEYTAN_MEDIA_TOOLS_CACHE_DIR
 $cacheReady = $false
-if (-not [string]::IsNullOrWhiteSpace($cache) -and (Test-Path -LiteralPath (Join-Path $cache "ffmpeg-n9.0.2-48-gd4070a14ce-win64-gpl-9.0.zip") -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cache "extracted-windows") -PathType Container)) {
+if (-not [string]::IsNullOrWhiteSpace($cache) -and (Test-Path -LiteralPath (Join-Path $cache "ffmpeg-n9.0.2-61-gd59078794d-win64-gpl-9.0.zip") -PathType Leaf) -and (Test-Path -LiteralPath (Join-Path $cache "extracted-windows") -PathType Container)) {
     $cacheReady = $true
 }
 if ($cacheReady) {
