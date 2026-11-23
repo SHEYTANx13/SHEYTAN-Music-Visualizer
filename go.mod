@@ -9,7 +9,7 @@ require (
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
 	github.com/go-gui-org/go-gui v0.98.0
-	github.com/gogpu/gputypes v0.8.2
+	github.com/gogpu/gputypes v0.9.1
 	github.com/gogpu/wgpu v0.34.15
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/llehouerou/go-mp3 v1.5.0
