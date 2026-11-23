@@ -1,5 +1,64 @@
 # Changelog
 
+## Run 45097038674 repair — Windows license-gate fix, Android APK gate fix, dependency upgrades, touch-safe UI, per-track 3D world plans (2026-11-23)
+
+- **Windows post-archive license gate repair (`scripts/build/build-windows.ps1`)**:
+  the documentation relocation (previous session, root keeps only
+  `readme.md`) moved `license.md` to `docs/`, and the staging side was
+  updated — but the post-archive `verify-extracted-package` gate still
+  hashed the root path. `Get-FileHash` on the now-missing root file
+  failed the gate closed on run 45097038674 (`gate verify-extracted-package
+  failed with exit code 1`), taking the "Build and verify Windows x64
+  desktop app" step, the ASCII-log-contract step and the required job
+  down with it. The gate now compares the distributed copy against
+  `docs/license.md` (Join-Path via the gate's resolved repo root).
+- **Android required-APK gate repair (`.github/workflows/build.yml`)**:
+  two stacked defects. (1) The gomobile build ran without build tags, and
+  without `goffi_static` the oto android driver does not compile
+  (`undefined: oboe.Play/Suspend/Resume` in `driver_android.go`) — proven
+  locally by cross-compiling `./cmd/app-gogui` for `android/arm64` with
+  and without the tag; the tag is now passed (the CI-canonical profile
+  everywhere else in the repository). (2) The job only PROBED for an NDK
+  while the required gate needs one; the step now provisions a pinned NDK
+  revision through the runner's sdkmanager when none is pre-installed
+  (fail-closed with actionable diagnostics, identity recorded in the log).
+- **Dependency upgrades (user-requested, dependabot branches confirmed)**:
+  `astral-sh/setup-uv` `10.3.3` → `10.4.0`
+  (`1db35dd8eee11c5894872e0b383ae6c406cf738d`), `actions/setup-go`
+  `7.0.0` → `7.1.0` (`d8cbb8045d7f43706b9177cceb36c1f91a6644d5`, 9 sites:
+  build.yml + codeql.yml), `github.com/gogpu/gputypes` `0.8.2` → `0.9.1`
+  (`go mod tidy` clean, CI-canonical build and `go vet` green with the
+  new graph). actionlint 1.7.12 and zizmor 1.32.0 re-run locally clean on
+  the updated workflows.
+- **Touch-safe UI (token applied)**: the token document has declared
+  `touchTargetMinDp` per responsive class (48 dp phone/tablet, 32 dp
+  desktop/wide) since its introduction, but no Go code applied it —
+  interactive targets could shrink below the documented minimum. The
+  shell now resolves the class minimum every frame
+  (`ShellTheme.SetTouchTargetForWidth`) and every shell button
+  (tab strip, command bar, button rows, template actions) enforces it
+  through `MinHeight` (plus `MinWidth` for the tab reorder controls), so
+  the interface stays touch- and phone-friendly and remains
+  touch-friendly on big screens. Covered by `TestTouchTargetForWidth`.
+- **Per-track 3D world plans (`internal/mvplan`, wired into `internal/studio`)**:
+  the "premade music video exclusively for each audio track" slice: after
+  the v3 analysis completes, the studio derives a deterministic world
+  plan from the measured analysis + Song DNA — chapters from detected
+  structural sections (documented single-chapter fallback when the
+  structure layer is unavailable), world elements (monolith / ring / gate
+  / pillar / current / ember-storm / mirror-shard) with bounded budgets,
+  seeded generative placement that is stable per track (seed mixes the
+  DNA seed with the track fingerprint), camera choreography beat-synced
+  only when the rhythm layer measured one, lighting from measured
+  warmth/palette, and an explicit long-audio policy (streamed section
+  render; export 8 h bound reported honestly). The builder consumes only
+  the analysis document — never PCM — and is O(sections) with capped
+  element counts, proven by a 6-hour-track test (bounded world) and a
+  9-hour-track test (honest out-of-bound flag). Determinism, coverage,
+  degradation notes and JSON round-trip are contract-tested.
+  The plan is DATA for the renderers; audio reactivity remains the
+  renderers' job (no fake reactivity was added).
+
 ## Runs 45042834040 + 45042834042 repair — build/CodeQL green, diagnostic format upgrade, UI readiness (2026-11-23)
 
 - **Android universal-APK compile repair (`internal/mediatools/archive.go`)**:

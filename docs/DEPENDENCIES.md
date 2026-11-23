@@ -1,5 +1,34 @@
 # Dependencies — exact upgrade record (2026-11-16 v3 work order)
 
+## Run 45097038674 upgrades (2026-11-23)
+
+- **astral-sh/setup-uv v10.3.3 → v10.4.0** (`.github/workflows/build.yml`,
+  the only active `setup-uv` reference): pin moved to
+  `uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0`.
+  The target SHA equals the remote dependabot branch
+  `dependabot/github_actions/astral-sh/setup-uv-10.4.0` diff against main
+  (fetched and diffed in this session). Inputs untouched
+  (`version: '0.9.9'`, `enable-cache: false`); the comment above the pin
+  now names v10.4.0.
+- **actions/setup-go v7.0.0 → v7.1.0** (9 sites: 6 in
+  `.github/workflows/build.yml`, 2 in `.github/workflows/codeql.yml`):
+  pin moved to
+  `uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0`
+  everywhere, matching the remote dependabot branch
+  `dependabot/github_actions/actions/setup-go-7.1.0` diff.
+- **github.com/gogpu/gputypes v0.8.2 → v0.9.1** (`go.mod`/`go.sum`,
+  matching the remote `dependabot/go_modules/go-minor-and-patch-a2dac3352f`
+  diff; observed go.sum hashes `h1:b9EfCKhsgx36oeTHXl9lpgDfldGsfTe7ww8rkHOIloc=`
+  and `go.mod h1:cnXrDMwTpWTvJLW1Vreop3PcT6a2YP/i3s91rPaOavw=`):
+  `go mod tidy` clean afterwards; CI-canonical profile
+  (`CGO_ENABLED=1 go build -tags goffi_static ./...`) and
+  `CGO_ENABLED=1 go vet -tags goffi_static ./...` green on the upgraded
+  graph (API-compatible).
+- Verified locally after all three: pinned actionlint 1.7.12 clean on
+  both workflows, zizmor 1.32.0 (offline mode) clean at low+ severity.
+  A hosted run proving the upgraded actions on GitHub runners remains
+  the confirmatory evidence (NOT RUN: no dispatch authorized).
+
 ## astral-sh/setup-uv v8.2.0 → v10.3.3
 
 - Changed file: `.github/workflows/build.yml` (the only active

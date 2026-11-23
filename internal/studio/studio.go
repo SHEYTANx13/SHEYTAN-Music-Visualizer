@@ -29,6 +29,7 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/jobs"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/mvplan"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/project"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
@@ -82,8 +83,11 @@ type Studio struct {
 	fullAnalysis *dsp.Analysis
 	composition  *visualizer.Composition
 	dna          *songdna.DNA
-	vizConfig    visualizer.Config
-	transport    *playback.Transport
+	// worldPlan is the per-track premade music-video world (mvplan)
+	// derived from the v3 analysis + DNA; nil for legacy-only analyses.
+	worldPlan *mvplan.Plan
+	vizConfig visualizer.Config
+	transport *playback.Transport
 
 	// Audio output opens lazily on the first Play and is published
 	// through an atomic pointer: the sync.Once body performs NO
@@ -287,6 +291,16 @@ func (s *Studio) DNA() *songdna.DNA {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.dna
+}
+
+// WorldPlan returns the per-track premade music-video world plan
+// (nil when the v3 analysis is unavailable, e.g. legacy-only fallback).
+// The plan is deterministic for the loaded track: same fingerprint,
+// same world.
+func (s *Studio) WorldPlan() *mvplan.Plan {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.worldPlan
 }
 
 // DeviceReal reports whether a real audio device is proven in use
@@ -576,6 +590,7 @@ func (s *Studio) analyzeTrack(ctx context.Context, track *audio.ImportedTrack) (
 		s.mu.Lock()
 		s.fullAnalysis = nil
 		s.composition = nil
+		s.worldPlan = nil
 		s.mu.Unlock()
 		return res, nil
 	}

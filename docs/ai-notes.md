@@ -1141,3 +1141,29 @@ Key engineering facts established this session (full detail in
 - The tracked `.env` and `download/README.md` are initial-commit
   sandbox artifacts, not product files; they are excluded from the
   delivered source ZIP and left untouched in the tree.
+
+## Session record — 2026-11-23 (run 45097038674 repair, local branch `repair/run-45097038674`)
+
+- Diagnosed the three red lanes of run 45097038674 (commit 2a8835e):
+  build-windows `verify-extracted-package` failed on the stale root
+  `license.md` reference left by the docs relocation (fixed to
+  `docs/license.md` in `scripts/build/build-windows.ps1`); build-android
+  failed because the gomobile build ran without `goffi_static` (oto's
+  android driver: `undefined: oboe.Play`) and the job never provisioned
+  an NDK (both fixed in build.yml); preflight's static-validation step
+  failed on the hosted runner while pinned actionlint 1.7.12 and zizmor
+  1.32.0 are clean locally (offline) — the online-mode audit and tool
+  provisioning remain the unproven surface, honestly documented.
+- Upgraded setup-uv 10.3.3 -> 10.4.0, setup-go 7.0.0 -> 7.1.0 (9 pins),
+  gputypes 0.8.2 -> 0.9.1; tidy/verify/build/vet green.
+- Touch safety: the token document's per-class `touchTargetMinDp` is now
+  actually applied (shell resolves it every frame; all shell buttons
+  enforce MinHeight/MinWidth) — `TestTouchTargetForWidth` covers it.
+- New `internal/mvplan`: deterministic per-track 3D world plan
+  (chapters from measured sections, bounded seeded elements, camera/
+  lighting from measured features, explicit long-audio policy), built
+  by the studio after v3 analysis, contract-tested including a 6-hour
+  bounded-world case. The plan is data for the renderers; reactivity
+  stays in the renderers.
+- Full CI-profile suite 39 packages ok; race green on mvplan/gogui/
+  studio; fixture suites green; actionlint/zizmor clean locally.

@@ -39,6 +39,11 @@ type ShellTheme struct {
 
 	reducedMotion bool
 	reducedGlow   bool
+
+	// touchTargetDp is the resolved minimum interactive-target
+	// height for the current responsive class (dp); 48 until the
+	// shell reports a width. See TouchTargetForWidth.
+	touchTargetDp float32
 }
 
 // parseHex converts a strict #RRGGBB token into an opaque color.NRGBA.
@@ -90,7 +95,7 @@ func guiColor(c color.NRGBA) gui.Color {
 // document. Identity values mirror internal/brand constants; the JSON
 // document is the presentation authority.
 func NewShellTheme(doc design.TokenDocument) *ShellTheme {
-	t := &ShellTheme{doc: doc}
+	t := &ShellTheme{doc: doc, touchTargetDp: 48}
 	t.intensityName = doc.DefaultIntensity
 	t.intensity = doc.IntensityPresets[doc.DefaultIntensity]
 	return t
@@ -98,6 +103,55 @@ func NewShellTheme(doc design.TokenDocument) *ShellTheme {
 
 // TokenDoc returns the loaded token document.
 func (t *ShellTheme) TokenDoc() design.TokenDocument { return t.doc }
+
+// TouchTargetDp is the resolved minimum interactive-target height for
+// the current window class (dp). The token document carries the
+// authority per breakpoint (48 dp for phone/tablet, 32 dp for
+// desktop/wide); until the shell reports the first window width the
+// safest default is the largest documented value.
+func (t *ShellTheme) TouchTargetDp() float32 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.touchTargetDp
+}
+
+// TouchTargetForWidth resolves the token document's
+// touchTargetMinDp for the responsive class of widthDp. Fallbacks
+// mirror the documented token values when a class entry omits the
+// field, so a token edit can never silently shrink targets to zero.
+// Pure; safe for concurrent use.
+func (t *ShellTheme) TouchTargetForWidth(widthDp float32) float32 {
+	var cls design.Breakpoint
+	switch {
+	case widthDp < breakpoints.TabletMin:
+		cls = t.doc.Breakpoints.Phone
+	case widthDp < breakpoints.DesktopMin:
+		cls = t.doc.Breakpoints.Tablet
+	case widthDp < breakpoints.WideMin:
+		cls = t.doc.Breakpoints.Desktop
+	default:
+		cls = t.doc.Breakpoints.Wide
+	}
+	if cls.TouchTargetMinDp > 0 {
+		return float32(cls.TouchTargetMinDp)
+	}
+	if widthDp < breakpoints.DesktopMin {
+		return 48
+	}
+	return 32
+}
+
+// SetTouchTargetForWidth stores the resolved minimum for the shell's
+// current width; every frame's control composition reads it through
+// TouchTargetDp so pointer and touch targets always meet the class
+// minimum (run 45097038674 touch-safety repair: the token existed but
+// was never applied).
+func (t *ShellTheme) SetTouchTargetForWidth(widthDp float32) {
+	v := t.TouchTargetForWidth(widthDp)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.touchTargetDp = v
+}
 
 // SetIntensity applies one of the token intensity presets
 // (subtle/ritual/infernal). It reports whether the name was known.

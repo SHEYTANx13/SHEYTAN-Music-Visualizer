@@ -44,8 +44,9 @@ func tabStripView(tabs *TabState, th *ShellTheme, onTab func(presentation.Destin
 		dest := info.ID
 		active := tabs.Layout.ActiveTab == dest
 		controls = append(controls, gui.Button(gui.ButtonCfg{
-			ID:    "tab-" + string(dest),
-			Label: info.Title,
+			ID:        "tab-" + string(dest),
+			Label:     info.Title,
+			MinHeight: th.TouchTargetDp(),
 			Colors: func() gui.ColorSet {
 				if active {
 					return gui.ColorSet{Base: th.AccentColor()}
@@ -69,8 +70,10 @@ func tabStripView(tabs *TabState, th *ShellTheme, onTab func(presentation.Destin
 	}
 	controls = append(controls,
 		gui.Button(gui.ButtonCfg{
-			ID:    "tab-move-left",
-			Label: "‹",
+			ID:        "tab-move-left",
+			Label:     "‹",
+			MinHeight: th.TouchTargetDp(),
+			MinWidth:  th.TouchTargetDp(),
 			A11YCfg: gui.A11YCfg{
 				A11YLabel:       "Move active tab left",
 				A11YDescription: "Reorders the active destination one position toward the strip start",
@@ -81,8 +84,10 @@ func tabStripView(tabs *TabState, th *ShellTheme, onTab func(presentation.Destin
 			},
 		}),
 		gui.Button(gui.ButtonCfg{
-			ID:    "tab-move-right",
-			Label: "›",
+			ID:        "tab-move-right",
+			Label:     "›",
+			MinHeight: th.TouchTargetDp(),
+			MinWidth:  th.TouchTargetDp(),
 			A11YCfg: gui.A11YCfg{
 				A11YLabel:       "Move active tab right",
 				A11YDescription: "Reorders the active destination one position toward the strip end",
@@ -267,8 +272,9 @@ func (sh *shell) buttonRow(defs ...btnDef) gui.View {
 	for _, d := range defs {
 		d := d
 		buttons = append(buttons, gui.Button(gui.ButtonCfg{
-			ID:    d.id,
-			Label: d.label,
+			ID:        d.id,
+			Label:     d.label,
+			MinHeight: sh.th.TouchTargetDp(),
 			OnClick: func(ctx gui.EventCtx) {
 				ctx.Consume()
 				if d.fn != nil {
@@ -428,8 +434,9 @@ func (sh *shell) panelTemplates() []gui.View {
 			sh.line(name),
 			sh.caption(presetSummary(p.Config)),
 			gui.Button(gui.ButtonCfg{
-				ID:    "tpl-apply-" + name,
-				Label: applyButtonLabel(name, isActive),
+				ID:        "tpl-apply-" + name,
+				Label:     applyButtonLabel(name, isActive),
+				MinHeight: sh.th.TouchTargetDp(),
 				Colors: func() gui.ColorSet {
 					if !isActive {
 						return gui.ColorSet{Base: sh.th.VolcanicColor()}

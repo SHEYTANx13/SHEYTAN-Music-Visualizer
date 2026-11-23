@@ -114,7 +114,7 @@ jobs:
       # caching DISABLED so they can never write or reserve the same
       # key. build-windows saves under a different runner OS key.
       - name: Setup Go (go.mod toolchain is the version authority)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -305,7 +305,7 @@ jobs:
       # broken workflow, so an install failure or silent no-op can never
       # masquerade as a clean scan (run 42939743766 §3.2).
       # uv is installed through astral-sh/setup-uv pinned to its verified
-      # upstream v10.3.3 commit (full 40-char SHA; reviewed release). uvx
+      # upstream v10.4.0 commit (full 40-char SHA; reviewed release). uvx
       # then runs zizmor==1.32.0 in ONE isolated cached environment that
       # is used for BOTH the version check and the audit (§3.1). The
       # audit runs ONLINE (zizmor's documented GITHUB_TOKEN source; this
@@ -317,7 +317,7 @@ jobs:
       # never as fully green.
       - name: Install pinned uv (for the isolated zizmor environment)
         if: ${{ always() && !cancelled() }}
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           version: '0.9.9'
           enable-cache: false
@@ -476,7 +476,7 @@ jobs:
       # from the Linux jobs, so its cache key cannot collide with the
       # single Linux saver (build-linux).
       - name: Setup Go (go.mod toolchain is the version authority)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -867,7 +867,7 @@ jobs:
         run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go (go.mod toolchain is the version authority)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -1244,7 +1244,7 @@ jobs:
         run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -1447,14 +1447,44 @@ jobs:
       - name: Bootstrap CI log directories (guaranteed evidence)
         run: bash scripts/ci/bootstrap-logs.sh
 
-      - name: Setup Android NDK (experimental compile smoke)
+      # Run 45097038674 repair: this step now PROVISIONS the NDK instead
+      # of only probing it. The required APK gate below cannot succeed
+      # without an NDK; on images where none is pre-installed the gate
+      # failed closed with "the toolchain absence is the real origin".
+      # Deterministic behavior: reuse a pre-installed NDK when present;
+      # otherwise install the pinned NDK revision through the runner's
+      # sdkmanager, verify the toolchain file exists, and export
+      # ANDROID_NDK_HOME for gomobile. Every outcome is recorded; a
+      # failed provisioning fails this step closed (never silent).
+      - name: Provision Android NDK (pinned revision, fail-closed)
         run: |
           set -Eeuo pipefail
           echo "ANDROID_HOME=${ANDROID_HOME:-unset}"
-          ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "ndk: NOT PRE-INSTALLED"
+          ndk_root=""
+          for c in "${ANDROID_NDK_ROOT:-}" "${ANDROID_NDK_HOME:-}" "$ANDROID_HOME/ndk"/*; do
+            if [ -n "$c" ] && [ -d "$c" ] && [ -f "$c/source.properties" ]; then ndk_root="$c"; break; fi
+          done
+          if [ -z "$ndk_root" ]; then
+            pinned_rev="28.2.13676358"
+            sdkman="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            if [ ! -x "$sdkman" ]; then
+              echo "ERROR: no pre-installed NDK and sdkmanager not found at $sdkman"
+              echo "remedy: provision the pinned NDK (ndk;$pinned_rev) in the workflow image or set ANDROID_NDK_HOME"
+              exit 1
+            fi
+            echo "no pre-installed NDK found; provisioning pinned revision $pinned_rev"
+            yes | "$sdkman" --licenses > /dev/null || true
+            "$sdkman" --install "ndk;$pinned_rev" > /dev/null
+            ndk_root="$ANDROID_HOME/ndk/$pinned_rev"
+          fi
+          test -f "$ndk_root/source.properties" || { echo "ERROR: provisioned NDK lacks source.properties at $ndk_root"; exit 1; }
+          test -x "$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" || { echo "ERROR: NDK toolchain clang missing at $ndk_root"; exit 1; }
+          echo "ANDROID_NDK_HOME=$ndk_root" >> "$GITHUB_ENV"
+          echo "ndk identity:"; grep -E "Pkg\.(Revision|Desc)" "$ndk_root/source.properties" || true
+          echo "ndk provisioning: OK"
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -1505,7 +1535,13 @@ jobs:
             if go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261117202452-47699113848a && gomobile init >/dev/null 2>&1; then
               echo "gomobile: installed"
               echo "[section] APK build (arm64, api 31)"
-              if CGO_ENABLED=1 gomobile build -target android -androidapi 31 -o /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk ./cmd/app-gogui; then
+              # Run 45097038674 repair: the goffi_static tag is REQUIRED
+              # here. Without it the oto android driver does not compile
+              # (undefined: oboe.Play/Suspend/Resume in
+              # driver_android.go) and the universal APK can never build;
+              # proven locally by cross-compiling ./cmd/app-gogui for
+              # android/arm64 with and without the tag.
+              if CGO_ENABLED=1 gomobile build -tags goffi_static -target android -androidapi 31 -o /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk ./cmd/app-gogui; then
                 echo "APK build: OK"
                 ls -la /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk
                 echo "APK_BUILD_OK" > "$status_file"
@@ -1600,7 +1636,7 @@ jobs:
         run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -1760,7 +1796,7 @@ jobs:
         run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false # cache policy: only build-linux/build-windows save caches

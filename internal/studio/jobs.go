@@ -31,6 +31,7 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/jobs"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/mvplan"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/playback"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
@@ -134,6 +135,7 @@ func (s *Studio) runImportJob(ctx context.Context, path string, h *jobs.JobHandl
 	s.track = track
 	s.analysis = nil
 	s.dna = nil
+	s.worldPlan = nil
 	// New track: the old transport's PCM source is stale. Drop it so
 	// the next Play creates a transport for the NEW fingerprint
 	// (stale-track playback fixture: a track switch must never keep
@@ -202,6 +204,19 @@ func (s *Studio) runAnalysisJob(ctx context.Context, h *jobs.JobHandle) {
 	}
 	s.mu.Lock()
 	s.dna = dna
+	// Per-track premade music-video world (run 45097038674 feature):
+	// derived from the measured v3 analysis + DNA, deterministic per
+	// fingerprint. Legacy-only analyses keep a nil plan (the UI reports
+	// that honestly rather than building a world without measurements).
+	if full != nil {
+		if plan, perr := mvplan.Build(dna, full); perr == nil {
+			s.worldPlan = plan
+		} else {
+			s.worldPlan = nil
+		}
+	} else {
+		s.worldPlan = nil
+	}
 	// adopt DNA artistic defaults when the user has not customized
 	if !s.userCustomized {
 		cfg.Mode = visualizer.Mode(dna.DefaultMode)

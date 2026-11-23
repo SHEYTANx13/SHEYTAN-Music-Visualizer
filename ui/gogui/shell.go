@@ -385,6 +385,10 @@ func (sh *shell) view(w *gui.Window) gui.View {
 
 	ww, _ := w.WindowSize()
 	sh.widthDp = float32(ww)
+	// Touch-safety (run 45097038674): keep the resolved minimum
+	// interactive-target height in sync with the responsive class
+	// every frame; controls read it through the theme.
+	sh.th.SetTouchTargetForWidth(float32(ww))
 
 	// Service-side config changes (preset apply, project load) flow back
 	// into the controls through the config revision.
@@ -551,20 +555,22 @@ func changedEnough(last, v float32) bool {
 // barButton renders a secondary (volcanic) command-bar button.
 func (sh *shell) barButton(id, label string, onClick func(gui.EventCtx)) gui.View {
 	return gui.Button(gui.ButtonCfg{
-		ID:      id,
-		Label:   label,
-		Colors:  gui.ColorSet{Base: sh.th.VolcanicColor()},
-		OnClick: onClick,
+		ID:        id,
+		Label:     label,
+		MinHeight: sh.th.TouchTargetDp(),
+		Colors:    gui.ColorSet{Base: sh.th.VolcanicColor()},
+		OnClick:   onClick,
 	})
 }
 
 // barButtonPrimary renders the primary (accent) command-bar button.
 func (sh *shell) barButtonPrimary(id, label string, onClick func(gui.EventCtx)) gui.View {
 	return gui.Button(gui.ButtonCfg{
-		ID:      id,
-		Label:   label,
-		Variant: gui.ButtonPrimary,
-		OnClick: onClick,
+		ID:        id,
+		Label:     label,
+		MinHeight: sh.th.TouchTargetDp(),
+		Variant:   gui.ButtonPrimary,
+		OnClick:   onClick,
 	})
 }
 

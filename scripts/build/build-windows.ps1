@@ -766,8 +766,8 @@ if ($exeOk) {
             & $cleanup; exit 1
         }
         # 2. Distributed license byte identity (hash AND length).
-        $canonical = Get-FileHash -Algorithm SHA256 -LiteralPath "license.md"
-        $canonicalLen = (Get-Item -LiteralPath "license.md").Length
+        $canonical = Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $repoRoot "docs/license.md")
+        $canonicalLen = (Get-Item -LiteralPath (Join-Path $repoRoot "docs/license.md")).Length
         $extractedLicense = Join-Path $appRoot "license.md"
         $dist = Get-FileHash -Algorithm SHA256 -LiteralPath $extractedLicense
         $distLen = (Get-Item -LiteralPath $extractedLicense).Length
