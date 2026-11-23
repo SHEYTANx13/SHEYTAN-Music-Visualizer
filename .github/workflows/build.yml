@@ -114,7 +114,7 @@ jobs:
       # caching DISABLED so they can never write or reserve the same
       # key. build-windows saves under a different runner OS key.
       - name: Setup Go (go.mod toolchain is the version authority)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -476,7 +476,7 @@ jobs:
       # from the Linux jobs, so its cache key cannot collide with the
       # single Linux saver (build-linux).
       - name: Setup Go (go.mod toolchain is the version authority)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -867,7 +867,7 @@ jobs:
         run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go (go.mod toolchain is the version authority)
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
@@ -1244,7 +1244,7 @@ jobs:
         run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -1454,7 +1454,7 @@ jobs:
           ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "ndk: NOT PRE-INSTALLED"
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -1600,7 +1600,7 @@ jobs:
         run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false
@@ -1760,7 +1760,7 @@ jobs:
         run: bash scripts/ci/bootstrap-logs.sh
 
       - name: Setup Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: false # cache policy: only build-linux/build-windows save caches
