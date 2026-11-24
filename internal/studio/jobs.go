@@ -148,6 +148,16 @@ func (s *Studio) runImportJob(ctx context.Context, path string, h *jobs.JobHandl
 	if stale != nil {
 		_ = stale.Close() // idempotent, thread-safe
 	}
+	// Disk-budget housekeeping (run 45182658992 data-management): the
+	// canonical PCM cache is swept of orphaned cache families (tracks
+	// no longer loaded), oldest first, until the byte budget holds.
+	// Best-effort and honest: the outcome is reported, never silent,
+	// and a failure never fails the import itself.
+	if removed, freed, serr := s.cache.Sweep(map[string]struct{}{track.Fingerprint: {}}, audio.CacheBudgetBytes); serr != nil {
+		s.emit(Event{Kind: EventImportDone, Message: fmt.Sprintf("cache housekeeping failed (non-fatal): %v", serr)})
+	} else if removed > 0 {
+		s.emit(Event{Kind: EventImportDone, Message: fmt.Sprintf("cache housekeeping: removed %d orphaned cache file(s), freed %d bytes", removed, freed)})
+	}
 	// Pre-arm the analysis terminal-state signal BEFORE the import-done
 	// event fires: observers that await cache-file quiescence after an
 	// import (tests touching cache files, Close) see a live signal they
@@ -230,6 +240,22 @@ func (s *Studio) runAnalysisJob(ctx context.Context, h *jobs.JobHandle) {
 		s.vizConfig = cfg
 	}
 	s.mu.Unlock()
+	// Persist the per-track world plan (run 45182658992): one JSON
+	// document under world-plans/<fingerprint>.json, overwritten on
+	// rebuild. The document is the deliverable a per-track premade
+	// music video consumes (and the input of --world-export-obj for
+	// Blender round trips). Honest outcome either way; the analysis
+	// itself already succeeded.
+	if plan := s.WorldPlan(); plan != nil {
+		if path, perr := s.persistWorldPlan(plan); perr == nil {
+			s.mu.Lock()
+			s.worldPlanPath = path
+			s.mu.Unlock()
+			s.emit(Event{Kind: EventAnalysisDone, Message: "world plan saved: " + path})
+		} else {
+			s.emit(Event{Kind: EventAnalysisDone, Message: "world plan not saved (non-fatal): " + perr.Error()})
+		}
+	}
 	s.emit(Event{Kind: EventAnalysisDone, Message: fmt.Sprintf("analysis done in %s — %s", time.Since(start).Round(time.Millisecond), dna.Descriptor)})
 	s.emit(Event{Kind: EventPlaybackChanged})
 }

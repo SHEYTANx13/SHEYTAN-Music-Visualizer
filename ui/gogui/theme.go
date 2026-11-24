@@ -44,6 +44,10 @@ type ShellTheme struct {
 	// height for the current responsive class (dp); 48 until the
 	// shell reports a width. See TouchTargetForWidth.
 	touchTargetDp float32
+
+	// spacing is the resolved responsive spacing profile; the phone
+	// profile is the safest default until the shell reports a width.
+	spacing SpacingProfile
 }
 
 // parseHex converts a strict #RRGGBB token into an opaque color.NRGBA.
@@ -95,7 +99,7 @@ func guiColor(c color.NRGBA) gui.Color {
 // document. Identity values mirror internal/brand constants; the JSON
 // document is the presentation authority.
 func NewShellTheme(doc design.TokenDocument) *ShellTheme {
-	t := &ShellTheme{doc: doc, touchTargetDp: 48}
+	t := &ShellTheme{doc: doc, touchTargetDp: 48, spacing: SpacingProfile{BarPadTop: 6, BarPadBottom: 6, BarPadH: 10, PanelPadV: 12, PanelPadH: 12, RowPadV: 5}}
 	t.intensityName = doc.DefaultIntensity
 	t.intensity = doc.IntensityPresets[doc.DefaultIntensity]
 	return t
@@ -151,6 +155,53 @@ func (t *ShellTheme) SetTouchTargetForWidth(widthDp float32) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.touchTargetDp = v
+}
+
+// SpacingProfile is the token-driven responsive spacing set the shell
+// resolves per width class (run 45182658992 space-management pass).
+// Phones/tablets get roomier bars, panels and rows (touch-friendly);
+// desktop/wide classes tighten vertically for a denser, professional
+// workspace while keeping comfortable horizontal gutters.
+type SpacingProfile struct {
+	BarPadTop    float32
+	BarPadBottom float32
+	BarPadH      float32
+	PanelPadV    float32
+	PanelPadH    float32
+	RowPadV      float32
+}
+
+// SpacingForWidth resolves the profile for the responsive class of
+// widthDp. Pure; values derive from the token spacing scale
+// (4/8/12/16/24) with documented per-class choices.
+func (t *ShellTheme) SpacingForWidth(widthDp float32) SpacingProfile {
+	switch {
+	case widthDp < breakpoints.TabletMin:
+		return SpacingProfile{BarPadTop: 6, BarPadBottom: 6, BarPadH: 10, PanelPadV: 12, PanelPadH: 12, RowPadV: 5}
+	case widthDp < breakpoints.DesktopMin:
+		return SpacingProfile{BarPadTop: 6, BarPadBottom: 6, BarPadH: 12, PanelPadV: 14, PanelPadH: 14, RowPadV: 5}
+	case widthDp < breakpoints.WideMin:
+		return SpacingProfile{BarPadTop: 4, BarPadBottom: 4, BarPadH: 10, PanelPadV: 10, PanelPadH: 12, RowPadV: 3}
+	default:
+		return SpacingProfile{BarPadTop: 4, BarPadBottom: 4, BarPadH: 12, PanelPadV: 12, PanelPadH: 14, RowPadV: 3}
+	}
+}
+
+// SetSpacingForWidth stores the profile resolved for the shell's
+// current width; composition helpers read it through Spacing().
+func (t *ShellTheme) SetSpacingForWidth(widthDp float32) {
+	p := t.SpacingForWidth(widthDp)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.spacing = p
+}
+
+// Spacing is the currently resolved spacing profile (phone-roomy
+// defaults until the shell reports a width).
+func (t *ShellTheme) Spacing() SpacingProfile {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.spacing
 }
 
 // SetIntensity applies one of the token intensity presets

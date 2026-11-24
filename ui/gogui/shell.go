@@ -389,6 +389,10 @@ func (sh *shell) view(w *gui.Window) gui.View {
 	// interactive-target height in sync with the responsive class
 	// every frame; controls read it through the theme.
 	sh.th.SetTouchTargetForWidth(float32(ww))
+	// Space management (run 45182658992): keep the responsive
+	// spacing profile in sync next to the touch target; bars, panels
+	// and rows read it through the theme every composition.
+	sh.th.SetSpacingForWidth(float32(ww))
 
 	// Service-side config changes (preset apply, project load) flow back
 	// into the controls through the config revision.
@@ -468,7 +472,7 @@ func (sh *shell) commandBar() gui.View {
 	return gui.Row(gui.ContainerCfg{
 		ID:          "command-bar",
 		Sizing:      gui.FillFit,
-		Padding:     gui.NewPadding(4, 8, 4, 8),
+		Padding:     sh.barPadding(),
 		Spacing:     gui.SpacingSmall,
 		Color:       sh.th.SurfaceColor(),
 		SizeBorder:  gui.BorderThin,
@@ -542,6 +546,19 @@ func (sh *shell) commandBar() gui.View {
 	})
 }
 
+// barPadding resolves the command bar's responsive padding
+// (token-driven profile; roomier on touch classes).
+func (sh *shell) barPadding() gui.Padding {
+	sp := sh.th.Spacing()
+	return gui.NewPadding(sp.BarPadTop, sp.BarPadH, sp.BarPadBottom, sp.BarPadH)
+}
+
+// statusPadding resolves the status strip's responsive padding.
+func (sh *shell) statusPadding() gui.Padding {
+	sp := sh.th.Spacing()
+	return gui.NewPadding(sp.BarPadTop-1, sp.BarPadH, sp.BarPadBottom-1, sp.BarPadH)
+}
+
 // changedEnough guards the volume dispatch against drag-step spam
 // (1% steps, the slider's own granularity).
 func changedEnough(last, v float32) bool {
@@ -581,7 +598,7 @@ func (sh *shell) statusStrip() gui.View {
 	return gui.Row(gui.ContainerCfg{
 		ID:          "status-strip",
 		Sizing:      gui.FillFit,
-		Padding:     gui.NewPadding(3, 8, 3, 8),
+		Padding:     sh.statusPadding(),
 		Spacing:     gui.SpacingSmall,
 		Color:       sh.th.SurfaceColor(),
 		SizeBorder:  gui.BorderThin,

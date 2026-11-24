@@ -35,6 +35,7 @@ import (
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/songdna"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/worldassets"
 )
 
 // SchemaVersion is the plan document version. Additive evolution only.
@@ -61,6 +62,11 @@ const (
 	KindCurrent     ElementKind = "current"
 	KindEmberStorm  ElementKind = "ember-storm"
 	KindMirrorShard ElementKind = "mirror-shard"
+	// Run 45182658992 world-asset families: the sigil, tree and floor
+	// assets from internal/worldassets join the composition palette.
+	KindSigil ElementKind = "sigil"
+	KindTree  ElementKind = "tree"
+	KindFloor ElementKind = "floor"
 )
 
 // MotionClass enumerates how an element moves over its lifetime.
@@ -89,8 +95,12 @@ const (
 // and a motion class. Positions are world units; the renderer maps
 // them onto the active visualizer mode's coordinate space.
 type Element struct {
-	ID          string      `json:"id"`
-	Kind        ElementKind `json:"kind"`
+	ID   string      `json:"id"`
+	Kind ElementKind `json:"kind"`
+	// Asset is the worldassets catalog ID realizing this element
+	// (e.g. "sigil/inverted-pentagram", "tree/twisted-oak"); empty for
+	// the abstract geometric families the renderers draw directly.
+	Asset       string      `json:"asset,omitempty"`
 	Chapter     int         `json:"chapter"`
 	Start       float64     `json:"start"`
 	End         float64     `json:"end"`
@@ -112,6 +122,9 @@ type Chapter struct {
 	Confidence  float64     `json:"confidence"`
 	Environment string      `json:"environment"`
 	Energy      EnergyClass `json:"energy"`
+	// Floor is the worldassets floor ID covering this chapter's ground
+	// ("floor/ritual-circle" ...); empty only when no floor matched.
+	Floor string `json:"floor,omitempty"`
 }
 
 // CameraPlan is the deterministic camera choreography for the video.
@@ -181,6 +194,9 @@ func Build(dna *songdna.DNA, analysis *dsp.Analysis) (*Plan, error) {
 	}
 
 	p.buildChapters(analysis)
+	for i := range p.Chapters {
+		p.Chapters[i].Floor = floorForEnvironment(p.Chapters[i].Environment)
+	}
 	p.TempoBPM = measureTempo(analysis)
 	p.buildCamera(analysis, rng)
 	p.buildLighting(dna, rng)
@@ -373,6 +389,7 @@ func (p *Plan) buildElements(dna *songdna.DNA, analysis *dsp.Analysis, rng *rng)
 			p.Elements = append(p.Elements, Element{
 				ID:          fmt.Sprintf("c%02de%02d", ch.Index, i),
 				Kind:        kind,
+				Asset:       pickAssetID(rng, kind),
 				Chapter:     ch.Index,
 				Start:       start,
 				End:         end,
@@ -410,10 +427,10 @@ func elementsForChapter(ch Chapter, dna *songdna.DNA) int {
 func pickKind(rng *rng, energy EnergyClass, dna *songdna.DNA) ElementKind {
 	rolls := []ElementKind{KindMonolith, KindPillar, KindRing}
 	if energy == EnergyPeak {
-		rolls = []ElementKind{KindEmberStorm, KindMonolith, KindGate, KindRing}
+		rolls = []ElementKind{KindEmberStorm, KindMonolith, KindGate, KindRing, KindSigil}
 	}
 	if energy == EnergyCalm {
-		rolls = []ElementKind{KindMirrorShard, KindCurrent, KindPillar}
+		rolls = []ElementKind{KindMirrorShard, KindCurrent, KindPillar, KindTree}
 	}
 	if dna.MotionStyle >= 2 {
 		rolls = append(rolls, KindGate)
@@ -432,6 +449,10 @@ func pickMotion(rng *rng, kind ElementKind, energy EnergyClass) MotionClass {
 		return MotionDrift
 	case KindMirrorShard:
 		return MotionRise
+	case KindSigil:
+		return MotionPulse
+	case KindTree:
+		return MotionDrift
 	}
 	if energy == EnergyPeak {
 		return MotionPulse
@@ -462,6 +483,48 @@ func describe(kind ElementKind, motion MotionClass, ch Chapter, dna *songdna.DNA
 		b.WriteString("steady response")
 	}
 	return b.String()
+}
+
+// pickAssetID binds an element to a worldassets catalog entry.
+// Deterministic from the plan rng; returns "" for the abstract
+// geometric kinds the renderers draw directly.
+func pickAssetID(rng *rng, kind ElementKind) string {
+	var family worldassets.Family
+	switch kind {
+	case KindSigil:
+		family = worldassets.FamilySigil
+	case KindTree:
+		family = worldassets.FamilyTree
+	default:
+		return ""
+	}
+	ids := worldassets.IDsForFamily(family)
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[rng.Intn(len(ids))]
+}
+
+// floorForEnvironment maps a chapter environment onto its ground
+// asset. Deterministic; unknown environments fall back to obsidian
+// tile (the neutral black ground).
+func floorForEnvironment(env string) string {
+	switch env {
+	case "threshold":
+		return "floor/obsidian-tile"
+	case "hall":
+		return "floor/cracked-earth"
+	case "arena":
+		return "floor/ritual-circle"
+	case "galleries":
+		return "floor/bone-grid"
+	case "descent":
+		return "floor/cracked-earth"
+	case "void":
+		return "floor/mirror-water"
+	default:
+		return "floor/obsidian-tile"
+	}
 }
 
 // buildLongAudioPolicy records the bounded long-audio strategy.

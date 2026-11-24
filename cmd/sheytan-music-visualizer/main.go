@@ -20,11 +20,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -35,8 +37,10 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/dsp"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/mvplan"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/worldexport"
 )
 
 var hexColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
@@ -68,6 +72,13 @@ func run(args []string, out, errW io.Writer) int {
 	exportFPS := fs.Int("export-fps", 30, "--export-cli frame rate (1-120)")
 	exportCodec := fs.String("export-codec", "h264", "--export-cli video codec: h264 (default) or hevc (requires a build with libx265)")
 	exportSeconds := fs.Float64("export-seconds", 1.0, "--export-cli duration in seconds")
+	// Run 45182658992: Blender-friendly world round trip. The per-track
+	// world plan JSON (written by the studio under world-plans/ after
+	// analysis) is exported as a Wavefront OBJ + MTL pair with one
+	// named object per element, chapter floor quads and token-derived
+	// materials - importable into Blender with default settings.
+	worldPlanFlag := fs.String("world-export-obj", "", "export the named world-plan JSON document to Wavefront OBJ (Blender-ready), then exit")
+	worldOut := fs.String("world-out", "", "--world-export-obj output .obj path (required with --world-export-obj; the companion .mtl is written beside it)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -90,6 +101,8 @@ func run(args []string, out, errW io.Writer) int {
 		return 0
 	case *selfCheckFlag:
 		return selfCheckToFile(out, errW, *selfCheckOut)
+	case *worldPlanFlag != "":
+		return worldExportOBJ(*worldPlanFlag, *worldOut, out, errW)
 	case *exportCLIFlag:
 		return export.RunCLI(export.CLIOptions{
 			Out: *exportOut, Width: *exportW, Height: *exportH,
@@ -106,8 +119,55 @@ func run(args []string, out, errW io.Writer) int {
 		fmt.Fprintln(out, "    --build-info-json  machine-readable build identity")
 		fmt.Fprintln(out, "    --self-check       foundation invariant checks")
 		fmt.Fprintln(out, "    --export-cli       headless deterministic export diagnostic")
+		fmt.Fprintln(out, "    --world-export-obj export a world-plan JSON to Blender-ready OBJ")
 		return 0
 	}
+}
+
+// worldExportOBJ implements --world-export-obj: load the plan JSON,
+// validate the output path and write the OBJ + MTL pair. A missing or
+// malformed plan, an empty output path or a write failure returns a
+// non-zero exit code with an actionable message.
+func worldExportOBJ(planPath, outPath string, out, errW io.Writer) int {
+	if outPath == "" {
+		fmt.Fprintln(errW, "error: --world-out is required with --world-export-obj")
+		return 2
+	}
+	data, err := os.ReadFile(planPath)
+	if err != nil {
+		fmt.Fprintf(errW, "error: world plan %s could not be read: %v\n", planPath, err)
+		return 1
+	}
+	var plan mvplan.Plan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		fmt.Fprintf(errW, "error: world plan %s is not a valid mvplan JSON document: %v\n", planPath, err)
+		return 1
+	}
+	if len(plan.Elements) == 0 {
+		fmt.Fprintf(errW, "error: world plan %s carries no elements (run an analysis in the app first)\n", planPath)
+		return 1
+	}
+	objFile, err := os.Create(outPath)
+	if err != nil {
+		fmt.Fprintf(errW, "error: output %s could not be created: %v\n", outPath, err)
+		return 1
+	}
+	defer objFile.Close()
+	mtlPath := filepath.Join(filepath.Dir(outPath), "sheytan_world.mtl")
+	mtlFile, err := os.Create(mtlPath)
+	if err != nil {
+		fmt.Fprintf(errW, "error: companion material file %s could not be created: %v\n", mtlPath, err)
+		return 1
+	}
+	defer mtlFile.Close()
+	res, err := worldexport.Export(&plan, objFile, mtlFile, worldexport.Options{})
+	if err != nil {
+		fmt.Fprintf(errW, "error: world export failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(out, "world plan exported: %s (objects=%d vertices=%d faces=%d lines=%d materials=%s)\n", outPath, res.Objects, res.Vertices, res.Faces, res.Lines, strings.Join(res.Material, ","))
+	fmt.Fprintf(out, "companion materials: %s\n", mtlPath)
+	return 0
 }
 
 type check struct {

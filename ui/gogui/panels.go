@@ -36,6 +36,26 @@ import (
 // tab through the persisted order — full-size theme buttons (touch-safe
 // targets) with explicit A11Y labels; the mod+alt+left/right chords are
 // the keyboard alternative. Both share the MoveActive state mutation.
+// tabStripPadding resolves the tab strip's responsive padding from
+// the token-driven spacing profile (roomier on touch classes).
+func tabStripPadding(th *ShellTheme) gui.Padding {
+	sp := th.Spacing()
+	return gui.NewPadding(sp.RowPadV, sp.BarPadH, sp.RowPadV, sp.BarPadH)
+}
+
+// panelPadding resolves the scroll panel and surface box padding
+// (professional density on desktop/wide, roomy on touch classes).
+func (sh *shell) panelPadding() gui.Padding {
+	sp := sh.th.Spacing()
+	return gui.NewPadding(sp.PanelPadV, sp.PanelPadH, sp.PanelPadV, sp.PanelPadH)
+}
+
+// rowPadding resolves the vertical padding of compact control rows.
+func (sh *shell) rowPadding() gui.Padding {
+	sp := sh.th.Spacing()
+	return gui.NewPadding(sp.RowPadV, 0, sp.RowPadV, 0)
+}
+
 func tabStripView(tabs *TabState, th *ShellTheme, onTab func(presentation.Destination), onMove func(int)) gui.View {
 	catalog := tabs.OrderedCatalog()
 	controls := make([]gui.View, 0, len(catalog)+2)
@@ -100,7 +120,7 @@ func tabStripView(tabs *TabState, th *ShellTheme, onTab func(presentation.Destin
 	return gui.Wrap(gui.ContainerCfg{
 		ID:          "tab-strip",
 		Sizing:      gui.FillFit,
-		Padding:     gui.NewPadding(2, 8, 2, 8),
+		Padding:     tabStripPadding(th),
 		Spacing:     gui.SpacingSmall,
 		Color:       th.SurfaceColor(),
 		SizeBorder:  gui.BorderThin,
@@ -148,7 +168,7 @@ func (sh *shell) scrollPanel(id string, content []gui.View) gui.View {
 	return gui.Column(gui.ContainerCfg{
 		ID:         id,
 		Sizing:     gui.FillFill,
-		Padding:    gui.PaddingMedium,
+		Padding:    sh.panelPadding(),
 		Spacing:    gui.SpacingSmall,
 		Scrollable: true,
 		ScrollMode: gui.ScrollVerticalOnly,
@@ -212,7 +232,7 @@ func (sh *shell) surfaceBox(id string, content []gui.View) gui.View {
 	return gui.Column(gui.ContainerCfg{
 		ID:          id,
 		Sizing:      gui.FillFit,
-		Padding:     gui.PaddingMedium,
+		Padding:     sh.panelPadding(),
 		Spacing:     gui.SpacingSmall,
 		Color:       sh.th.SurfaceColor(),
 		SizeBorder:  gui.BorderThin,
@@ -228,7 +248,7 @@ func (sh *shell) fieldColumn(label string, controls ...gui.View) gui.View {
 	content = append(content, controls...)
 	return gui.Column(gui.ContainerCfg{
 		Sizing:  gui.FillFit,
-		Padding: gui.NewPadding(2, 0, 2, 0),
+		Padding: sh.rowPadding(),
 		Spacing: gui.SpacingTight,
 		Content: content,
 	})
@@ -345,7 +365,7 @@ func (sh *shell) radioRow(field, label, current string, opts []radioOpt, onPick 
 func (sh *shell) switchRow(id, label string, selected bool, desc string, onFlip func(bool, gui.EventCtx)) gui.View {
 	return gui.Row(gui.ContainerCfg{
 		Sizing:  gui.FillFit,
-		Padding: gui.NewPadding(2, 0, 2, 0),
+		Padding: sh.rowPadding(),
 		Spacing: gui.SpacingMedium,
 		VAlign:  gui.VAlignMiddle,
 		Content: []gui.View{

@@ -1167,3 +1167,47 @@ Key engineering facts established this session (full detail in
   stays in the renderers.
 - Full CI-profile suite 39 packages ok; race green on mvplan/gogui/
   studio; fixture suites green; actionlint/zizmor clean locally.
+
+## Session record — 2026-11-24 (run 45182658992 repair, local branch `repair/run-45182658992`)
+
+- Diagnosed the three red lanes of run 45182658992 (commit 1d84152 =
+  the previous session's candidate pushed as BETA):
+  (1) build-android: the `goffi_static` tag itself broke the android
+  build (goff v0.6.8 errno build-tag inconsistency; reproduced locally
+  with an aarch64 cross toolchain — with the tag: the exact three hosted
+  errors; without: clean). Fixed by dropping the tag on the APK build
+  and restricting gomobile to `android/arm64` (goff ships android
+  implementations for arm64 only; matches the gate + artifact name).
+  (2) build-windows ASCII log contract: `windows-compiler.log` was
+  written via Tee-Object (CRLF on Windows — the documented 521-class
+  control-byte defect), failing the byte gate on every run that wrote
+  it. Fixed to the WriteAllText LF discipline.
+  (3) preflight: all locally reproducible gates re-verified clean with
+  the pinned tools after the session's workflow edits (actionlint
+  1.7.12 + ignores + fixture; the scan is clean on the edited tree).
+  The step's four stdout-only error lines now also land in
+  `ci-logs/static-validation-errors.log` so the next hosted failure
+  carries its own origin in the consolidated report; the hosted-only
+  surface (online zizmor, pinned-tool download) remains the honest
+  remainder, unchanged and unweakened.
+- World assets + Blender round trip: new `internal/worldassets` (5
+  Luciferian sigils, 3 ritual trees, 5 floors; deterministic unit-space
+  geometry, catalog-tested), `mvplan` bindings (Asset per element,
+  Floor per chapter, new kinds), `internal/worldexport` OBJ+MTL writer
+  and the CLI `--world-export-obj` (verified with a real plan: 27
+  objects, 3360 vertices, 684 faces, 456 lines, 5 materials; honest
+  failure paths). The studio persists `world-plans/<fingerprint>.json`
+  after every v3 analysis (`Studio.WorldPlanPath()`).
+- Data management: `audio.Cache.Sweep` + `CacheBudgetBytes` (4 GiB,
+  oldest-first orphan removal, keep-protection, best-effort honest
+  reporting wired into the import job); responsive space management in
+  the shell (`SpacingForWidth` profile applied to bars/panels/rows;
+  `TestSpacingProfileForWidth`).
+- Verification (linux/amd64, go1.27.4): gofmt clean; tidy -diff clean;
+  go mod verify all modules verified; CI-canonical build + vet green;
+  full suite 41 packages ok / 0 FAIL; race green on gogui/audio/
+  worldassets/worldexport/mvplan; windows/amd64 cross-compiles green
+  (wails purego+sheytan_nogpu profile and the CLI); actionlint clean on
+  both workflows (pinned 1.7.12 + repository ignore set); fixture
+  fixture still rejected (exit 1). Android cgo APK link + hosted rerun
+  remain the honest NOT RUN boundary (no push authorized).

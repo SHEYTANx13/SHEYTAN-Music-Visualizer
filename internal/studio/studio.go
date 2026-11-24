@@ -11,6 +11,7 @@ package studio
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -86,8 +87,12 @@ type Studio struct {
 	// worldPlan is the per-track premade music-video world (mvplan)
 	// derived from the v3 analysis + DNA; nil for legacy-only analyses.
 	worldPlan *mvplan.Plan
-	vizConfig visualizer.Config
-	transport *playback.Transport
+	// worldPlanPath is the on-disk location the current plan was
+	// persisted to ("" when none was persisted yet). One JSON document
+	// per track fingerprint, overwritten on rebuild (bounded).
+	worldPlanPath string
+	vizConfig     visualizer.Config
+	transport     *playback.Transport
 
 	// Audio output opens lazily on the first Play and is published
 	// through an atomic pointer: the sync.Once body performs NO
@@ -301,6 +306,51 @@ func (s *Studio) WorldPlan() *mvplan.Plan {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.worldPlan
+}
+
+// WorldPlanPath returns the on-disk path the current world plan was
+// persisted to ("" when none was persisted yet). The JSON document is
+// the deliverable a per-track premade music video (or a Blender round
+// trip via --world-export-obj) consumes.
+func (s *Studio) WorldPlanPath() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.worldPlanPath
+}
+
+// persistWorldPlan writes one plan JSON document under
+// world-plans/<fingerprint>.json in the app data dir (next to the PCM
+// cache). One file per track, overwritten on rebuild: the world-plans
+// directory is bounded by the number of analyzed tracks, never by
+// analysis count or time. Safe to call off the studio lock.
+func (s *Studio) persistWorldPlan(p *mvplan.Plan) (string, error) {
+	if p == nil || p.TrackFingerprint == "" {
+		return "", fmt.Errorf("studio: world plan has no fingerprint")
+	}
+	fp := p.TrackFingerprint
+	for _, r := range fp {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return "", fmt.Errorf("studio: track fingerprint contains an unusable character %q", r)
+		}
+	}
+	dir := filepath.Join(filepath.Dir(s.cacheDir), "world-plans")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("studio: world-plan dir: %w", err)
+	}
+	data, err := json.MarshalIndent(p, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("studio: world-plan JSON: %w", err)
+	}
+	path := filepath.Join(dir, fp+".json")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return "", fmt.Errorf("studio: world-plan write: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("studio: world-plan finalize: %w", err)
+	}
+	return path, nil
 }
 
 // DeviceReal reports whether a real audio device is proven in use

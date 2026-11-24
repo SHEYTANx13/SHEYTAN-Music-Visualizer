@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -135,6 +136,101 @@ func (c *Cache) Reader(fp string) (*os.File, error) {
 // OpenWAV opens the canonical WAV wrapper.
 func (c *Cache) OpenWAV(fp string) (*os.File, error) {
 	return os.Open(c.WavPath(fp))
+}
+
+// CacheBudgetBytes is the default byte budget of the canonical PCM
+// cache sweep (run 45182658992 data-management). 4 GiB keeps roughly
+// three hours of canonical stereo float32 PCM (384 KB/s) resident; the
+// sweep removes orphaned families beyond it, oldest first.
+const CacheBudgetBytes int64 = 4 << 30
+
+// cacheFamily groups every on-disk artifact of one fingerprint.
+type cacheFamily struct {
+	fp     string
+	bytes  int64
+	newest int64 // unix nanos of the newest artifact
+}
+
+// Sweep enforces the cache disk budget: it deletes every cache family
+// (a fingerprint's .f32/.wav/.json set) whose fingerprint is not in
+// keep, oldest first (by the newest artifact's mtime), until the total
+// remaining size is <= maxBytes or nothing removable is left. Kept
+// families are never touched. The method is safe for concurrent use
+// (directory walk under the cache lock; deletions best-effort with the
+// first error surfaced after the pass completes).
+func (c *Cache) Sweep(keep map[string]struct{}, maxBytes int64) (removed int, freed int64, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entries, walkErr := os.ReadDir(c.dir)
+	if walkErr != nil {
+		return 0, 0, walkErr
+	}
+	fams := map[string]*cacheFamily{}
+	var total int64
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		fp := name
+		for _, suffix := range []string{".f32", ".wav", ".json"} {
+			if strings.HasSuffix(name, suffix) {
+				fp = strings.TrimSuffix(name, suffix)
+				break
+			}
+		}
+		if fp == "" {
+			continue
+		}
+		info, ierr := e.Info()
+		if ierr != nil {
+			continue // unreadable entry: skip, never fail the sweep
+		}
+		f, ok := fams[fp]
+		if !ok {
+			f = &cacheFamily{fp: fp}
+			fams[fp] = f
+		}
+		f.bytes += info.Size()
+		if m := info.ModTime().UnixNano(); m > f.newest {
+			f.newest = m
+		}
+		total += info.Size()
+	}
+	if total <= maxBytes {
+		return 0, 0, nil
+	}
+	// Removable candidates: not kept, oldest first.
+	var cands []*cacheFamily
+	for _, f := range fams {
+		if _, ok := keep[f.fp]; ok {
+			continue
+		}
+		cands = append(cands, f)
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].newest < cands[j].newest })
+	var firstErr error
+	for _, f := range cands {
+		if total <= maxBytes {
+			break
+		}
+		c.Delete(f.fp)
+		removed++
+		freed += f.bytes
+		total -= f.bytes
+		// Best-effort: surface the first failure after the pass; a family
+		// that could not be removed is re-counted on the next sweep.
+		if _, statErr := os.Stat(c.RawPath(f.fp)); statErr == nil && f.bytes > 0 {
+			// Still present and still sized: treat as a delete failure.
+			if firstErr == nil {
+				firstErr = fmt.Errorf("audio: sweep could not remove family %s", f.fp)
+			}
+			removed--
+			freed -= f.bytes
+			total += f.bytes
+		}
+	}
+	return removed, freed, firstErr
 }
 
 // Delete removes all artifacts of one entry (used by failed imports).

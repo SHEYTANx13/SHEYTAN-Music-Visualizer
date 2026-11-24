@@ -328,6 +328,17 @@ jobs:
           set -Eeuo pipefail
           mkdir -p ci-logs bin-tools gate-results
           start_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          # Run 45182658992 repair: every sub-gate error line below used to
+          # be printed ONLY to the step log, so a hosted sub-gate failure
+          # left the consolidated diagnostics with a bare "step conclusion
+          # failure" and no origin (the observed preflight signature of
+          # runs 45097038674 and 45182658992). emit_error keeps the step
+          # log line AND appends the same ASCII line to
+          # ci-logs/static-validation-errors.log, which travels with the
+          # preflight log part into the consolidated report.
+          SV_ERRLOG=ci-logs/static-validation-errors.log
+          : > "$SV_ERRLOG"
+          emit_error() { printf '%s\n' "$*"; printf '%s\n' "$*" >> "$SV_ERRLOG"; }
           {
             echo "[section] actionlint v1.7.12 (pinned, checksum-verified)"
             curl -fsSL -o bin-tools/actionlint.tgz \
@@ -346,7 +357,7 @@ jobs:
           } 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/workflow-static-tools.log
           st=${PIPESTATUS[0]}
           if [ "$st" -ne 0 ]; then
-            echo "ERROR: static-tool installation/version verification failed (exit $st)"
+            emit_error "ERROR: static-tool installation/version verification failed (exit $st)"
             exit "$st"
           fi
 
@@ -358,7 +369,7 @@ jobs:
             2>&1 | "$CI_BIN/cisanitize" > ci-logs/actionlint.log || rc=$?
           cat ci-logs/actionlint.log
           if [ "$rc" -ne 0 ]; then
-            echo "ERROR: actionlint findings (outside the two documented compatibility ignores above)"
+            emit_error "ERROR: actionlint findings (outside the two documented compatibility ignores above)"
           fi
 
           # NEGATIVE FIXTURE (§3.2): a deliberately invalid workflow must
@@ -372,7 +383,7 @@ jobs:
           printf 'on: push\njobs:\n  broken:\n    runs-on: ubuntu-26.04\n    steps:\n      - run: echo hi\n        uses: actions/checkout@v9\n' \
             > .actionlint-fixture/.github/workflows/broken.yml
           if bin-tools/actionlint .actionlint-fixture/.github/workflows/broken.yml 2>&1 | "$CI_BIN/cisanitize" > ci-logs/actionlint-fixture.log; then
-            echo "ERROR: actionlint accepted an INVALID workflow — the scan cannot be trusted"
+            emit_error "ERROR: actionlint accepted an INVALID workflow - the scan cannot be trusted"
             fixture_failed=1
           else
             echo "actionlint negative fixture PASSED (invalid workflow correctly rejected, exit nonzero)"
@@ -390,7 +401,7 @@ jobs:
             --format plain .github/workflows/ 2>&1 | "$CI_BIN/cisanitize" > ci-logs/zizmor.log || zrc=$?
           cat ci-logs/zizmor.log
           if [ "$zrc" -ne 0 ]; then
-            echo "ERROR: zizmor findings at low severity or above"
+            emit_error "ERROR: zizmor findings at low severity or above"
           fi
           end_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
@@ -560,7 +571,27 @@ jobs:
           # evidence still flows behind a loud marker — the strict byte
           # gate fails that log; nothing is silently masked.
           if ($env:CI_SANITIZER_EXE -and (Test-Path $env:CI_SANITIZER_EXE)) {
-            $evidence | & $env:CI_SANITIZER_EXE | Tee-Object -FilePath ci-logs/windows-compiler.log
+            # Run 45182658992 repair: the former
+            #   $evidence | & $env:CI_SANITIZER_EXE | Tee-Object -FilePath ci-logs/windows-compiler.log
+            # terminated every written line with CRLF on Windows. Tee-Object
+            # appends the platform line ending per record, so even fully
+            # sanitized CONTENT carried CR bytes into the log part - the
+            # exact "521-class control-byte" defect Capture-Step.ps1
+            # documents (Add-Content / Tee-Object are forbidden writers for
+            # ci-logs). windows-compiler.log therefore failed the byte-level
+            # "Validate ASCII log contract" gate on every Windows run that
+            # wrote it (runs 45097038674 and 45182658992), independent of
+            # any gate-crash downstream effect. The file is now written
+            # through [System.IO.File]::WriteAllText with explicit LF-only
+            # content and UTF-8 without BOM - the same discipline
+            # Capture-Step.ps1 and the setup-blocked writer use. The
+            # console passthrough keeps the evidence visible in the step
+            # log, and the sanitized text is joined exactly as the
+            # sanitizer emitted it (no re-termination).
+            $sanitizedLines = @($evidence | & $env:CI_SANITIZER_EXE)
+            $text = (($sanitizedLines -join "`n") + "`n")
+            [System.IO.File]::WriteAllText((Join-Path (Get-Location).Path 'ci-logs/windows-compiler.log'), $text, (New-Object System.Text.UTF8Encoding($false)))
+            Write-Output $sanitizedLines
           }
           else {
             # FAIL CLOSED (priority-A repair of the raw-passthrough
@@ -1535,13 +1566,43 @@ jobs:
             if go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261117202452-47699113848a && gomobile init >/dev/null 2>&1; then
               echo "gomobile: installed"
               echo "[section] APK build (arm64, api 31)"
-              # Run 45097038674 repair: the goffi_static tag is REQUIRED
-              # here. Without it the oto android driver does not compile
-              # (undefined: oboe.Play/Suspend/Resume in
-              # driver_android.go) and the universal APK can never build;
-              # proven locally by cross-compiling ./cmd/app-gogui for
-              # android/arm64 with and without the tag.
-              if CGO_ENABLED=1 gomobile build -tags goffi_static -target android -androidapi 31 -o /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk ./cmd/app-gogui; then
+              # Run 45182658992 repair: NO goffi_static tag here, target
+              # restricted to android/arm64.
+              # 1. The goffi_static tag made the required APK gate red in
+              #    run 45182658992 with three exact goff v0.6.8 compiler
+              #    errors (errno_static.go ErrnoFnAddr redeclared;
+              #    errno_android_cgo.go other declaration of ErrnoFnAddr +
+              #    undefined dl.AndroidErrnoAddr). Root cause is an
+              #    upstream build-tag inconsistency: errno_android_cgo.go
+              #    matches `android && cgo && arm64` WITHOUT a
+              #    !goffi_static guard, but the dl.AndroidErrnoAddr symbol
+              #    it calls only exists under `android && cgo && arm64 &&
+              #    !goffi_static`, and errno_static.go also matches
+              #    `goffi_static && ... android ... && arm64`. With
+              #    CGO_ENABLED=1 AND -tags goffi_static both errno files
+              #    compile and the package cannot build. Without the tag,
+              #    android+cgo resolves goffi through its C-wrapper dlopen
+              #    path (dl_android_cgo.go, -ldl) and compiles cleanly;
+              #    reproduced locally with an aarch64 cross toolchain
+              #    (with the tag: the exact three hosted errors; without:
+              #    the goff packages compile clean). The goffi_static tag
+              #    remains a DESKTOP link requirement (goffi_dlopen
+              #    SDYNIMPORT vs CGO relocation mixing), not an android
+              #    one; every other lane keeps it.
+              # 2. goff v0.6.8 ships android implementations for arm64 ONLY
+              #    (dl_android*.go, errno_android*.go and
+              #    syscall_arm64.go are all arm64-gated), so a universal
+              #    all-ABI APK cannot compile with the linked GPU renderer
+              #    profile. The gate (validate-apk.py) and the artifact
+              #    name are arm64-specific, so the build scope is arm64.
+              # 3. CGO_ENABLED=1 stays: the oto android driver's oboe
+              #    binding (binding_android.cpp) is cgo-only. The run
+              #    45097038674 "undefined: oboe.Play" observation was a
+              #    CGO_ENABLED=0 cross-compile artifact (oboe's binding is
+              #    excluded when cgo is off) and never depended on
+              #    goffi_static; with CGO_ENABLED=1 the oboe C++ binding
+              #    compiles against the NDK for android/arm64.
+              if CGO_ENABLED=1 gomobile build -target android/arm64 -androidapi 31 -o /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk ./cmd/app-gogui; then
                 echo "APK build: OK"
                 ls -la /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk
                 echo "APK_BUILD_OK" > "$status_file"

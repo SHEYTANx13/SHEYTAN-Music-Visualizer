@@ -1,5 +1,98 @@
 # Changelog
 
+## Run 45182658992 repair — Android goff tag conflict, Windows CRLF log writer, preflight evidence plumbing, world assets + Blender export, responsive space management, cache disk budget (2026-11-24)
+
+- **Android required-APK gate repair (`.github/workflows/build.yml`)**: the
+  `goffi_static` tag added in the previous session is exactly what made
+  run 45182658992's APK build fail with three goff v0.6.8 compiler
+  errors (`errno_static.go` ErrnoFnAddr redeclared; `errno_android_cgo.go`
+  other declaration + undefined `dl.AndroidErrnoAddr`). Root cause is an
+  upstream build-tag inconsistency: `errno_android_cgo.go` matches
+  `android && cgo && arm64` without a `!goffi_static` guard, while the
+  `dl.AndroidErrnoAddr` symbol it calls only exists under
+  `android && cgo && arm64 && !goffi_static`, and `errno_static.go` also
+  matches `goffi_static && android && arm64` — with CGO_ENABLED=1 AND the
+  tag, both files compile and the package cannot build. Reproduced
+  locally with an aarch64 cross toolchain: with the tag the exact three
+  hosted errors appear; without the tag the goff android+cgo path
+  (dl_android_cgo.go C wrappers) compiles clean. The tag remains a
+  DESKTOP link requirement only. Additionally, goff v0.6.8 ships android
+  implementations for arm64 ONLY, so the build target is now
+  `android/arm64` (matching the gate validator and the artifact name)
+  instead of a universal APK that can never compile with the linked GPU
+  renderer profile.
+- **Windows ASCII-log-contract repair (`.github/workflows/build.yml`)**:
+  the "Verify UCRT64 toolchain" step wrote `ci-logs/windows-compiler.log`
+  through `Tee-Object`, which terminates every written record with CRLF
+  on Windows — the exact "521-class control-byte" defect that
+  `scripts/ci/Capture-Step.ps1` documents as forbidden for ci-logs
+  writers. Every Windows run that wrote that file therefore failed the
+  byte-level "Validate ASCII log contract" gate (runs 45097038674 and
+  45182658992), independent of any gate-crash downstream effect (the
+  previous session's assessment). The file is now written through
+  `[System.IO.File]::WriteAllText` with explicit LF-only content and
+  UTF-8 without BOM (the Capture-Step discipline); console passthrough
+  and the fail-closed sanitizer-unavailable branch are unchanged.
+- **Preflight evidence plumbing (`.github/workflows/build.yml`)**: the
+  static-validation step's four sub-gate error lines were printed only
+  to the step log, so a hosted sub-gate failure leaves the consolidated
+  diagnostics with a bare "step conclusion failure" and no origin (the
+  observed preflight signature of both runs). Every sub-gate error now
+  also lands in `ci-logs/static-validation-errors.log` via an
+  `emit_error` helper (ASCII-pure; the fixture-acceptance message lost
+  its em-dash), which travels with the preflight log part into the
+  consolidated report. All locally reproducible sub-gates re-verified
+  with the pinned tools after the workflow edits (actionlint 1.7.12 with
+  the repository ignore set: clean on both workflows; negative fixture
+  still rejected, exit 1).
+- **New `internal/worldassets`**: the canonical 3D world asset catalog —
+  five Luciferian sigils (inverted pentagram, horned mark, serpent coil,
+  inverted cross, eye of the abyss), three ritual trees (dead conifer,
+  twisted oak, cypress column) and five floor variants (obsidian tile,
+  cracked earth, ritual circle, bone grid, mirror water) as
+  deterministic unit-space geometry (outlines, segment skeletons,
+  bounded pattern descriptors). Pure data, contract-tested (catalog
+  invariants, family coverage, determinism, validator rejects).
+- **`internal/mvplan` wiring**: new element kinds (sigil, tree, floor),
+  per-element `Asset` bindings chosen deterministically from the
+  catalog, per-chapter `Floor` selected by environment, and
+  sigil/tree motion classes. Existing bounds (24/chapter, 480 total,
+  96 chapters) are unchanged and still enforced.
+- **New `internal/worldexport` + CLI `--world-export-obj`**: the
+  Blender-friendly round trip. A world-plan JSON document exports to a
+  Wavefront OBJ + MTL pair (y-up, 1 unit = 1 meter, one named object per
+  element, tiled chapter floor quads, extruded sigil prisms, tree line
+  skeletons, token-derived materials). Verified end-to-end locally with
+  a real plan (27 objects, 3360 vertices, 684 faces, 456 lines, 5
+  materials) and honest failure paths (missing/malformed plan, missing
+  output path, zero-element plan all fail with actionable errors).
+- **Studio world-plan persistence**: after each successful v3 analysis
+  the plan JSON is written to `world-plans/<fingerprint>.json` (atomic
+  tmp+rename; one document per track, overwritten on rebuild; the path
+  is exposed via `Studio.WorldPlanPath()` and reported in the
+  analysis-done event). This is the per-track premade music-video
+  document users and the CLI consume.
+- **Cache disk budget (`internal/audio`, studio wiring)**: new
+  `Cache.Sweep(keep, maxBytes)` + `audio.CacheBudgetBytes` (4 GiB) —
+  orphaned cache families (tracks no longer loaded) are deleted oldest
+  first until the byte budget holds; the kept/active family is never
+  touched; best-effort with the outcome reported in the import-done
+  event, never silent and never failing the import. Contract-tested
+  (oldest-first ordering, budget stop, keep-protection, within-budget
+  no-op).
+- **Responsive space management (`ui/gogui`)**: new token-driven
+  `ShellTheme.SpacingForWidth` + per-frame `SetSpacingForWidth` next to
+  the touch-target resolution. Phones/tablets get roomier bars, panels
+  and rows (touch-friendly); desktop/wide tighten vertically for a
+  denser professional workspace; horizontal gutters never collapse. The
+  command bar, status strip, tab strip, scroll panels, surface boxes and
+  compact control rows all compose from the resolved profile — covered
+  by `TestSpacingProfileForWidth` + `TestSpacingDefaultsArePhoneSafe`.
+- Full CI-canonical suite (goffi_static): 41 packages ok, 0 FAIL; race
+  green on every touched package; `go vet` clean; `gofmt -l .` empty;
+  tidy/verify clean; windows/amd64 cross-compiles green; actionlint
+  clean on both workflows after all edits.
+
 ## Run 45097038674 repair — Windows license-gate fix, Android APK gate fix, dependency upgrades, touch-safe UI, per-track 3D world plans (2026-11-23)
 
 - **Windows post-archive license gate repair (`scripts/build/build-windows.ps1`)**:
