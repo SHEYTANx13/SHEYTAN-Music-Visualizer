@@ -103,7 +103,7 @@ jobs:
             # Dependency-graph reconciliation (run 44648357437, failure
             # 2.12): the traced build profile is `go vet -tags
             # goffi_static ./...` plus the manual traced build of the
-            # same production profile. The UI shell is go-gui v0.98.0
+            # same production profile. The UI shell is go-gui v0.99.1
             # (cgo-free Linux desktop: pure-Go X11 + runtime dlopen),
             # so NO X11/Wayland/GL -dev headers or pkg-config UI
             # modules are required. Only the C toolchain for the GoGPU
@@ -119,7 +119,7 @@ jobs:
             fi
 
             echo "[section] build-time pkg-config UI modules"
-            echo "required: none (go-gui v0.98.0 cgo-free Linux desktop; the traced build below is the proof)"
+            echo "required: none (go-gui v0.99.1 cgo-free Linux desktop; the traced build below is the proof)"
 
             echo "[section] CGO compiler identity"
             if [ "$CGO_ENABLED" != "1" ]; then

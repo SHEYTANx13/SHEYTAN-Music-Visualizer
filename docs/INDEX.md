@@ -18,7 +18,7 @@ not exist. Links are verified by `scripts/ci/tests/test-docs-consistency.sh`.
 
 | Document | Scope |
 | --- | --- |
-| [docs/architecture.md](architecture.md) | Module map, data flow, threading rules (Fyne event loop, `fyne.Do`), the close/shutdown state machine (`internal/appclose`) and the responsive root (`ui/fyne/responsive.go`). |
+| [docs/architecture.md](architecture.md) | Module map, data flow, frame-thread rules (the go-gui shell: frame-thread-owned control values, uiState/preview-pacer bridges) and the responsive token classes (`ui/gogui/layout.go`). |
 | [docs/architecture/queue-orchestration.md](architecture/queue-orchestration.md) | The bounded work scheduler (`internal/jobs`): queue classes A–I, hard lane ceilings, typed admission outcomes, job lifecycle/records, weighted fairness + aging, cancellation/containment/shutdown, job journal and crash reconciliation, studio routing map. |
 | [docs/features/requirements-manager.md](features/requirements-manager.md) | GitHub Requirements Manager + Download Center engine (`internal/ghreq`): closed validated requirements catalog, official release discovery, deterministic asset matching, strict origin policy, integrity levels, resumable transfer state machine. |
 | [docs/security/file-access-and-privileges.md](security/file-access-and-privileges.md) | Selected-file/folder analysis (`internal/fileaccess`): asInvoker least-privilege model (no elevation, no helper), authorization summary + revocable grants, openat-anchored read-only bounded traversal, sensitive-location default-skip inventory, redacted audit trail. |

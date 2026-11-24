@@ -129,6 +129,24 @@ first. A comment line whose first word after `#` is `shellcheck` is
 parsed as a shellcheck DIRECTIVE — never write prose lines in `run:`
 blocks that start that way.
 
+The same parity class applies to pwsh-gated fixtures:
+`test-ci-plumbing.sh`'s C17-21 group (and `Test-ResolveRepoRoot.ps1`'s
+R8 fixture inside `test-package-gates.sh`) execute only when a `pwsh`
+binary is on PATH; every session before 2026-11-24 recorded them
+`NOT RUN` and the stale assertions inside them (D23b's pre-run-44648357437
+`go test $goTags ./...` line, H30's pre-iOS-removal download count)
+stayed invisible until a pwsh-capable host ran the suite. Install pwsh 7
+before claiming a local plumbing/fixture pass.
+
+Gate-body child safety (run 45347124889): a Capture-Step gate body that
+references a parent-only build-script variable dies under
+`Set-StrictMode -Version 3.0` with a message carrying no "error"
+substring, so the filtered diagnostic log never shows the origin. The
+P13 fixture (`scripts/ci/tests/audit-gate-bodies.py`, invoked by
+`test-package-gates.sh`) audits every `build-windows.ps1` gate body for
+parent-only variable references; extend it whenever a gate gains a new
+documented preamble variable.
+
 ## Diagnosing a red run, in order
 
 1. Open the run page; check which required job(s) are red.

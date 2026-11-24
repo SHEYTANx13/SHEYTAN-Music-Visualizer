@@ -618,6 +618,44 @@ if ($exeOk) {
     # forbid-bundled-media-tools and package-size-budget below enforce
     # this negatively on the produced ZIP.
     $rc = Capture-Step -Job $job -Step "stage-portable" -ToolContext "gate:stage-portable" -Command {
+        # RUN 45347124889 stage-portable repair: the gate previously died
+        # inside $ErrorActionPreference = "Stop" on a thrown Copy-Item
+        # without any explanatory "ERROR:" line, so the filtered
+        # diagnostic log carried only the downstream missing-entry
+        # failures and never the origin. Every source is asserted first
+        # with a precise per-file message; a freshly linked executable
+        # can transiently hold a sharing lock while Defender real-time
+        # scanning reads it (validate-pe read the same CLI exe
+        # successfully before AND after the failed copy), so the copy
+        # retries ONLY that documented class on a bounded budget,
+        # logging every attempt; anything else fails loudly.
+        function Copy-StagedFile {
+            param([string]$Source, [string]$DestDir)
+            if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+                Write-Output ("ERROR: stage-portable source missing: {0} (expected under the job working directory)" -f $Source)
+                exit 1
+            }
+            $deadline = (Get-Date).AddSeconds(12)
+            $attempt = 0
+            while ($true) {
+                $attempt++
+                try {
+                    Copy-Item -LiteralPath $Source -Destination $DestDir -ErrorAction Stop
+                    return
+                }
+                catch {
+                    $msg = $_.Exception.Message
+                    $transient = ($msg -match "being used by another process") -or ($msg -match "sharing violation")
+                    if (-not $transient -or (Get-Date) -ge $deadline) {
+                        Write-Output ("ERROR: stage-portable could not copy {0} after {1} attempt(s): {2}" -f $Source, $attempt, $msg)
+                        exit 1
+                    }
+                    Write-Output ("WARN: transient sharing violation copying {0} (attempt {1}); retrying: {2}" -f $Source, $attempt, $msg)
+                    Start-Sleep -Seconds 2
+                }
+            }
+        }
+        try {
         # CANONICAL ONE-PACKAGE CONTRACT (run 42939743766 §5.1): the GitHub
         # Actions artifact is EXACTLY dist\SHEYTAN-Music-Visualizer-windows-x64.zip
         # containing exactly one top-level app directory
@@ -632,23 +670,42 @@ if ($exeOk) {
         # RUN 45297707372 SHIP-THE-SHELL: app-gogui.exe is the PRIMARY
         # product executable (the thing users double-click); the CLI
         # stays as the scripting/self-check companion.
-        if ($shellOk) {
-            Copy-Item "bin\app-gogui.exe" $appDir
+        # RUN 45347124889 ROOT CAUSE: this gate body previously read
+        # the parent-only $shellOk variable. Capture-Step serializes
+        # each gate into a CHILD pwsh process whose only inherited
+        # PowerShell surface is the generated script text, so under
+        # Set-StrictMode -Version 3.0 the read threw "The variable
+        # '\u0024shellOk' cannot be retrieved because it has not been
+        # set." - a message with no "error" substring, which the
+        # filtered diagnostic log therefore never showed (the same
+        # parent-only-variable class as run 41915116613's $goTags).
+        # The gate now derives the shell-exe state from the FILE
+        # SYSTEM (the artifact the previous gate built), never from
+        # parent scope. Gate bodies must reference parent variables
+        # never; scripts/ci/tests/test-ci-plumbing.sh asserts the
+        # audit below.
+        if (Test-Path -LiteralPath "bin\app-gogui.exe" -PathType Leaf) {
+            Copy-StagedFile -Source "bin\app-gogui.exe" -DestDir $appDir
         } else {
-            Write-Output "ERROR: the product desktop shell (app-gogui.exe) was not built; refusing to stage a CLI-only package"
+            Write-Output "ERROR: the product desktop shell (bin/app-gogui.exe) was not found beside the built CLI; refusing to stage a CLI-only package"
             exit 1
         }
-        Copy-Item "assets\icon\icon.png" $appDir
-        Copy-Item "bin\sheytan-music-visualizer.exe" $appDir
-        Copy-Item "docs/license.md" $appDir
-        Copy-Item "readme.md" $appDir
-        Copy-Item "packaging\portable.mode" $appDir
-        Copy-Item "packaging\DATA-FOLDERS.txt" (Join-Path $appDir "data")
-        Copy-Item "packaging\FFMPEG-TOOLS-LICENSING.md" (Join-Path $appDir "tools\ffmpeg")
+        Copy-StagedFile -Source "assets\icon\icon.png" -DestDir $appDir
+        Copy-StagedFile -Source "bin\sheytan-music-visualizer.exe" -DestDir $appDir
+        Copy-StagedFile -Source "docs/license.md" -DestDir $appDir
+        Copy-StagedFile -Source "readme.md" -DestDir $appDir
+        Copy-StagedFile -Source "packaging\portable.mode" -DestDir $appDir
+        Copy-StagedFile -Source "packaging\DATA-FOLDERS.txt" -DestDir (Join-Path $appDir "data")
+        Copy-StagedFile -Source "packaging\FFMPEG-TOOLS-LICENSING.md" -DestDir (Join-Path $appDir "tools\ffmpeg")
         $exeItem = Get-Item (Join-Path $appDir "sheytan-music-visualizer.exe")
         if ($exeItem.Length -le 0) { Write-Output "ERROR: staged executable is empty"; exit 1 }
         Write-Output ("staged executable size: {0} bytes" -f $exeItem.Length)
         Get-ChildItem -Recurse -File $appDir | ForEach-Object { $rel = $_.FullName.Substring($stageRoot.Length + 1); Write-Output ("STAGED: " + ($rel -replace '\\', '/')) }
+        }
+        catch {
+            Write-Output ("ERROR: stage-portable failed: {0}" -f $_.Exception.Message)
+            exit 1
+        }
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "stage-portable" }
@@ -658,8 +715,19 @@ if ($exeOk) {
     # exactly, before archive creation. SHA-256 equality on raw bytes;
     # any mismatch fails the package gate.
     $rc = Capture-Step -Job $job -Step "verify-package-license" -ToolContext "gate:license-identity" -Command {
-        $canonical = Get-FileHash -Algorithm SHA256 "docs/license.md"
+        # RUN 45347124889: a missing input previously threw opaquely
+        # (Get-FileHash under $ErrorActionPreference = "Stop"); the
+        # precondition makes the failure self-describing.
+        try {
+        $canonicalPath = "docs/license.md"
         $stagedPath = "dist\windows-x64-stage\SHEYTAN-Music-Visualizer-windows-x64\license.md"
+        foreach ($licPath in @($canonicalPath, $stagedPath)) {
+            if (-not (Test-Path -LiteralPath $licPath -PathType Leaf)) {
+                Write-Output ("ERROR: verify-package-license input missing: {0} (a missing staged license means stage-portable failed upstream)" -f $licPath)
+                exit 1
+            }
+        }
+        $canonical = Get-FileHash -Algorithm SHA256 $canonicalPath
         $staged = Get-FileHash -Algorithm SHA256 $stagedPath
         Write-Output ("canonical sha256: {0}" -f $canonical.Hash)
         Write-Output ("staged    sha256: {0}" -f $staged.Hash)
@@ -669,6 +737,11 @@ if ($exeOk) {
         }
         Write-Output "license identity PASSED (staged copy is byte-identical to the canonical tracked license.md)"
         exit 0
+        }
+        catch {
+            Write-Output ("ERROR: verify-package-license failed: {0}" -f $_.Exception.Message)
+            exit 1
+        }
     }
     if ($rc -ne 0) { Fail-Gate "verify-package-license" }
 

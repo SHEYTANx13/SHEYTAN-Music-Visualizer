@@ -25,6 +25,7 @@ func feedMono(m *MultiRes, mono []float64, chunk int) {
 }
 
 func TestMultiResHatSharpness(t *testing.T) {
+	t.Parallel()
 	// HatLike proxy: very short high-frequency transient at 1.0 s.
 	tr := Silence(2, 1)
 	HatLike(&tr, 1.0, 0.5)
@@ -60,6 +61,7 @@ func TestMultiResHatSharpness(t *testing.T) {
 }
 
 func TestMultiResSubBassPlacement(t *testing.T) {
+	t.Parallel()
 	// 42 Hz tone proxy → SubEnergy (20..60 Hz) must dominate BassBody
 	// (60..250 Hz); 120 Hz → the reverse.
 	for _, tc := range []struct {
@@ -92,6 +94,7 @@ func TestMultiResSubBassPlacement(t *testing.T) {
 }
 
 func TestMultiResHopSeconds(t *testing.T) {
+	t.Parallel()
 	m := NewMultiRes()
 	feedMono(m, monoF64(Tone(220, 1, 0.5)), 48000)
 	d := m.Series()
@@ -112,6 +115,7 @@ func TestMultiResHopSeconds(t *testing.T) {
 }
 
 func TestMultiResChunkIndependence(t *testing.T) {
+	t.Parallel()
 	tr := Tone(220, 2, 0.4)
 	HatLike(&tr, 0.7, 0.5)
 	KickLike(&tr, 1.3, 0.8)

@@ -48,6 +48,7 @@ func toneSilenceTone() StereoTrack {
 }
 
 func TestLoudnessSineLevel(t *testing.T) {
+	t.Parallel()
 	// 997 Hz sine at amplitude 0.5, DUAL MONO (L = R, both speakers):
 	// a full-scale 1 kHz sine on ONE channel reads -3.01 LUFS (RMS
 	// -3.01 dBFS, K-weight ~0 dB at 1 kHz, plus the -0.691 LUFS
@@ -63,6 +64,7 @@ func TestLoudnessSineLevel(t *testing.T) {
 }
 
 func TestLoudnessSilence(t *testing.T) {
+	t.Parallel()
 	m := NewLoudnessMeter()
 	loudFeed(m, Silence(3, 1))
 	s := m.Finish()
@@ -98,6 +100,7 @@ func TestLoudnessSilence(t *testing.T) {
 }
 
 func TestLoudnessClipping(t *testing.T) {
+	t.Parallel()
 	// Clipped proxy: 1.6× sine hard-clipped at ±1 → long ±1.0 sample
 	// runs in every 400 ms block.
 	m := NewLoudnessMeter()
@@ -118,6 +121,7 @@ func TestLoudnessClipping(t *testing.T) {
 }
 
 func TestLoudnessCrest(t *testing.T) {
+	t.Parallel()
 	mt := NewLoudnessMeter()
 	loudFeed(mt, Tone(440, 3, 0.5))
 	crestTone := mt.Finish().CrestFactorDB
@@ -130,6 +134,7 @@ func TestLoudnessCrest(t *testing.T) {
 }
 
 func TestLoudnessSilenceInterval(t *testing.T) {
+	t.Parallel()
 	m := NewLoudnessMeter()
 	loudFeed(m, toneSilenceTone())
 	s := m.Finish()
@@ -147,6 +152,7 @@ func TestLoudnessSilenceInterval(t *testing.T) {
 }
 
 func TestLoudnessChunkIndependence(t *testing.T) {
+	t.Parallel()
 	iv := toneSilenceTone().Interleaved()
 	f := make([]float64, len(iv))
 	for i, x := range iv {
@@ -175,6 +181,7 @@ func TestLoudnessChunkIndependence(t *testing.T) {
 }
 
 func TestLoudnessSeriesLength(t *testing.T) {
+	t.Parallel()
 	// SetFrameCount pins the decimated series length.
 	m := NewLoudnessMeter()
 	loudFeed(m, Tone(440, 2, 0.5))

@@ -99,8 +99,12 @@ func (sh *shell) studioRail() gui.View {
 		// RUN 45297707372: the class-resolved scroll bar (same contract
 		// as the workspace panels).
 		ScrollbarCfgY: sh.scrollbarCfg(),
-		Color:         sh.th.SurfaceColor(),
-		Content:       content,
+		// RUN 45347124889 drag-to-scroll (same contract as the
+		// workspace panels): a finger or a held pointer pans the
+		// rail; a tap still reaches the child.
+		DragScroll: true,
+		Color:      sh.th.SurfaceColor(),
+		Content:    content,
 	})
 }
 
@@ -115,7 +119,11 @@ func (sh *shell) studioMainPane() gui.View {
 		Scrollable:    true,
 		ScrollMode:    gui.ScrollVerticalOnly,
 		ScrollbarCfgY: sh.scrollbarCfg(),
-		Content:       sh.studioMainContent(),
+		// RUN 45347124889 drag-to-scroll (same contract as the
+		// workspace panels): a finger or a held pointer pans the
+		// studio main pane; a tap still reaches the child.
+		DragScroll: true,
+		Content:    sh.studioMainContent(),
 	})
 }
 

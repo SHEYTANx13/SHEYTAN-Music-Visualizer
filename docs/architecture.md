@@ -8,7 +8,8 @@ describe; this page is the orientation layer.
 
 | Package | Owns |
 | --- | --- |
-| `cmd/sheytan-music-visualizer` | Process entry: flag parsing, `--version`, `--self-check` (foundation invariants, machine-readable result file), recoverable-panic GUI boundary. |
+| `cmd/sheytan-music-visualizer` | CLI authority: flag parsing, `--version`, `--self-check` (foundation invariants, machine-readable result file), `--export-cli`, world-OBJ export. It never opens a window. |
+| `cmd/app-gogui` | THE product desktop entry: bootstrap-first logging (banner/tee/crash report/exit record) then `ui/gogui.Run` (`gui_desktop.go`, `//go:build !android`; the android gomobile glue is `gui_mobile.go`). The desktop product executable ships from this package. |
 | `cmd/ci-log-collector` | Consolidated plain-text run report (`log.txt`); stdlib-only so it builds even when the app dependency graph is broken. |
 | `internal/apppaths` | THE data-layout authority: portable vs installed mode resolution, directory bootstrap, legacy-log migration (copy, never move). |
 | `internal/logging` | Runtime log: rotation, stderr fallback, verify-writable probe, non-destructive legacy migration helper. |
@@ -29,30 +30,37 @@ describe; this page is the orientation layer.
 | `internal/sysprofile` | Local system profile: CPU/RAM/OS/display/GPU/audio/FFmpeg facts, capability classification, bounded resource-policy modes. |
 | `internal/perf` | Startup stage recorder anchored at true process start; runtime snapshot. |
 | `internal/procattr` | Child-process policy: Windows `HideWindow` + `CREATE_NO_WINDOW` so FFmpeg/ffprobe never flash a console. |
-| `ui/fyne` | The Fyne surface: single main window, studio shell, System Integration + Help/Diagnostics dialogs, theme, fullscreen adapter, policy/preference stores. |
+| `ui/gogui` | The native Go-Gui surface (v0.99.1): the ONE window, command bar, workspace tab strip and eleven destination panels, studio rail/main split, live PixelSurface preview with the pacer bridge, media-tools manager panel, theme (SHEYTAN token palette), responsive classes from the token document, drag-to-scroll + class-resolved scroll bars. The former Fyne surface (`ui/fyne`) was deleted after parity (run 44330231458 update; guard: `scripts/ci/check-no-fyne.sh`). |
 
 ## Application startup sequence
 
 1. `main.run` parses flags; `--version`/`--self-check` exit without a
    window.
 2. `runGUI` installs the recoverable-panic boundary (log + stderr stack).
-3. `ui/fyne.Run` starts `internal/perf` (anchored at true process start).
-4. `initRuntime` resolves the data layout, bootstraps directories,
-   migrates legacy logs by copy and opens the runtime log BEFORE any
-   subsystem or window construction; a broken log degrades to stderr,
-   never aborts.
-5. The first structured record `application starting` carries
-   version/commit/builder/date and the resolved data/log directories.
-6. The single `fyne.Window` is created (exactly one `NewWindow` in the
-   package — locked by `ui/fyne/one_window_test.go`).
+3. `cmd/app-gogui` runs FIRST-BYTE logging (`logging.Bootstrap` +
+   startup banner + stderr tee) before any subsystem; `ui/gogui.Run`
+   logs every phase (design tokens, data layout, studio service,
+   renderer selection, window created) with its reason.
+4. The data layout resolves and bootstraps the contract directories;
+   the runtime log opens before window construction; a broken log
+   degrades to stderr, never aborts.
+5. The first structured record (startup banner) carries
+   version/commit/builder/date/go/os/arch/pid and the resolved data/log
+   directories.
+6. The single `gui.Window` is created (locked by
+   `ui/gogui/one_window_test.go`); `gui.SetTheme(ThemeDark)` and the
+   SHEYTAN token theme install BEFORE the window so the first frame
+   paints in the dark polarity.
 7. The studio service initializes; persisted renderer preference and
    resource-policy mode load with revalidation and logged reasons.
-8. The UI shell builds; `ShowAndRun` starts the event loop.
-9. On first event-loop iteration: `first-window-usable` mark, persisted
-   fullscreen restore, the `startup stages complete` record and the
-   one-per-launch runtime snapshot.
-10. On close: fullscreen observed-state sync, `shutdown` record, teardown
-    in dependency order (UI → service).
+8. The view generator builds every frame from frame-thread-owned
+   control values; `backend.Run` starts the frame loop.
+9. The preview pacer goroutine publishes measured frames through the
+   uiState bridge; nothing on the frame thread ever blocks on audio,
+   FFmpeg, filesystem or analysis work.
+10. On close (or SIGINT/SIGTERM): teardown in dependency order —
+    studio service, renderer, pixel surface — with the exit record
+    (`LogExit`) and any recovered panic persisted as a crash report.
 
 ## System-profile flow
 
@@ -73,18 +81,23 @@ provenance sidecar) → DSP analysis (chunked, cache-backed) → Song DNA →
 per-frame `visualizer.FrameInput` → renderer (CPU always available;
 GPU only after classification and a real pipeline validation with
 verified readback; software adapters never impersonate hardware) →
-preview (`fyne.Do`-marshaled widget updates) or export (streamed frames
-piped to local FFmpeg with hidden windows, real progress, cancellation
-that reaches FFmpeg, ffprobe validation before atomic finalize).
+preview (frames published through the pacer bridge into the window's
+PixelSurface; control values ride the uiState bridge) or export
+(streamed frames piped to local FFmpeg with hidden windows, real
+progress, cancellation that reaches FFmpeg, ffprobe validation before
+atomic finalize).
 
-## Fyne main-thread and single-window contract
+## Go-Gui frame-thread and single-window contract
 
-- Exactly ONE primary `fyne.Window`; all other surfaces are dialogs or
-  in-window navigation (no splash window, no hidden second instance).
-- Every widget mutation from a non-UI goroutine is marshaled with
-  `fyne.Do`/`fyne.DoAndWait` (Fyne 2.8 threading contract); the UI
-  thread never blocks on adapter enumeration, FFmpeg probes, filesystem
-  scans or project analysis.
+- Exactly ONE primary `gui.Window`; all other surfaces are in-window
+  destinations (no splash window, no hidden second instance; locked by
+  `ui/gogui/one_window_test.go`).
+- Every shell field is owned by the go-gui frame thread (the view
+  generator and widget callbacks). go-gui widgets are rebuilt every
+  frame from those control values; callbacks write them and dispatch.
+  The only cross-goroutine surfaces are `uiState` and the preview
+  pacer's publish path; the frame thread never blocks on adapter
+  enumeration, FFmpeg probes, filesystem scans or project analysis.
 - **Close/shutdown (run 43090342995):** every close surface — titlebar
   (via `Window.SetCloseIntercept`), File→Quit — enters ONE state machine
   (`internal/appclose`): running → closeRequested → confirming →
@@ -97,9 +110,12 @@ that reaches FFmpeg, ffprobe validation before atomic finalize).
   regions is recomposed per breakpoint by `ui/fyne/responsive.go` —
   phone <480 px (single column, touch-sized action grid, focal preview),
   compact <1024 px (draggable preview/side-panel split), desktop <1680
-  px (three-region workspace), ultrawide ≥1680 px (content capped at
-  1680 px and centered). State survives resize because instances are
-  re-parented, never rebuilt.
+  px (three-region workspace), ultrawide ≥1680 px. The classes come
+  from the token document (`design/tokens.json`) through
+  `ui/gogui/layout.go` (`Breakpoint`, `For`); spacing, touch-target and
+  scroll-bar sizing resolve per class (`ShellTheme.ScrollbarCfgForWidth`,
+  `SpacingProfileForWidth`). Every scroll surface carries drag-to-scroll
+  (a finger or held pointer pans; taps still reach children).
 - **First-frame deferral (run 43090342995):** the renderer probe runs in
   the render-loop goroutine after the window is visible ("probing…"
   state until then); the audio device opens lazily on first playback.

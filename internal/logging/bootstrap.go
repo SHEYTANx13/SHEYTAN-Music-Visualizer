@@ -38,6 +38,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,15 +51,26 @@ import (
 const CrashFilePrefix = "crash-"
 
 // Bootstrap opens the runtime log for the earliest possible startup
-// moment and returns a never-nil Log. The layout's log directory is
-// created best-effort first (the layout bootstrap owns the contract
-// directories; a failure here must not block startup). On failure the
-// returned Log is the stderr fallback and the error is recorded ON
-// that fallback, never swallowed.
+// moment and returns a never-nil Log. The log directory is chosen by
+// the same contract as Dir: the explicit SHEYTAN_LOG_DIR override wins
+// (run 45347124889 repair: CI sets SHEYTAN_LOG_DIR to route runtime
+// logs into the job's ci-logs tree and the previous layout-only path
+// silently ignored that documented override), and the layout's log
+// directory is the default. The directory is created best-effort first
+// (the layout bootstrap owns the contract directories; a failure here
+// must not block startup). On failure the returned Log is the stderr
+// fallback and the error is recorded ON that fallback, never
+// swallowed.
 func Bootstrap(lay apppaths.Layout) *Log {
-	if lay.Logs != "" {
-		if err := os.MkdirAll(lay.Logs, 0o755); err == nil {
-			if l, err := Open(lay.Logs, Options{}); err == nil {
+	dir := lay.Logs
+	if override := strings.TrimSpace(os.Getenv("SHEYTAN_LOG_DIR")); override != "" {
+		if abs, err := filepath.Abs(override); err == nil {
+			dir = abs
+		}
+	}
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err == nil {
+			if l, err := Open(dir, Options{}); err == nil {
 				return l
 			}
 		}

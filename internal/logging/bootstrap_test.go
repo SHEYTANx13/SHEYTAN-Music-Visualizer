@@ -52,6 +52,37 @@ func TestBootstrapOpensRuntimeLog(t *testing.T) {
 	}
 }
 
+// TestBootstrapHonorsLogDirOverride: the documented SHEYTAN_LOG_DIR
+// override (logging.Dir's contract; the build scripts route runtime
+// logs into the job's ci-logs tree with it) decides the log directory
+// ahead of the layout. Run 45347124889: Bootstrap silently ignored the
+// override, so CI runtime logs landed under the data layout instead of
+// the documented location.
+func TestBootstrapHonorsLogDirOverride(t *testing.T) {
+	lay := testLayout(t)
+	override := filepath.Join(t.TempDir(), "ci-logs", "app-logs")
+	t.Setenv("SHEYTAN_LOG_DIR", override)
+	l := Bootstrap(lay)
+	defer l.Close()
+	if l.IsFallback() {
+		t.Fatalf("bootstrap must open the real log when the override directory is writable")
+	}
+	l.Logger().Error("override probe", "reason", "test")
+	if err := l.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(override, FileName))
+	if err != nil {
+		t.Fatalf("app.log not written to the SHEYTAN_LOG_DIR override %s: %v", override, err)
+	}
+	if !bytes.Contains(raw, []byte("override probe")) {
+		t.Fatalf("override record not persisted: %q", raw)
+	}
+	if _, err := os.Stat(filepath.Join(lay.Logs, FileName)); err == nil {
+		t.Fatalf("the layout log path must stay unused while the override is set")
+	}
+}
+
 // TestBootstrapDegradesToStderr: an unwritable log location must never
 // take the product down - Bootstrap returns the stderr fallback and
 // records the reason ON it.

@@ -18,17 +18,24 @@
 #       b) SHEYTAN_REPO_ROOT -> helper imports, package output touched
 #       c) GITHUB_WORKSPACE  -> fallback, helper imports via canonical path
 #   R8  static contract: build-windows.ps1 declares -RequireRepoRoot for the
-#       SIX helper-importing gates (verify-build-metadata,
-#       create-portable-zip, verify-extracted-package,
-#       forbid-bundled-media-tools, media-tools-pinned-install,
-#       verify-extracted-path-with-spaces) with their exact ordered helper
-#       lists, keeps a single documented parent-side $env:SHEYTAN_REPO_ROOT
-#       assignment, and no gate body consumes the workspace-root env directly.
+#       SEVEN root-consuming gates (build-shell-resource,
+#       verify-build-metadata, create-portable-zip,
+#       verify-extracted-package, forbid-bundled-media-tools,
+#       media-tools-pinned-install, verify-extracted-path-with-spaces)
+#       with their exact ordered helper lists (build-shell-resource
+#       consumes $repoRoot without importing a helper, so it declares
+#       -RequireRepoRoot with no -RepoRootHelpers switch), keeps a single
+#       documented parent-side $env:SHEYTAN_REPO_ROOT assignment, and no
+#       gate body consumes the workspace-root env directly.
 #       (Run-43767556517 repair: the fixture expected the four-gate era;
 #       the live script added forbid-bundled-media-tools and
 #       media-tools-pinned-install and a second helper for
 #       verify-extracted-path-with-spaces, so the stale fixture failed R8
-#       and P7.)
+#       and P7. Run-45347124889 repair: the ship-the-shell icon resource
+#       gate added a seventh root consumer (build-shell-resource, windres
+#       + app.rc paths through $repoRoot, no helper import) and the stale
+#       fixture again failed R8 and P7; the canonical list follows the
+#       live architecture.)
 #   R9  generated gate preamble interpolates the diagnostic: prints the
 #       actual resolved root directory, never the literal variable name.
 #
@@ -254,6 +261,7 @@ $assignment = [bool]($bw -match [regex]::Escape('$env:SHEYTAN_REPO_ROOT = $repoR
 # helpers (Invoke-CapturedProcess + MediaTools-Pinned) for the path-with-
 # spaces runtime check plus the app-managed media-tools export proof.
 $callSites = @(
+    @{ gate = 'build-shell-resource';              helpers = @() },
     @{ gate = 'verify-build-metadata';             helpers = @('scripts/ci/Invoke-CapturedProcess.ps1') },
     @{ gate = 'create-portable-zip';               helpers = @('scripts/ci/New-PortableZip.ps1') },
     @{ gate = 'verify-extracted-package';          helpers = @('scripts/ci/Invoke-CapturedProcess.ps1') },
@@ -263,11 +271,19 @@ $callSites = @(
 )
 $callSitesOk = $true
 foreach ($cs in $callSites) {
-    $helpersLiteral = '@(' + (($cs.helpers | ForEach-Object { '"{0}"' -f $_ }) -join ', ') + ')'
-    $pattern = '-Step "{0}" .*-RequireRepoRoot .*-RepoRootHelpers {1}' -f `
-        [regex]::Escape($cs.gate), [regex]::Escape($helpersLiteral)
+    # A root consumer with no helper import declares -RequireRepoRoot and
+    # NO -RepoRootHelpers switch (run-45347124889: build-shell-resource);
+    # the negative lookahead keeps the assertion exact, never looser.
+    if ($cs.helpers.Count -eq 0) {
+        $pattern = '-Step "{0}" .*-RequireRepoRoot(?! .*-RepoRootHelpers)' -f [regex]::Escape($cs.gate)
+    }
+    else {
+        $helpersLiteral = '@(' + (($cs.helpers | ForEach-Object { '"{0}"' -f $_ }) -join ', ') + ')'
+        $pattern = '-Step "{0}" .*-RequireRepoRoot .*-RepoRootHelpers {1}' -f `
+            [regex]::Escape($cs.gate), [regex]::Escape($helpersLiteral)
+    }
     if (-not ($bw -match $pattern)) {
-        Write-Output ("        call site missing or wrong helper list: gate='{0}' expected='{1}'" -f $cs.gate, $helpersLiteral)
+        Write-Output ("        call site missing or wrong helper list: gate='{0}'" -f $cs.gate)
         $callSitesOk = $false
     }
 }

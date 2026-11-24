@@ -202,7 +202,7 @@ check("B7-no-needs-preflight-linux",
 # consolidated report must still be produced after a user cancellation,
 # so && !cancelled() must not return there).
 check("B11-collector-needs-all",
-      "needs: [preflight, build-windows, build-linux, build-macos, build-android, ios-compile-smoke]" in bd
+      "needs: [preflight, build-windows, build-linux, build-macos, build-android]" in bd
       and "needs: [preflight, build-windows, build-linux, codeql]" not in bd)
 check("B11-collector-always", "\n    if: always()\n" in bd)
 
@@ -536,16 +536,18 @@ assert doc["event"] == "workflow_dispatch"
 assert doc["start_time_utc"] == ""
 results = {j["name"]: j["result"] for j in doc["jobs"]}
 assert results == {"preflight": "success", "build-windows": "skipped", "build-linux": "failure",
-                   "build-macos": "success", "build-android": "skipped", "ios-compile-smoke": "skipped"}, results
+                   "build-macos": "success", "build-android": "skipped"}, results
 required = {j["name"]: j["required"] for j in doc["jobs"]}
 assert required == {"preflight": True, "build-windows": True, "build-linux": True,
-                    "build-macos": True, "build-android": True, "ios-compile-smoke": False}, required
+                    "build-macos": True, "build-android": True}, required
 # run 43612608237: CodeQL is an independent workflow — the caller manifest
 # records that fact without declaring CodeQL evidence rows.
 assert doc.get("codeql", {}).get("job") == "independent-workflow", doc.get("codeql")
 assert doc["codeql"]["result"] == "NOT_APPLICABLE"
 outs = {d["artifact"]: d["outcome"] for d in doc["downloads"]}
-assert len(outs) == 6 and all(v in ("success", "skipped") for v in outs.values())
+# Run 45347124889: the iOS log part was removed with the iOS build;
+# the downloads list carries the four product platforms.
+assert len(outs) == 5 and all(v in ("success", "skipped") for v in outs.values())
 assert not any("codeql" in a for a in outs)
 assert os.path.getsize(os.path.join(t, "m1/manifest.json")) > 0
 assert not [f for f in os.listdir(os.path.join(t, "m1")) if f.startswith(".manifest-")], "temp file left behind"
@@ -553,7 +555,7 @@ assert os.path.exists(os.path.join(t, "m1/manifest-diagnostics.txt"))
 print("H31-OK")
 PYCHK
 then
-  report PASS "H30" "manifest writer: hostile ref (quotes/backslash/Unicode/slashes), empty optional, all five platform job conclusions, independent-CodeQL marker, atomic rename, no temp leftovers, diagnostics written"
+  report PASS "H30" "manifest writer: hostile ref (quotes/backslash/Unicode/slashes), empty optional, four product platform job conclusions (iOS removed by run 45347124889), independent-CodeQL marker, atomic rename, no temp leftovers, diagnostics written"
 else
   report FAIL "H30" "manifest writer fixture failed"
 fi

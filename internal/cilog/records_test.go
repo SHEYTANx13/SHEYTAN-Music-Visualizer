@@ -125,15 +125,14 @@ func TestSchemaLineSanitizesHostileValues(t *testing.T) {
 
 func TestPlatformDerivation(t *testing.T) {
 	cases := map[string]string{
-		"build-windows":     "windows-x64",
-		"build-linux":       "linux-x64",
-		"build-macos":       "macos-arm64",
-		"build-android":     "android-arm64",
-		"ios-compile-smoke": "ios-compile-smoke",
-		"collect-logs":      "diagnostics",
-		"publish-products":  "publication",
-		"preflight":         "preflight",
-		"mystery":           "unknown",
+		"build-windows":    "windows-x64",
+		"build-linux":      "linux-x64",
+		"build-macos":      "macos-arm64",
+		"build-android":    "android-arm64",
+		"collect-logs":     "diagnostics",
+		"publish-products": "publication",
+		"preflight":        "preflight",
+		"mystery":          "unknown",
 	}
 	for job, want := range cases {
 		if got := platformForJob(job); got != want {

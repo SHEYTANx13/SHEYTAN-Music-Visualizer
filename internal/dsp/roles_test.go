@@ -19,6 +19,7 @@ func layerInputs(t *testing.T, tr StereoTrack) (*Result, *BandTimeline, *HPSSSer
 }
 
 func TestRolesKickDetected(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(5)
 	_, bands, hp, sp := layerInputs(t, tr)
 	frames, _, _ := analyzeFrames(t, tr)
@@ -36,6 +37,7 @@ func TestRolesKickDetected(t *testing.T) {
 }
 
 func TestRolesPadVsKickSeparation(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(9))
 	PadLike(&tr, 0.5, 4, 0.4)
 	for k := 0; k < 14; k++ {
@@ -64,6 +66,7 @@ func TestRolesPadVsKickSeparation(t *testing.T) {
 }
 
 func TestRolesHatDetected(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(5))
 	for k := 0; k < 18; k++ {
 		HatLike(&tr, 0.3+float64(k)*0.25, 0.5)
@@ -84,6 +87,7 @@ func TestRolesHatDetected(t *testing.T) {
 }
 
 func TestRolesEvidenceFields(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(2)
 	_, bands, hp, sp := layerInputs(t, tr)
 	frames, _, _ := analyzeFrames(t, tr)
@@ -111,6 +115,7 @@ func TestRolesEvidenceFields(t *testing.T) {
 }
 
 func TestRolesEmptyOnSilence(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("silence", 4, 1)
 	_, bands, hp, sp := layerInputs(t, tr)
 	frames, _, _ := analyzeFrames(t, tr)
@@ -122,6 +127,7 @@ func TestRolesEmptyOnSilence(t *testing.T) {
 }
 
 func TestRolesDeterministicAndCapped(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(8)
 	_, bands, hp, sp := layerInputs(t, tr)
 	frames, _, _ := analyzeFrames(t, tr)

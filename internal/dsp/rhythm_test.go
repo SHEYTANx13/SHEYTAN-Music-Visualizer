@@ -9,6 +9,7 @@ import (
 )
 
 func TestRhythmClick120(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(6))
 	ClickTrain(&tr, 0, 6, 120, 0.6, 1.6, 4)
 	frames, bands, _ := analyzeFrames(t, tr)
@@ -59,6 +60,7 @@ func TestRhythmClick120(t *testing.T) {
 }
 
 func TestRhythmHalfDoubleAmbiguity(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("half-double", 8, 1)
 	frames, bands, _ := analyzeFrames(t, tr)
 	r := DetectRhythm(frames.Frames, bands, hopSec)
@@ -79,6 +81,7 @@ func TestRhythmHalfDoubleAmbiguity(t *testing.T) {
 }
 
 func TestRhythmSyncopation(t *testing.T) {
+	t.Parallel()
 	syncTr := newTrack(nSamples(6))
 	Syncopated(&syncTr, 0.1, 6, 120, 0.55)
 	straightTr := newTrack(nSamples(6))
@@ -96,6 +99,7 @@ func TestRhythmSyncopation(t *testing.T) {
 }
 
 func TestRhythmSteadyToneUncertain(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("tone-440", 5, 1)
 	frames, bands, _ := analyzeFrames(t, tr)
 	r := DetectRhythm(frames.Frames, bands, hopSec)
@@ -111,6 +115,7 @@ func TestRhythmSteadyToneUncertain(t *testing.T) {
 }
 
 func TestRhythmSilenceNoTransients(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("silence", 3, 1)
 	frames, bands, _ := analyzeFrames(t, tr)
 	r := DetectRhythm(frames.Frames, bands, hopSec)
@@ -123,6 +128,7 @@ func TestRhythmSilenceNoTransients(t *testing.T) {
 }
 
 func TestRhythmTempoRampSegments(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("tempo-ramp", 12, 1)
 	frames, bands, _ := analyzeFrames(t, tr)
 	r := DetectRhythm(frames.Frames, bands, hopSec)
@@ -137,6 +143,7 @@ func TestRhythmTempoRampSegments(t *testing.T) {
 }
 
 func TestRhythmDeterministic(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(11)
 	frames, bands, _ := analyzeFrames(t, tr)
 	a := DetectRhythm(frames.Frames, bands, hopSec)

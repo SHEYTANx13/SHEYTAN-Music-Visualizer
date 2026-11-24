@@ -1,6 +1,6 @@
 // Package gogui is the native Go-Gui presentation shell of
 // SHEYTAN Music Visualizer BETA, built on github.com/go-gui-org/go-gui
-// v0.98.0 (the "gui" package plus its backend and soft renderer).
+// v0.99.1 (the "gui" package plus its backend and soft renderer).
 //
 // # Ownership rules
 //
@@ -76,6 +76,6 @@
 //   - internal/studio, internal/render, internal/export,
 //     internal/mediatools, internal/fileaccess, internal/apppaths,
 //     internal/buildinfo: the service layer.
-//   - github.com/go-gui-org/go-gui v0.98.0: gui (views, theme, window),
+//   - github.com/go-gui-org/go-gui v0.99.1: gui (views, theme, window),
 //     gui/backend (Run) and gui/backend/soft (headless smoke evidence).
 package gogui

@@ -181,7 +181,12 @@ func (sh *shell) scrollPanel(id string, content []gui.View) gui.View {
 		// 7dp theme default was nearly invisible on the dark surfaces
 		// and too fine to grab on touch screens).
 		ScrollbarCfgY: sh.scrollbarCfg(),
-		Content:       content,
+		// RUN 45347124889 drag-to-scroll: a finger or a held pointer pans
+		// the panel directly (go-gui #783; a tap still reaches the child,
+		// and the touch pan fallback skips DragScroll containers so one
+		// finger never scrolls twice).
+		DragScroll: true,
+		Content:    content,
 	})
 }
 

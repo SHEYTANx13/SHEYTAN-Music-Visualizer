@@ -11,6 +11,7 @@ import (
 )
 
 func TestRolloffPureToneIsLow(t *testing.T) {
+	t.Parallel()
 	a := NewAnalyzer()
 	// 2 s of a 220 Hz sine at −6 dBFS (mono, canonical rate).
 	const rate = SampleRate
@@ -37,6 +38,7 @@ func TestRolloffPureToneIsLow(t *testing.T) {
 }
 
 func TestRolloffBroadbandClickIsHigh(t *testing.T) {
+	t.Parallel()
 	a := NewAnalyzer()
 	// Impulse train: each impulse spreads energy across the whole
 	// spectrum, so the 85% accumulation point is far up the spectrum.
@@ -65,6 +67,7 @@ func TestRolloffBroadbandClickIsHigh(t *testing.T) {
 }
 
 func TestRolloffSilenceIsZero(t *testing.T) {
+	t.Parallel()
 	a := NewAnalyzer()
 	for i := 0; i < SampleRate; i++ {
 		a.Process([]float32{0, 0})

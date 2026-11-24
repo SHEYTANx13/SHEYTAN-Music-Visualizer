@@ -19,6 +19,19 @@ rows and runs after this session's changes are pushed by the user.
 
 | ID | Behavior | Implementation | Tests | CI gate | User entry point | Docs | Status (this session) |
 |---|---|---|---|---|---|---|---|
+
+> Run-45347124889 note: rows whose Implementation/Tests columns cite
+> `ui/fyne/...` files keep those HISTORICAL references (the evidence
+> they describe existed when the row was written). The current UI
+> surface is `ui/gogui` (go-gui v0.99.1): the single-window lock lives
+> in `ui/gogui/one_window_test.go`, the studio UI in
+> `ui/gogui/studio_panel.go`, the actions in `ui/gogui/actions.go`, the
+> diagnostics destination in `ui/gogui/panels.go`; `ui/fyne` was
+> deleted after parity (run 44330231458 update, guard
+> `scripts/ci/check-no-fyne.sh`). The fullscreen desktop wiring
+> (APP-row mentioning F11/Esc) is NOT WIRED in the current shell; the
+> controller (`internal/fullscreen`) remains delivered and tested.
+
 | APP-01 | One primary Fyne main window; all views inside it | `cmd/sheytan-music-visualizer/main.go`, `ui/fyne/app.go` (`NewApp` single-window lifecycle) | `ui/fyne/one_window_test.go` | Linux GUI smoke (Xvfb); Windows process/window fixture | the app window | readme; docs/architecture.md | VERIFIED locally (one-window test PASS); hosted Windows smoke BLOCKED (no local Windows) |
 | APP-02 | Windows GUI: no console window; hidden child processes | `scripts/build/build-windows.ps1` (`-H=windowsgui`), `internal/procattr` | `internal/procattr/procattr_windows_test.go`, PE-subsystem gate (`validate-pe`), `Test-GuiProcessCapture.ps1` | build-windows: `validate-pe`, `verify-extracted-package` | n/a (desktop launch) | docs/ci.md; docs/TROUBLESHOOTING.md | VERIFIED (code + tests present, fixtures run in preflight on pwsh hosts); native Windows execution BLOCKED locally, owned by hosted build-windows |
 | APP-03 | System Integration from real probes | `internal/sysprofile`, `internal/perf`, `ui/fyne/sysint.go` | `internal/sysprofile/*_test.go`, `ui/fyne` snapshot/behavior tests | platform `go test` gates | Help / System Integration view | docs/architecture.md | VERIFIED (tests PASS this session) |

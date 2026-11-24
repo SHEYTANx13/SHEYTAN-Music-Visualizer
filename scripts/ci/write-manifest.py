@@ -119,7 +119,6 @@ def build_caller_manifest() -> dict:
         "linux": f"linux-logs-part-attempt{attempt}",
         "macos": f"macos-logs-part-attempt{attempt}",
         "android": f"android-logs-part-attempt{attempt}",
-        "ios": f"ios-logs-part-attempt{attempt}",
     }
 
     return {
@@ -152,7 +151,6 @@ def build_caller_manifest() -> dict:
             {"artifact": artifacts["linux"], "outcome": downloads["DOWNLOAD_LINUX"]},
             {"artifact": artifacts["macos"], "outcome": downloads["DOWNLOAD_MACOS"]},
             {"artifact": artifacts["android"], "outcome": downloads["DOWNLOAD_ANDROID"]},
-            {"artifact": artifacts["ios"], "outcome": downloads["DOWNLOAD_IOS"]},
         ],
         "jobs": [
             {
@@ -204,17 +202,9 @@ def build_caller_manifest() -> dict:
                 # virtualization) and is never claimed.
                 "required": True,
             },
-            {
-                "name": "ios-compile-smoke",
-                "kind": "workflow-job",
-                "result": results["RESULT_IOS"],
-                "result_basis": "needs.ios-compile-smoke.result (workflow conclusion)",
-                "artifact": artifacts["ios"],
-                # Informational compile smoke only: no simulator package,
-                # no signing, no product claim. Its result never gates
-                # the final verdict.
-                "required": False,
-            },
+            # (The iOS compile smoke job was removed by the
+            # run-45347124889 update: iOS is not a supported target at
+            # this stage; the manifest records only live jobs.)
         ],
     }
 

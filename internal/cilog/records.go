@@ -447,8 +447,6 @@ func platformForJob(job string) string {
 		return "macos-arm64"
 	case strings.Contains(l, "android"):
 		return "android-arm64"
-	case strings.Contains(l, "ios"):
-		return "ios-compile-smoke"
 	case strings.Contains(l, "codeql") || strings.Contains(l, "analyze"):
 		return "codeql"
 	case strings.Contains(l, "linux"):

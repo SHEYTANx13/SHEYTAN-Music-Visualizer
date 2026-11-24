@@ -1,5 +1,97 @@
 # Changelog
 
+## Run 45347124889 repair — dsp race-gate timeout, P7 repo-root fixture, Windows staging child-safety root cause, macOS iconutil contract, go-gui v0.99.1, iOS removal, drag-to-scroll, logging override (2026-11-24)
+
+- **build-linux go-test + go-test-race ROOT CAUSE (both records one
+  cause)**: the CPU-bound dsp suite (85 tests over 16 s multi-resolution
+  fixtures) exceeded the race gate's 480 s budget on 2-core hosts —
+  reproduced locally (`panic: test timed out after 480s` inside
+  `Analyzer.Process`); the go-test record was the collector deriving a
+  second `package failed` row from the same `FAIL` line (its parser
+  labels any `FAIL <pkg>` line tool=go-test). All 85 top-level dsp tests
+  now run `t.Parallel()` (self-contained: no t.Setenv, no subtests, no
+  AllocsPerRun, package state read-only) — the exact hosted race-gate
+  command finishes in 388 s locally on 2 cores, inside the budget.
+- **preflight P7 ROOT CAUSE**: `Test-ResolveRepoRoot.ps1` fixture R8
+  pinned the six-RequireRepoRoot-gate era; the run-45297707372
+  ship-the-shell repair added a legitimate seventh root consumer
+  (`build-shell-resource`: windres + app.rc paths through `$repoRoot`,
+  no helper import). The fixture follows the live architecture (7 call
+  sites, an exact empty-helper lookahead variant) — first local
+  execution ever (pwsh 7.7.0 installed in the sandbox), pass=11 fail=0.
+- **build-windows staging ROOT CAUSE (the lane's five failing gates,
+  one cause)**: the stage-portable gate body read the parent-only
+  `$shellOk` variable. Capture-Step serializes every gate into a CHILD
+  pwsh process whose PowerShell surface is only the generated script
+  text, so under `Set-StrictMode -Version 3.0` the read threw "The
+  variable '$shellOk' cannot be retrieved because it has not been set."
+  — a message with no "error" substring, which the filtered diagnostic
+  log therefore never showed (same parent-only-variable class as run
+  41915116613's `$goTags`; the CLI/shell binaries themselves passed
+  validate-pe/validate-pe-gui around the failed copy). The gate now
+  derives the shell-exe state from the file system; staging gained
+  per-file source asserts, a bounded transient-sharing-violation retry
+  (logged per attempt) and full try/catch self-describing failures;
+  verify-package-license gained missing-input preconditions. New P13
+  fixture (`scripts/ci/tests/audit-gate-bodies.py`) audits all 26 gate
+  bodies for parent-only references — the class is now structurally
+  guarded.
+- **build-macos package-macos ROOT CAUSE (the missing .app artifact)**:
+  the tracked iconset violated the iconutil contract —
+  `icon_512x512@2x.png` carried 512x512 pixels (must be 1024x1024),
+  five canonical names were missing, and a non-standard
+  `icon_64x64.png` was present; the gate died inside iconutil under
+  `set -Eeuo pipefail` and no artifact was produced (the "No files were
+  found" upload error). `gen_icon.py` now emits exactly the documented
+  Apple iconset table (10 entries, dimension-correct @2x naming), and
+  `build-macos.sh` validates every entry (name + pixel dimensions via
+  sips) BEFORE iconutil runs, so a regression is a per-file diagnostic
+  instead of an opaque exit.
+- **go-gui v0.98.0 -> v0.99.1** across go.mod and every reference
+  (workflow comments, docs, package docs). v0.99.0's Windows GL->CPU
+  renderer fallback verified live (the sandbox smoke logs
+  `gl: no GPU context; drawing with the CPU renderer` and renders).
+- **Drag-to-scroll everywhere**: `DragScroll` wired on every scroll
+  surface (all workspace panels, studio rail, studio main pane) — a
+  finger or a held pointer pans the content directly (go-gui #783; a
+  tap still reaches the child; the touch pan fallback skips DragScroll
+  containers so one finger never scrolls twice). Complements the
+  existing class-resolved scroll bars, wheel multiplier and
+  scroll-to-top behavior.
+- **iOS removed everywhere (not a supported target at this stage)**:
+  the `ios-compile-smoke` workflow job, `scripts/build/build-ios.sh`,
+  the gomobile glue build tags (`//go:build android` / `//go:build
+  !android`), the run-manifest writer rows, the collector job/platform
+  mappings, the plumbing fixture expectations, the readme platform
+  table row and a roadmap note. Android stays the REQUIRED product
+  gate (real arm64 APK).
+- **Logging override contract repaired**: `logging.Bootstrap` now
+  honors `SHEYTAN_LOG_DIR` exactly like `logging.Dir()` — the build
+  scripts route runtime logs into `ci-logs/app-logs` through that
+  documented variable and the previous layout-only path silently
+  ignored it (regression test `TestBootstrapHonorsLogDirOverride`).
+- **pwsh-availability parity (two stale fixtures exposed and
+  repaired)**: with pwsh 7.7.0 on PATH for the first time,
+  `test-ci-plumbing.sh`'s pwsh group actually ran: D23b still asserted
+  the pre-run-44648357437 `go test $goTags ./...` line (updated to the
+  live `-skip` form) and H30's download-count matched the pre-iOS-removal
+  manifest (6 -> 5). Suite now PASS=22 FAIL=0.
+- **Verification (linux/amd64, go1.27.4, 2 vCPU)**: gofmt clean; tidy
+  -diff clean; `go mod verify` all modules verified; CI-canonical build
+  + vet green; full suite 42 packages ok / 0 FAIL; race green on
+  dsp (388 s), gogui, logging, cilog, app-gogui; actionlint 1.7.12 +
+  shellcheck 0.10.0 clean on both workflows (documented ignores);
+  fixture suites green (expression 4/4 negative controls,
+  docs-consistency 5/5, verdict-expression, sanitizer-portable 6/6,
+  package-status 20/20, package-gates 19 PASS / 0 FAIL / 1 NOT RUN,
+  ci-plumbing 22/22); Xvfb smoke exit 0 (60 frames, backend=cpu
+  gpu=none) with the full banner -> phases -> exit log chain; Windows
+  cross-compiles green (CLI pure + shell mingw-CGO GUI-subsystem), and
+  the FULL icon-on-executable chain exercised locally (windres ->
+  resource.syso -> linked .rsrc, CLI console(3) / shell GUI(2)
+  verified from the produced PE bytes). Hosted rerun of all four lanes
+  is the honest NOT RUN boundary (no push authorized).
+
 ## Run 45297707372 repair — Windows ship-the-shell, first-byte crash logging, android gomobile lifecycle glue, preflight shellcheck parity, icon on the executable, scrolling/download/touch UX (2026-11-24)
 
 - **Windows "app did not open and recorded no logs" ROOT CAUSE (the

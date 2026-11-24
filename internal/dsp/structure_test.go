@@ -21,6 +21,7 @@ func analyzeFrames(t *testing.T, tr StereoTrack) (*Result, *BandTimeline, []Chro
 var hopSec = float64(HopSize) / SampleRate
 
 func TestStructureDropDetection(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(42)
 	frames, bands, chroma := analyzeFrames(t, tr)
 	rhythm := DetectRhythm(frames.Frames, bands, hopSec)
@@ -54,6 +55,7 @@ func TestStructureDropDetection(t *testing.T) {
 }
 
 func TestStructureRepeat(t *testing.T) {
+	t.Parallel()
 	tr := RepeatedSection(16, 7)
 	frames, bands, chroma := analyzeFrames(t, tr)
 	rhythm := DetectRhythm(frames.Frames, bands, hopSec)
@@ -95,6 +97,7 @@ func equalHalves(frames []Frame) bool {
 }
 
 func TestStructureIntroOutro(t *testing.T) {
+	t.Parallel()
 	tr := FadeInFadeOut(12, 440, 0.5, 0.8)
 	frames, bands, chroma := analyzeFrames(t, tr)
 	rhythm := DetectRhythm(frames.Frames, bands, hopSec)
@@ -115,6 +118,7 @@ func TestStructureIntroOutro(t *testing.T) {
 }
 
 func TestStructureBoundsAndOrder(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(9)
 	frames, bands, chroma := analyzeFrames(t, tr)
 	rhythm := DetectRhythm(frames.Frames, bands, hopSec)
@@ -141,6 +145,7 @@ func TestStructureBoundsAndOrder(t *testing.T) {
 }
 
 func TestStructureDeterministic(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(3)
 	frames, bands, chroma := analyzeFrames(t, tr)
 	rhythm := DetectRhythm(frames.Frames, bands, hopSec)
@@ -152,6 +157,7 @@ func TestStructureDeterministic(t *testing.T) {
 }
 
 func TestStructureSilenceNoSections(t *testing.T) {
+	t.Parallel()
 	tr := Silence(2, 1)
 	frames, bands, chroma := analyzeFrames(t, tr)
 	secs := DetectStructure(frames.Frames, chroma, bands, nil, hopSec)

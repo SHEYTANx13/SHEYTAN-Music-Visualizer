@@ -34,6 +34,7 @@ func hpssMeans(s *HPSSSeries, from, to int) (h, p float64) {
 }
 
 func TestHPSSKickPercussive(t *testing.T) {
+	t.Parallel()
 	// KickLike proxy: low transient; at each onset the temporal median
 	// is still cold (previous frames silent) so percussive evidence
 	// must dominate harmonic evidence.
@@ -54,6 +55,7 @@ func TestHPSSKickPercussive(t *testing.T) {
 }
 
 func TestHPSSPadHarmonic(t *testing.T) {
+	t.Parallel()
 	// PadLike proxy: sustained harmonic bed; the temporal median tracks
 	// the steady spectrum while the frequency median smooths its peaks.
 	pad := Silence(3, 1)
@@ -69,6 +71,7 @@ func TestHPSSPadHarmonic(t *testing.T) {
 }
 
 func TestHPSSWarmupAndShareSum(t *testing.T) {
+	t.Parallel()
 	mags := stftMags(t, Tone(220, 1, 0.5), 12)
 	h := NewHPSS()
 	s := &HPSSSeries{}
@@ -102,6 +105,7 @@ func TestHPSSWarmupAndShareSum(t *testing.T) {
 }
 
 func TestHPSSDeterministic(t *testing.T) {
+	t.Parallel()
 	pad := Silence(2, 1)
 	PadLike(&pad, 0, 2, 0.4)
 	KickLike(&pad, 1.0, 0.8)

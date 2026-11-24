@@ -374,8 +374,6 @@ func defaultGateForJob(job string) string {
 		return "desktop-build"
 	case strings.Contains(l, "android"):
 		return "android-package"
-	case strings.Contains(l, "ios"):
-		return "ios-compile-smoke"
 	case strings.Contains(l, "publish"):
 		return "publication"
 	case strings.Contains(l, "collect") || strings.Contains(l, "log"):

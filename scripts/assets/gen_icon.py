@@ -7,7 +7,18 @@ Draws the canonical application icon from the design token palette
                          gomobile assets/icon.png source)
   assets/icon/icon.ico   multi-size ICO (16/24/32/48/64/128/256) for the
                          Windows executable resource (.syso via windres)
-  assets/icon/iconset/*.png  macOS iconset sizes for iconutil (icns)
+  assets/icon/iconset/*.png  macOS iconset for iconutil (icns), EXACTLY
+                         the documented Apple iconset table: every
+                         canonical name present and every file's pixel
+                         dimensions equal to the size its name declares
+                         (@2x entries are 2x the base size). iconutil
+                         refuses a set whose file dimensions contradict
+                         the names (run 45347124889: icon_512x512@2x.png
+                         was written at 512x512, the set was missing the
+                         16/32/128/256 @2x entries and the 512 base, and
+                         it carried a non-standard icon_64x64.png - the
+                         hosted package-macos gate failed inside
+                         iconutil and no .app artifact was produced).
 
 The mark: a black obsidian rounded square, a red INVERTED pentagram
 (the Luciferian brand mark, matching internal/worldassets sigil
@@ -141,10 +152,31 @@ def main():
         f.write(make_ico(sizes, draw_icon))
 
     os.makedirs(iconset_dir, exist_ok=True)
-    for s in (16, 32, 64, 128, 256, 512):
-        name = ("icon_%dx%d.png" % (s, s)) if s < 512 else ("icon_512x512@2x.png")
+    # The documented Apple iconset table (man iconutil, Apple TN): name ->
+    # required pixel dimensions. iconutil validates both directions - a
+    # missing canonical name and a file whose dimensions contradict its
+    # name both fail the icns conversion.
+    iconset = [
+        ("icon_16x16.png", 16),
+        ("icon_16x16@2x.png", 32),
+        ("icon_32x32.png", 32),
+        ("icon_32x32@2x.png", 64),
+        ("icon_128x128.png", 128),
+        ("icon_128x128@2x.png", 256),
+        ("icon_256x256.png", 256),
+        ("icon_256x256@2x.png", 512),
+        ("icon_512x512.png", 512),
+        ("icon_512x512@2x.png", 1024),
+    ]
+    canonical = set(name for name, _ in iconset)
+    # Remove any stale non-canonical entry (e.g. the retired
+    # icon_64x64.png) so the tracked set stays exactly the table.
+    for stale in os.listdir(iconset_dir):
+        if stale.endswith(".png") and stale not in canonical:
+            os.remove(os.path.join(iconset_dir, stale))
+    for name, px in iconset:
         with open(os.path.join(iconset_dir, name), "wb") as f:
-            f.write(png_bytes(draw_icon(s)))
+            f.write(png_bytes(draw_icon(px)))
     print("icon assets regenerated:", out_dir)
     return 0
 

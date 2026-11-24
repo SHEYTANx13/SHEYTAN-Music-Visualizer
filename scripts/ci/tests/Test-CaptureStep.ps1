@@ -272,7 +272,7 @@ $newExecuted = (($new | Out-String)).Contains($marker)
     # ---- build-windows.ps1 static checks (D23 assembly sources) ---------
     $bw = Get-Content (Join-Path $repoRoot "scripts/build/build-windows.ps1") -Raw
     $d23ok = $bw.Contains('$env:SHEYTAN_GO_TAGS = "-tags goffi_static"') -and
-             $bw.Contains('go test $goTags ./...') -and
+             $bw.Contains('go test $goTags -skip ''^TestPaletteReachesGPUShader$'' ./...') -and
              $bw.Contains('go vet $goTags ./...') -and
              $bw.Contains('go build $goTags ./...') -and
              $bw.Contains('@("build", "-trimpath") + $goTags') -and

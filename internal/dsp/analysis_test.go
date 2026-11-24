@@ -46,6 +46,7 @@ func analyzeChunks(tr StereoTrack, chunkSamples int) *Analysis {
 }
 
 func TestAnalyzeChunkIndependence(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(17)
 	a1 := analyzeChunks(tr, 960)       // 10 ms chunks
 	a2 := analyzeChunks(tr, 48000)     // 1 s chunks
@@ -71,6 +72,7 @@ func TestAnalyzeChunkIndependence(t *testing.T) {
 }
 
 func TestAnalyzeDeterministic(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(4)
 	a1 := analyzeChunks(tr, 4096)
 	a2 := analyzeChunks(tr, 4096)
@@ -88,6 +90,7 @@ func TestAnalyzeDeterministic(t *testing.T) {
 }
 
 func TestAnalyzeValidateAndRoundTrip(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(9)
 	a := analyzeChunks(tr, 8192)
 	if err := a.Validate(); err != nil {
@@ -113,6 +116,7 @@ func TestAnalyzeValidateAndRoundTrip(t *testing.T) {
 }
 
 func TestLoadAnalysisRejectsWrongVersion(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("tone-440", 1, 1)
 	a := analyzeChunks(tr, 4096)
 	blob, _ := a.Serialize()
@@ -127,6 +131,7 @@ func TestLoadAnalysisRejectsWrongVersion(t *testing.T) {
 }
 
 func TestAnalyzeAntiPhaseWarning(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("antiphase", 2, 1)
 	a := analyzeChunks(tr, 4096)
 	found := false
@@ -151,6 +156,7 @@ func TestAnalyzeAntiPhaseWarning(t *testing.T) {
 }
 
 func TestAnalyzeStereoPreservedNotAveraged(t *testing.T) {
+	t.Parallel()
 	// Panned-left: pure L energy with a quiet R must remain visible in
 	// the per-channel series (the mono-averaged legacy path destroys it).
 	tr := Panned(2, 440, -0.8, 0.5)
@@ -180,6 +186,7 @@ func TestAnalyzeStereoPreservedNotAveraged(t *testing.T) {
 }
 
 func TestAnalyzeDurationAndFrames(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("tone-440", 3, 1)
 	a := analyzeChunks(tr, 4096)
 	want := 3.0
@@ -198,6 +205,7 @@ func TestAnalyzeDurationAndFrames(t *testing.T) {
 }
 
 func TestAnalyzeCancellationContext(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(2)
 	in := &chunkedInput{data: tr.Interleaved(), size: 4096}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -208,6 +216,7 @@ func TestAnalyzeCancellationContext(t *testing.T) {
 }
 
 func TestAnalyzeSilenceHonest(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("silence", 3, 1)
 	a := analyzeChunks(tr, 4096)
 	if err := a.Validate(); err != nil {
@@ -225,6 +234,7 @@ func TestAnalyzeSilenceHonest(t *testing.T) {
 }
 
 func TestAnalyzeReaderInputMatchesChunks(t *testing.T) {
+	t.Parallel()
 	tr := DropStructure(6)
 	inter := tr.Interleaved()
 	// Raw float32-LE reader.
@@ -244,6 +254,7 @@ func TestAnalyzeReaderInputMatchesChunks(t *testing.T) {
 }
 
 func TestAnalyzeBoundedWarnings(t *testing.T) {
+	t.Parallel()
 	// Every warning must be a bounded ASCII English sentence.
 	tr, _ := CorpusFixture("antiphase", 2, 1)
 	a := analyzeChunks(tr, 4096)

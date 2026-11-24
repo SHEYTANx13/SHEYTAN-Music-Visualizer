@@ -39,6 +39,7 @@ func meanSeriesF32(v []float32) float64 {
 }
 
 func TestSpectralFlatnessNoiseVsTone(t *testing.T) {
+	t.Parallel()
 	noise := spectralAppendRuns(t, NoiseWhite(2, 3), 40)
 	tone := spectralAppendRuns(t, Tone(440, 2, 0.5), 40)
 	nf, tf := meanSeriesF32(noise.Flatness), meanSeriesF32(tone.Flatness)
@@ -48,6 +49,7 @@ func TestSpectralFlatnessNoiseVsTone(t *testing.T) {
 }
 
 func TestSpectralEntropy(t *testing.T) {
+	t.Parallel()
 	// silence proxy: all-zero spectrum → entropy exactly 0
 	mags := stftMags(t, Silence(1, 1), 2)
 	p := ComputeSpectralFrame(mags[0], nil)
@@ -64,6 +66,7 @@ func TestSpectralEntropy(t *testing.T) {
 }
 
 func TestSpectralZCR(t *testing.T) {
+	t.Parallel()
 	// 6 kHz tone proxy: 2 crossings per period = 2·6000/48000 = 0.25.
 	tr := Tone(6000, 1, 0.4)
 	mags := stftMags(t, tr, 3)
@@ -76,6 +79,7 @@ func TestSpectralZCR(t *testing.T) {
 }
 
 func TestChromaA440(t *testing.T) {
+	t.Parallel()
 	// 440 Hz tone proxy → pitch class 9 (A) must dominate.
 	mags := stftMags(t, Tone(440, 1.5, 0.5), 30)
 	var sum float64
@@ -89,6 +93,7 @@ func TestChromaA440(t *testing.T) {
 }
 
 func TestChromaCTriad(t *testing.T) {
+	t.Parallel()
 	// ChordChange proxy: C major triad (C4, E4, G4 sines).
 	tr := Silence(2, 1)
 	ChordChange(&tr, 0.1, 1.5, 0.5, []float64{261.6256}, true)
@@ -115,6 +120,7 @@ func TestChromaCTriad(t *testing.T) {
 }
 
 func TestTuningOffsets(t *testing.T) {
+	t.Parallel()
 	mag440 := stftMags(t, Tone(440, 1, 0.5), 25)[20]
 	off440 := EstimateTuningOffsetCents(mag440)
 	if math.Abs(off440) > 3 {
@@ -128,6 +134,7 @@ func TestTuningOffsets(t *testing.T) {
 }
 
 func TestHarmonicityStackVsNoise(t *testing.T) {
+	t.Parallel()
 	stack := spectralAppendRuns(t, HarmonicStack(220, 8, 2, 0.5), 40)
 	noise := spectralAppendRuns(t, NoiseWhite(2, 11), 40)
 	sh, nh := meanSeriesF32(stack.Harmonicity), meanSeriesF32(noise.Harmonicity)
@@ -140,6 +147,7 @@ func TestHarmonicityStackVsNoise(t *testing.T) {
 }
 
 func TestSpectralNaNSafe(t *testing.T) {
+	t.Parallel()
 	mag := make([]float64, FFTSize/2+1)
 	mag[10] = math.NaN()
 	mag[100] = 5 // one finite peak so the descriptor paths all execute

@@ -9,6 +9,7 @@ import (
 )
 
 func TestHarmonyTuning(t *testing.T) {
+	t.Parallel()
 	a440, _ := CorpusFixture("tone-440", 3, 1)
 	fa := newFullAnalyzer()
 	fa.Process(a440.Interleaved())
@@ -30,6 +31,7 @@ func TestHarmonyTuning(t *testing.T) {
 }
 
 func TestChromaPureToneIsAPitchClass(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("tone-440", 2, 1)
 	fa := newFullAnalyzer()
 	fa.Process(tr.Interleaved())
@@ -62,6 +64,7 @@ func TestChromaPureToneIsAPitchClass(t *testing.T) {
 }
 
 func TestHarmonyChordMajorDetected(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(4))
 	ChordChange(&tr, 0.5, 3, 0.4, []float64{261.63}, true) // C major triad
 	frames, bands, chroma := analyzeFrames(t, tr)
@@ -83,6 +86,7 @@ func TestHarmonyChordMajorDetected(t *testing.T) {
 }
 
 func TestHarmonyKeyHonestOnAmbiguous(t *testing.T) {
+	t.Parallel()
 	// A steady 440 Hz tone carries one pitch class: a key label would
 	// be a guess. Either no key clears the floor (Key == "") or the
 	// candidates exist with the honest floor visible.
@@ -95,6 +99,7 @@ func TestHarmonyKeyHonestOnAmbiguous(t *testing.T) {
 }
 
 func TestHarmonyNoChordOnNoise(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("noise-white", 3, 5)
 	frames, _, chroma := analyzeFrames(t, tr)
 	h := DetectHarmony(frames.Frames, chroma, hopSec)
@@ -106,6 +111,7 @@ func TestHarmonyNoChordOnNoise(t *testing.T) {
 }
 
 func TestHarmonyTensionReflectsChange(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(8))
 	ChordChange(&tr, 0.5, 3.5, 0.4, []float64{261.63}, true)  // C major
 	ChordChange(&tr, 4.5, 3.0, 0.4, []float64{311.13}, false) // D# minor (far away)
@@ -139,6 +145,7 @@ func TestHarmonyTensionReflectsChange(t *testing.T) {
 }
 
 func TestHarmonyDeterministic(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(6))
 	ChordChange(&tr, 0.5, 2.5, 0.4, []float64{220}, false)
 	ChordChange(&tr, 3.5, 2.0, 0.4, []float64{261.63}, true)

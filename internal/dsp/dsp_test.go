@@ -17,6 +17,7 @@ func feedSine(a *Analyzer, seconds int, freq float64) {
 }
 
 func TestBandEnergyPureTone(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		freq  float64
 		band  string
@@ -38,6 +39,7 @@ func TestBandEnergyPureTone(t *testing.T) {
 }
 
 func TestSpectralCentroid(t *testing.T) {
+	t.Parallel()
 	a := NewAnalyzer()
 	feedSine(a, 1, 2000)
 	res := a.Finish()
@@ -47,6 +49,7 @@ func TestSpectralCentroid(t *testing.T) {
 }
 
 func TestAnalysisDeterministic(t *testing.T) {
+	t.Parallel()
 	run := func() *Result {
 		a := NewAnalyzer()
 		feedSine(a, 1, 220)
@@ -74,6 +77,7 @@ func TestAnalysisDeterministic(t *testing.T) {
 }
 
 func TestTempoClick120BPM(t *testing.T) {
+	t.Parallel()
 	// Build a 120 BPM click track: bass thump every 0.5 s.
 	a := NewAnalyzer()
 	totalSec := 8
@@ -101,6 +105,7 @@ func TestTempoClick120BPM(t *testing.T) {
 }
 
 func TestTempoShortTrackUnreliable(t *testing.T) {
+	t.Parallel()
 	a := NewAnalyzer()
 	feedSine(a, 1, 440) // 1 s steady tone: no rhythm
 	res := a.Finish()
@@ -110,6 +115,7 @@ func TestTempoShortTrackUnreliable(t *testing.T) {
 }
 
 func TestWaveformEnvelope(t *testing.T) {
+	t.Parallel()
 	a := NewAnalyzer()
 	feedSine(a, 2, 220)
 	res := a.Finish()
@@ -125,6 +131,7 @@ func TestWaveformEnvelope(t *testing.T) {
 }
 
 func TestOnsetDetectionClicks(t *testing.T) {
+	t.Parallel()
 	// sharp clicks every 0.25 s must yield onsets
 	a := NewAnalyzer()
 	totalSec := 4
@@ -148,6 +155,7 @@ func TestOnsetDetectionClicks(t *testing.T) {
 }
 
 func TestEmptyAnalyzer(t *testing.T) {
+	t.Parallel()
 	a := NewAnalyzer()
 	res := a.Finish()
 	if res == nil || len(res.Frames) != 0 {

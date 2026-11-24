@@ -10,6 +10,7 @@ import (
 )
 
 func TestVocalPhraseDetected(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(6))
 	VocalLike(&tr, 1.0, 3.0, 0.5, 21)
 	frames, bands, hp, sp := layerInputs(t, tr)
@@ -39,6 +40,7 @@ func TestVocalPhraseDetected(t *testing.T) {
 }
 
 func TestVocalNoPhrasesOnPad(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(6))
 	PadLike(&tr, 0.5, 5, 0.4)
 	frames, bands, hp, sp := layerInputs(t, tr)
@@ -50,6 +52,7 @@ func TestVocalNoPhrasesOnPad(t *testing.T) {
 }
 
 func TestVocalAntiPhaseNotVocal(t *testing.T) {
+	t.Parallel()
 	tr, _ := CorpusFixture("antiphase", 3, 1)
 	frames, bands, hp, sp := layerInputs(t, tr)
 	v := EstimateVocalFlow(frames.Frames, bands, hp, sp, hopSec)
@@ -62,6 +65,7 @@ func TestVocalAntiPhaseNotVocal(t *testing.T) {
 }
 
 func TestVocalSeriesAligned(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(4))
 	VocalLike(&tr, 0.5, 2.5, 0.5, 3)
 	frames, bands, hp, sp := layerInputs(t, tr)
@@ -80,6 +84,7 @@ func TestVocalSeriesAligned(t *testing.T) {
 }
 
 func TestVocalDeterministic(t *testing.T) {
+	t.Parallel()
 	tr := newTrack(nSamples(5))
 	VocalLike(&tr, 0.5, 3, 0.5, 9)
 	frames, bands, hp, sp := layerInputs(t, tr)

@@ -583,6 +583,24 @@ else
 fi
 
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# P13: build-windows.ps1 gate bodies are child-safe (run-45347124889 repair).
+# Capture-Step serializes each gate into a CHILD pwsh process; a body
+# referencing a parent-only variable dies under Set-StrictMode with a
+# message that carries no "error" substring, so the filtered diagnostic
+# log never showed the origin. python3 audit: portable, runs on any host.
+# ----------------------------------------------------------------------------
+if command -v python3 >/dev/null 2>&1; then
+  if python3 "$REPO_ROOT/scripts/ci/tests/audit-gate-bodies.py" > "$T/p13.out" 2>&1; then
+    report PASS "P13" "build-windows gate bodies are child-safe (no parent-only variable references)"
+  else
+    sed 's/^/  /' "$T/p13.out"
+    report FAIL "P13" "build-windows gate body audit found parent-only variable references"
+  fi
+else
+  report "NOT RUN" "P13" "python3 not available"
+fi
+
 # P12: media-tools pinned resolver contract matrix (run-43767556517 §2.2).
 # Authoritative [pscustomobject] schema, Write-Output pollution class,
 # missing fields/invalid hash/missing binaries/spaces+Unicode fixtures.

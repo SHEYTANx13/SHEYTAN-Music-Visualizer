@@ -51,6 +51,7 @@ func meanF32(v []float32) float64 {
 }
 
 func TestStereoMonoWidthCorrelation(t *testing.T) {
+	t.Parallel()
 	s := stereoAppendRuns(Tone(440, 1.5, 0.5), 64)
 	if w := meanF32(s.Width); w > 0.01 {
 		t.Fatalf("mono tone width = %.4f, want ~0", w)
@@ -64,6 +65,7 @@ func TestStereoMonoWidthCorrelation(t *testing.T) {
 }
 
 func TestStereoAntiPhase(t *testing.T) {
+	t.Parallel()
 	// AntiPhase is a proxy: L = -R exactly.
 	s := stereoAppendRuns(AntiPhase(1.5, 440, 0.5), 64)
 	if c := meanF32(s.Correlation); c > -0.99 {
@@ -87,6 +89,7 @@ func TestStereoAntiPhase(t *testing.T) {
 }
 
 func TestStereoPannedLeft(t *testing.T) {
+	t.Parallel()
 	// Panned(-0.8) proxy: gl = amp, gr = amp·0.2.
 	s := stereoAppendRuns(Panned(1.5, 440, -0.8, 0.5), 64)
 	l, r := meanF32(s.LEnergy), meanF32(s.REnergy)
@@ -99,6 +102,7 @@ func TestStereoPannedLeft(t *testing.T) {
 }
 
 func TestStereoWideDecorrelated(t *testing.T) {
+	t.Parallel()
 	// Decorrelated-channel property, measured on a locally generated
 	// (seeded, deterministic) noise pair. NOTE: the corpus WideStereo /
 	// NoiseWhite / NoisePink fixtures instantiate their PRNG per sample
@@ -125,6 +129,7 @@ func TestStereoWideDecorrelated(t *testing.T) {
 }
 
 func TestStereoNaNSanitize(t *testing.T) {
+	t.Parallel()
 	l := []float64{math.NaN(), 0.5, -0.5, 0.25, math.Inf(1)}
 	r := []float64{0.3, math.Inf(-1), math.NaN(), -0.2, 0.1}
 	p := ComputeStereoFrame(l, r)

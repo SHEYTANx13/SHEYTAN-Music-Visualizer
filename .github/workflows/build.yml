@@ -959,7 +959,7 @@ jobs:
             fi
             echo "[section] apt-get install native prerequisites (Go-Gui cgo-free desktop shell + GoGPU runtime stack)"
             # Dependency-graph reconciliation (run 44648357437, failure
-            # 2.5): the UI shell is go-gui v0.98.0, whose Linux desktop
+            # 2.5): the UI shell is go-gui v0.99.1, whose Linux desktop
             # backend is CGO-FREE — it uses pure-Go X11 (jezek/xgb) and
             # dlopens libEGL/libGL/wayland/xkbcommon at RUNTIME, so no
             # X11/Wayland/GL -dev headers or pkg-config modules are
@@ -997,7 +997,7 @@ jobs:
             # native dependency were still required. The runtime dlopen
             # set installed above is verified by ldd on the built
             # binary during the package gates.
-            echo "build-time pkg-config UI modules required: none (go-gui v0.98.0 cgo-free Linux desktop; verified by the app-gogui build step)"
+            echo "build-time pkg-config UI modules required: none (go-gui v0.99.1 cgo-free Linux desktop; verified by the app-gogui build step)"
             echo "[section] encoders/ffprobe availability (informational)"
             ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx264|aac" | head -4 || echo "(encoder list unavailable)"
             ffprobe -version 2>/dev/null | head -1 || echo "(ffprobe unavailable)"
@@ -1547,7 +1547,7 @@ jobs:
           bash scripts/build/build-android.sh
 
       # REQUIRED product package (priority-B): a real arm64 APK built
-      # with the pinned gomobile revision (the go-gui v0.98.0-pinned
+      # with the pinned gomobile revision (the go-gui v0.99.1-pinned
       # x/mobile revision). The gate is authoritative: a missing,
       # invalid or signature-failing APK fails the job. Validation
       # covers archive structure, manifest, arm64 ABI native libraries
@@ -1583,7 +1583,7 @@ jobs:
               # — its build.go symbol check links the NativeActivity /
               # UIKit glue only when the app imports it). The glue now
               # lives in cmd/app-gogui/gui_mobile.go (//go:build
-              # android || ios): it imports golang.org/x/mobile/app and
+              # android): it imports golang.org/x/mobile/app and
               # runs the real lifecycle loop. The runtime scope stays
               # honest: go-gui's android delivery is the Kotlin
               # GLSurfaceView host pattern (backend panics on the
@@ -1705,146 +1705,6 @@ jobs:
           path: ci-logs
           if-no-files-found: error
 
-  ios-compile-smoke:
-    # EXPERIMENTAL (run 44330231458 update): compile smoke only. iOS
-    # requires macOS and full Xcode; Wails classifies iOS as
-    # experimental and the GoGPU native CAMetalLayer backend is
-    # documented as planned, not shipped. No simulator validation, no
-    # signing, no GPU claim. Not a required gate.
-    name: ios-compile-smoke (informational compile smoke; NO product package)
-    runs-on: macos-26
-    timeout-minutes: 30
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Bootstrap CI log directories (guaranteed evidence)
-        run: bash scripts/ci/bootstrap-logs.sh
-
-      - name: Setup Go
-        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
-        with:
-          go-version-file: go.mod
-          cache: false
-
-      # Run 44462492262 repair (THE macOS fix, iOS job): build the
-      # canonical capture-time sanitizer and export CI_SANITIZER_BIN for
-      # scripts/ci/capture.sh (used by scripts/build/build-ios.sh via
-      # ci_capture). capture.sh no longer contains any sed; this binary
-      # (or the python bootstrap fallback) owns the contract.
-      - name: Build sanitizer tool
-        run: |
-          set -Eeuo pipefail
-          CI_BIN="$PWD/.ci-bin"
-          mkdir -p "$CI_BIN"
-          go build -o "$CI_BIN/cisanitize" ./cmd/cisanitize
-          echo "CI_BIN=$CI_BIN" >> "$GITHUB_ENV"
-          echo "CI_SANITIZER_BIN=$CI_BIN/cisanitize" >> "$GITHUB_ENV"
-          echo "$CI_BIN" >> "$GITHUB_PATH"
-          smoke="$(printf 'hello===world\nghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefgh\n' | "$CI_BIN/cisanitize")"
-          if [ "$smoke" != "hello==world"$'\n'"REDACTED" ]; then
-            echo "ERROR: cisanitize smoke test failed (got: $smoke)"
-            exit 1
-          fi
-          echo "cisanitize built and smoke-tested: $CI_BIN/cisanitize"
-
-      # Run 44462492262 repair regression: prove the whole capture-time
-      # sanitizer pipeline is BSD-safe on THIS runner (go build, byte-
-      # identical python fallback, live ci_capture contract, no sed in
-      # scripts/ci/capture.sh).
-      - name: Sanitizer portability (BSD-safe)
-        if: ${{ always() && !cancelled() }}
-        run: |
-          set -Eeuo pipefail
-          bash scripts/ci/tests/test-sanitizer-portable.sh
-
-      - name: iOS compile smoke (no simulator or signing claim)
-        run: |
-          set -Eeuo pipefail
-          bash scripts/build/build-ios.sh
-
-      # Experimental simulator attempt on the macOS runner (Xcode is
-      # pre-installed): gomobile can package the Go-Gui shell as an iOS
-      # .app for the SIMULATOR. The gomobile version is pinned to the
-      # exact golang.org/x/mobile revision go-gui v0.98.0 requires
-      # (v0.2.0 does not exist upstream). Device IPA signing is NOT
-      # configured in this repository's secrets, so the device path is
-      # recorded BLOCKED_SIGNING_NOT_CONFIGURED - never faked.
-      # Install/launch on a concrete simulator runtime is attempted
-      # best-effort and recorded with its exact outcome.
-      - name: iOS simulator app attempt (gomobile, experimental, recorded)
-        run: |
-          set -Eeuo pipefail
-          # SC2030/SC2031 repair (run 44648357437): the piped brace
-          # group below runs in a SUBSHELL; the authoritative status is
-          # a result FILE read by the parent after the pipeline, and
-          # the pipeline exit code still propagates via pipefail.
-          status_file="$(mktemp)"
-          trap 'rm -f "$status_file"' EXIT
-          echo "EXPERIMENTAL_TEST" > "$status_file"
-          {
-            echo "[section] gomobile install (go-gui-pinned x/mobile revision)"
-            if go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261117202452-47699113848a; then
-              echo "gomobile: installed"
-              echo "[section] simulator .app build attempt"
-              if CGO_ENABLED=1 gomobile build -target ios -o /tmp/app-gogui-sim.app ./cmd/app-gogui; then
-                echo "simulator .app build: OK"
-                ls -la /tmp/app-gogui-sim.app
-                echo "TEST_PACKAGE_READY_BUILD_ONLY" > "$status_file"
-                echo "[section] simulator install/launch attempt (best-effort)"
-                dev="$(xcrun simctl list devices available | grep -m1 'iPhone' | sed -E 's/^ *([^ ]+) \(/\1/' || true)"
-                if [ -n "$dev" ]; then
-                  echo "simulator device: $dev"
-                  if xcrun simctl install "$dev" /tmp/app-gogui-sim.app; then
-                    echo "simulator install: OK"
-                    if xcrun simctl launch "$dev" com.parsaetak.sheytan-music-visualizer; then
-                      echo "simulator launch: OK"
-                      echo "EXPERIMENTAL_TEST_SIM_LAUNCHED" > "$status_file"
-                      xcrun simctl terminate "$dev" com.parsaetak.sheytan-music-visualizer || true
-                    else
-                      echo "simulator launch: FAILED (recorded)"
-                      echo "EXPERIMENTAL_TEST_FAILED" > "$status_file"
-                    fi
-                  else
-                    echo "simulator install: FAILED (recorded)"
-                    echo "EXPERIMENTAL_TEST_FAILED" > "$status_file"
-                  fi
-                else
-                  echo "no available iPhone simulator runtime; install/launch UNAVAILABLE (recorded)"
-                  echo "TEST_PACKAGE_READY_BUILD_ONLY" > "$status_file"
-                fi
-              else
-                echo "simulator .app build: FAILED (recorded honestly)"
-                echo "EXPERIMENTAL_TEST_FAILED" > "$status_file"
-              fi
-            else
-              echo "gomobile: INSTALL FAILED (attempt recorded, never faked)"
-              echo "BLOCKED_TOOLCHAIN" > "$status_file"
-            fi
-            echo "[section] device IPA path"
-            echo "device IPA: BLOCKED_SIGNING_NOT_CONFIGURED (no authorized signing identity/provisioning profile in repository secrets; never faked)"
-          } 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/ios-sim-attempt.log
-          status="$(cat "$status_file")"
-          printf '{\n  "gate": "ios-sim-attempt",\n  "status": "%s"\n}\n' "$status" > ci-logs/shell-sim-ios.json
-          echo "ios simulator attempt status: $status"
-
-
-      - name: Validate ASCII log contract (byte-level gate)
-        if: always()
-        run: |
-          set -Eeuo pipefail
-          go run ./cmd/civalidate ci-logs/*.log
-
-      - name: Upload iOS log part
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ios-logs-part-attempt${{ github.run_attempt }}
-          path: ci-logs
-          if-no-files-found: error
-
   collect-logs:
     name: collect-logs (single consolidated report evidence)
     # always() so a failed build job still yields its report;
@@ -1853,7 +1713,7 @@ jobs:
     # reached a TERMINAL state before this job starts — the collector
     # never observes an in_progress/pending job conclusion (a defensive
     # IN_PROGRESS classification still exists in the collector).
-    needs: [preflight, build-windows, build-linux, build-macos, build-android, ios-compile-smoke]
+    needs: [preflight, build-windows, build-linux, build-macos, build-android]
     # if: always() - plain valid form (run 44449832903 repair). The
     # collector is the central always-runs job: it must execute after
     # success, failure, skip AND cancellation (while a runner remains
@@ -1944,18 +1804,6 @@ jobs:
           name: android-logs-part-attempt${{ github.run_attempt }}
           path: ci-parts/android-logs-part-attempt${{ github.run_attempt }}
 
-      - name: Download iOS log part
-        id: download_ios
-        # Run 44449832903 annotation (former build-desktop.yml line 1172):
-        # malformed single-brace `if: ${ always() && !cancelled() }`;
-        # repaired like the macOS step above.
-        if: always()
-        continue-on-error: true
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: ios-logs-part-attempt${{ github.run_attempt }}
-          path: ci-parts/ios-logs-part-attempt${{ github.run_attempt }}
-
       - name: Write run manifest
         if: always()
         env:
@@ -1972,13 +1820,11 @@ jobs:
           RESULT_LINUX: ${{ needs.build-linux.result }}
           RESULT_MACOS: ${{ needs.build-macos.result }}
           RESULT_ANDROID: ${{ needs.build-android.result }}
-          RESULT_IOS: ${{ needs.ios-compile-smoke.result }}
           DOWNLOAD_PREFLIGHT: ${{ steps.download_preflight.outcome }}
           DOWNLOAD_WINDOWS: ${{ steps.download_windows.outcome }}
           DOWNLOAD_LINUX: ${{ steps.download_linux.outcome }}
           DOWNLOAD_MACOS: ${{ steps.download_macos.outcome }}
           DOWNLOAD_ANDROID: ${{ steps.download_android.outcome }}
-          DOWNLOAD_IOS: ${{ steps.download_ios.outcome }}
         run: |
           set -Eeuo pipefail
           mkdir -p ci-parts
@@ -1989,7 +1835,6 @@ jobs:
             echo "linux=${DOWNLOAD_LINUX:-not-run}"
             echo "macos=${DOWNLOAD_MACOS:-not-run}"
             echo "android=${DOWNLOAD_ANDROID:-not-run}"
-            echo "ios=${DOWNLOAD_IOS:-not-run}"
             echo "(CodeQL is an independent workflow; its artifacts are neither downloaded nor consolidated here)"
             echo "[section] downloaded evidence tree"
             find ci-parts -maxdepth 4 -type f -printf '%P\n' | sort || true
@@ -2461,7 +2306,7 @@ jobs:
 
   final-verdict:
     name: final-verdict (all required gates must be green)
-    needs: [preflight, build-windows, build-linux, build-macos, build-android, ios-compile-smoke, collect-logs, publish-products, cleanup-internal]
+    needs: [preflight, build-windows, build-linux, build-macos, build-android, collect-logs, publish-products, cleanup-internal]
     # Braced valid form, deliberately kept for cancellation (latest-update
     # override section A justification): after a user cancellation the
     # collector (if: always()) has already recorded every cancelled job
@@ -2501,28 +2346,22 @@ jobs:
           # verdict only guarantees the truthful report, never success.
           # REQUIRED: preflight, build-windows, build-linux, build-macos,
           # build-android (real arm64 APK), collect-logs,
-          # publish-products, cleanup-internal. INFORMATIONAL:
-          # ios-compile-smoke (compile smoke only; no product package).
-          for gate in preflight build-windows build-linux build-macos build-android ios-compile-smoke collect-logs publish-products cleanup-internal; do
+          # publish-products, cleanup-internal. (The iOS compile smoke
+          # was removed by the run-45347124889 update: iOS is not a
+          # supported target at this stage.)
+          for gate in preflight build-windows build-linux build-macos build-android collect-logs publish-products cleanup-internal; do
             case "$gate" in
               preflight)         result="${{ needs.preflight.result }}" ;;
               build-windows)     result="${{ needs.build-windows.result }}" ;;
               build-linux)       result="${{ needs.build-linux.result }}" ;;
               build-macos)       result="${{ needs.build-macos.result }}" ;;
               build-android)     result="${{ needs.build-android.result }}" ;;
-              ios-compile-smoke) result="${{ needs.ios-compile-smoke.result }}" ;;
               collect-logs)      result="${{ needs.collect-logs.result }}" ;;
               publish-products)  result="${{ needs.publish-products.result }}" ;;
               cleanup-internal)  result="${{ needs.cleanup-internal.result }}" ;;
               *)                 result="unknown" ;;
             esac
             echo "${gate}: ${result}"
-            if [ "$gate" = "ios-compile-smoke" ]; then
-              if [ "$result" != "success" ]; then
-                echo "::warning title=Informational gate ${gate} did not succeed::result=${result} - the iOS compile smoke is non-required and claims no product package; the result is reported truthfully in the run summary"
-              fi
-              continue
-            fi
             if [ "$result" != "success" ]; then
               echo "::error title=Required gate ${gate} did not succeed::result=${result} - see the ${gate} job log and the diagnostics artifact SHEYTAN-Music-Visualizer-all-logs.txt"
               failed=1

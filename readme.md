@@ -15,7 +15,7 @@ machine. No account, no telemetry, no bundled codec binaries.
 > toolkit-free Go application core (`internal/*`) with TWO alternative
 > presentation shells and ONE renderer subsystem behind a contract:
 > - **Native Go-Gui shell** (`cmd/app-gogui`, the actual Go-Gui library
->   `github.com/go-gui-org/go-gui v0.98.0` — NOT Gio `gioui.org`, which was
+>   `github.com/go-gui-org/go-gui v0.99.1` — NOT Gio `gioui.org`, which was
 >   removed in the 2026-11-21 migration) —
 >   the production desktop shell: one window, the eleven workspace tabs,
 >   SHEYTAN design tokens, PixelSurface CPU-frame preview bridge, honest GPU
@@ -54,7 +54,7 @@ See docs/TROUBLESHOOTING.md ("App does not open").
 | Linux x64 | `SHEYTAN-Music-Visualizer-linux-x64.tar.gz` | VERIFIED-only candidate → workflow-wide publisher |
 | macOS arm64 | `SHEYTAN-Music-Visualizer-macos-arm64.app.zip` (real `.app` bundle; unsigned test build, honestly labeled) | candidate → publisher |
 | Android arm64 | `SHEYTAN-Music-Visualizer-android-arm64.apk` (real APK; debug-signed, honestly labeled) | REQUIRED product gate → publisher |
-| iOS | compile smoke only (`ios-compile-smoke`, informational; no product package) | never published |
+| Web (Wails shell) | cgo-free alternative profile, no package published | alternative shell |
 
 Platform jobs never publish under the final public artifact name: they
 produce internal `*-candidate-attemptN` artifacts and the single
@@ -120,7 +120,7 @@ palettes used by the visualizer (`internal/visualizer`).
 
 | Capability | Status |
 |---|---|
-| Studio shell: top command bar, eleven workspace tabs (Home/Studio/Worlds/Templates/Library/Export/Requirements/Downloads/System Files/Settings/Diagnostics), library, live preview, inspector, transport, export dialog | DELIVERED (native Go-Gui shell `cmd/app-gogui` on `github.com/go-gui-org/go-gui v0.98.0` with SHEYTAN token theme; Wails v3 web shell `cmd/app-wails` as the alternative cgo-free profile) |
+| Studio shell: top command bar, eleven workspace tabs (Home/Studio/Worlds/Templates/Library/Export/Requirements/Downloads/System Files/Settings/Diagnostics), library, live preview, inspector, transport, export dialog | DELIVERED (native Go-Gui shell `cmd/app-gogui` on `github.com/go-gui-org/go-gui v0.99.1` with SHEYTAN token theme; Wails v3 web shell `cmd/app-wails` as the alternative cgo-free profile) |
 | Import WAV (int16/int24/int32 + IEEE float32), MP3, FLAC, Ogg/Vorbis via first-party Go decoders | DELIVERED (`internal/audio`) |
 | Import AAC/M4A/ALAC via the user's local FFmpeg (optional adapter, never bundled) | DELIVERED as an optional adapter (`internal/audio/decoders_ffmpeg.go`; registers only when FFmpeg is present) |
 | Layered compositions: a dimmed background mode behind the primary mode | DELIVERED (CPU renderer, deterministic, bounded intensity; `internal/render`) |
@@ -134,9 +134,9 @@ palettes used by the visualizer (`internal/visualizer`).
 | GPU renderer: wgpu (Go-controlled WebGPU) radial-mode shader with verified readback; hardware adapters on Vulkan/DX12/Metal hosts | DELIVERED as code + software-adapter proof; **hardware-GPU execution: NOT AVAILABLE on the verification host** |
 | MP4 export: 1280×720 → 3840×2160 at 24/30/60/**120** fps, H.264 + AAC via FFmpeg, streamed frames, real progress, cancellation, ffprobe validation; 4K120/4K60 functional export tests with exact-cadence ffprobe checks | DELIVERED (`internal/export`; run 43612608237: 4K120 verified locally — 120 frames, exact 1.000 s, ffprobe-validated) |
 | Projects: versioned JSON, atomic save, validation, relink, presets (Hellfire Pulse, Crimson Orbit, Obsidian Wave, Ember Storm) | DELIVERED (`internal/project`) |
-| Fullscreen: single state controller, persisted intent vs observed platform state, F11 toggle, Esc exit, event-driven reconciliation (never a force loop) | DELIVERED (`internal/fullscreen`, `ui/fyne`; state-transition tests PASS — interactive desktop behavior: NOT RUN on this headless verification host) |
+| Fullscreen: single state controller, persisted intent vs observed platform state, event-driven reconciliation (never a force loop) | CONTROLLER DELIVERED (`internal/fullscreen`, state-transition tests PASS); the desktop shell wiring is NOT WIRED since the ui/fyne removal — outstanding work (go-gui exposes `Window.SetFullscreen`/`IsFullscreen`; the adapter + F11/Esc handling is the next slice) |
 | Runtime logging in every interactive launch: UTC text log, rotation, stderr fallback, startup/subsystem/error records, panic stacks | DELIVERED (`internal/logging` + startup wiring; real-run probe evidence captured) |
-| User-facing diagnostics: Help / Diagnostics dialog with Open Logs Folder, Copy Log Path, resolved data mode + log path | DELIVERED (`ui/fyne` actions; button execution needs an interactive desktop: NOT RUN here) |
+| User-facing diagnostics: Diagnostics destination panel with the diagnostics summary, resolved data mode + log path, Open Logs Folder action | DELIVERED (`ui/gogui` panels + actions; button execution needs an interactive desktop: NOT RUN here) |
 | Predictable app-local data layout: portable `data/` beside the executable (portable.mode marker) or installed per-user location (Windows LOCALAPPDATA, Linux XDG), with visible fallback and non-destructive legacy migration | DELIVERED (`internal/apppaths` + package staging gates; resolver/bootstrap/migration tests PASS) |
 | Windows x64 build | DELIVERED as script/workflow definition producing exactly one canonical package (`SHEYTAN-Music-Visualizer-windows-x64.zip`, uploaded VERIFIED or TEST-ONLY); **native Windows execution: NOT RUN on this Linux verification host — hosted `build-windows` owns it** |
 
@@ -183,7 +183,7 @@ decoders are never shared across goroutines.
 
 - **Go** at the `go.mod` toolchain (1.27 line). The desktop build uses CGO.
 - **Linux**: `gcc` (the GoGPU wgpu renderer stack compiles cgo) and the
-  RUNTIME UI libraries only — the go-gui v0.98.0 desktop backend is
+  RUNTIME UI libraries only — the go-gui v0.99.1 desktop backend is
   cgo-free (pure-Go X11 via jezek/xgb; libEGL/libGL/wayland/xkbcommon are
   dlopened at run time, so no `-dev` headers or pkg-config UI modules are
   needed):

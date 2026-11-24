@@ -50,9 +50,13 @@ current user prompt.
   project state, no mandatory account, no telemetry. Do not introduce
   Python, Node.js, Electron, React, web UIs, Qt/QML or C++ product
   engines.
-- **Fyne owns the desktop UI only** — it must never become the export
-  renderer or media pipeline. UI thread ownership: never mutate Fyne
-  widgets from goroutines; use Fyne's documented UI-thread mechanism.
+- **go-gui owns the desktop UI** (`ui/gogui` on go-gui v0.99.1) — it
+  must never become the export renderer or media pipeline. Frame-thread
+  ownership: shell control values live on the go-gui frame thread;
+  widgets are rebuilt per frame from them; the only cross-goroutine
+  surfaces are uiState and the preview pacer's publish path. The former
+  Fyne surface was removed after parity and its return is guarded by
+  `scripts/ci/check-no-fyne.sh`.
 - **GPU acceleration has a proof gate.** Never claim acceleration, never
   fake GPU telemetry, never label CPU output as GPU. Detection ≠
   execution ≠ verification. The wgpu renderer reports
@@ -105,11 +109,12 @@ go build -trimpath -tags goffi_static -o bin/sheytan-music-visualizer ./cmd/shey
 go test -race -tags goffi_static ./internal/...  # race detector on concurrent cores
 ```
 
-The `-tags goffi_static` build tag is REQUIRED whenever Fyne (CGO) and the
-wgpu renderer (goffi FFI stubs) link into one binary — the Go internal
-linker rejects the mixed relocations (`goffi_dlopen` SDYNIMPORT vs CGO);
-`goffi_static` selects goffi's static dlopen path. The packaged build
-scripts apply it on both Linux and Windows.
+The `-tags goffi_static` build tag selects goffi's static dlopen path
+for the wgpu renderer's FFI stubs — required on the CI-canonical Linux
+profile (CGO_ENABLED=1) because the Go internal linker rejects the
+mixed relocations (`goffi_dlopen` SDYNIMPORT vs CGO). The packaged
+build scripts apply it on Linux and Windows; go-gui v0.99.1's native
+desktop backends themselves are cgo-free.
 
 Or run the packaged script that does all of the above with full capture:
 

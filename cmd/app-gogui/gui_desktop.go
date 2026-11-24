@@ -3,7 +3,7 @@
 // ONE gogui window lifecycle. The mobile targets (android, iOS) run
 // the x/mobile lifecycle loop instead — see gui_mobile.go.
 //
-//go:build !android && !ios
+//go:build !android
 
 package main
 

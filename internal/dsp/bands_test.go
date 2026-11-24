@@ -75,6 +75,7 @@ func meanBand(tl *BandTimeline, b int) float64 {
 }
 
 func TestBandToneShares(t *testing.T) {
+	t.Parallel()
 	// 55 Hz tone proxy: nearly all energy lands in sub-bass+bass
 	// (bands 0+1 cover 20..120 Hz).
 	low := runBandTracker(stftMags(t, Tone(55, 2, 0.6), 0))
@@ -109,6 +110,7 @@ func TestBandToneShares(t *testing.T) {
 }
 
 func TestBandKickFluxDominatesLowBands(t *testing.T) {
+	t.Parallel()
 	// KickLike proxy: low-frequency transient with pitch drop.
 	kick := Silence(3.5, 1)
 	KickLike(&kick, 0.5, 0.9)
@@ -154,6 +156,7 @@ func TestBandKickFluxDominatesLowBands(t *testing.T) {
 }
 
 func TestBandEnvelopeAttackRelease(t *testing.T) {
+	t.Parallel()
 	bt := NewBandTracker()
 	zero := make([]float64, FFTSize/2+1)
 	// loud content confined to band 5 (1000..2000 Hz → bins 43..85)
@@ -183,6 +186,7 @@ func TestBandEnvelopeAttackRelease(t *testing.T) {
 }
 
 func TestBandSeriesIntegrity(t *testing.T) {
+	t.Parallel()
 	kick := Silence(2, 1)
 	KickLike(&kick, 0.5, 0.8)
 	SnareLike(&kick, 1.0, 0.6)

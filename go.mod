@@ -8,10 +8,10 @@ require (
 	github.com/ebitengine/oto/v3 v3.5.1
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
-	github.com/go-gui-org/go-gui v0.98.0
+	github.com/go-gui-org/go-gui v0.99.1
 	github.com/gogpu/gputypes v0.9.1
 	github.com/gogpu/wgpu v0.34.15
-	github.com/jfreymuth/oggvorbis v1.0.5
+	github.com/jfreymuth/oggvorbis v1.0.6
 	github.com/llehouerou/go-mp3 v1.5.0
 	github.com/tphakala/go-flac v1.4.0
 	github.com/ulikunitz/xz v0.5.17
@@ -25,10 +25,10 @@ require (
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
-	github.com/dlclark/regexp2/v2 v2.2.2 // indirect
+	github.com/dlclark/regexp2/v2 v2.13.2 // indirect
 	github.com/ebitengine/purego v0.11.3 // indirect
 	github.com/go-audio/riff v1.0.0 // indirect
-	github.com/go-gui-org/go-glyph v1.28.0 // indirect
+	github.com/go-gui-org/go-glyph v1.29.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-pdf/fpdf v0.9.0 // indirect
 	github.com/go-text/typesetting v0.3.5 // indirect
@@ -40,7 +40,6 @@ require (
 	github.com/gogpu/naga v0.22.0 // indirect
 	github.com/jezek/xgb v1.3.1 // indirect
 	github.com/jfreymuth/pulse v0.1.3 // indirect
-	github.com/jfreymuth/vorbis v1.0.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/tdewolff/parse/v2 v2.25.0 // indirect
 	github.com/tphakala/simd v1.16.0 // indirect

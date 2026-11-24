@@ -115,7 +115,7 @@
   MIGRATION (2026-11-21, run 44648357437 repair): `gioui.org` was
   removed and the native shell now uses the actual Go-Gui library.
   The current presentation dependencies are:
-  - `github.com/go-gui-org/go-gui v0.98.0` — the native Go-Gui shell
+  - `github.com/go-gui-org/go-gui v0.99.1` — the native Go-Gui shell
     toolkit (`cmd/app-gogui`, `ui/gogui`). Immediate-mode Go-first GUI;
     the Linux desktop backend is CGO-FREE (pure-Go X11 via jezek/xgb,
     runtime dlopen of libEGL/libGL/wayland/xkbcommon — no `-dev`

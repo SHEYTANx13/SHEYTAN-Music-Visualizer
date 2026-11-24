@@ -1,7 +1,7 @@
 // gui_mobile.go — the gomobile lifecycle glue for the mobile targets
 // (android and iOS) of the native Go-Gui shell.
 //
-// gomobile build (both -target android and -target ios) refuses to
+// gomobile build (-target android) refuses to
 // package a main package that does not import golang.org/x/mobile/app
 // (cmd/gomobile build.go checks the symbol table; the NativeActivity /
 // UIKit lifecycle glue is linked only when the app imports it). Without
@@ -26,7 +26,7 @@
 // and emulator evidence is recorded UNAVAILABLE by the CI contract.
 // No placeholder screen, no fake UI, no invented runtime claim.
 //
-//go:build android || ios
+//go:build android
 
 package main
 

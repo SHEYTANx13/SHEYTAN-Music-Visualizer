@@ -104,7 +104,50 @@ else
       # iconutil (present on every macOS runner). A missing iconutil is
       # recorded, never faked - the bundle then ships without an icon
       # and the gate records the honest state.
+      # RUN 45347124889 repair: iconutil REFUSES an iconset whose file
+      # dimensions contradict the documented Apple iconset table (the
+      # tracked set shipped icon_512x512@2x.png at 512x512, missed five
+      # canonical names and carried a non-standard icon_64x64.png; the
+      # opaque iconutil failure produced NO artifact). The set is now
+      # validated file-by-file BEFORE iconutil runs, so a regression is
+      # a precise per-file diagnostic, never an opaque exit code.
       if command -v iconutil >/dev/null 2>&1; then
+        set -- icon_16x16.png:16 icon_16x16@2x.png:32 icon_32x32.png:32 \
+          icon_32x32@2x.png:64 icon_128x128.png:128 icon_128x128@2x.png:256 \
+          icon_256x256.png:256 icon_256x256@2x.png:512 icon_512x512.png:512 \
+          icon_512x512@2x.png:1024
+        icon_err=0
+        for entry in "$@"; do
+          name="${entry%%:*}"
+          want="${entry##*:}"
+          file="assets/icon/iconset/$name"
+          if [ ! -f "$file" ]; then
+            echo "ERROR: iconset is missing the required entry $name (documented Apple iconset table)"
+            icon_err=1
+            continue
+          fi
+          dims="$(sips -g pixelWidth -g pixelHeight "$file" 2>/dev/null | awk '/pixelWidth/{w=$2} /pixelHeight/{h=$2} END{print w "x" h}')"
+          if [ "$dims" != "${want}x${want}" ]; then
+            echo "ERROR: iconset entry $name is ${dims:-unreadable}px, must be ${want}x${want}px (iconutil rejects a dimension mismatch)"
+            icon_err=1
+          fi
+        done
+        extra=""
+        for f in assets/icon/iconset/*; do
+          case "$(basename "$f")" in
+            icon_16x16.png|icon_16x16@2x.png|icon_32x32.png|icon_32x32@2x.png|icon_128x128.png|icon_128x128@2x.png|icon_256x256.png|icon_256x256@2x.png|icon_512x512.png|icon_512x512@2x.png) ;;
+            *) extra="$extra $(basename "$f")" ;;
+          esac
+        done
+        if [ -n "$extra" ]; then
+          echo "ERROR: iconset carries non-canonical entries (must be exactly the documented table):$extra"
+          icon_err=1
+        fi
+        if [ "$icon_err" -ne 0 ]; then
+          echo "ERROR: tracked macOS iconset does not satisfy the iconutil contract; fix assets/icon/iconset via scripts/assets/gen_icon.py"
+          exit 1
+        fi
+        echo "iconset validated: 10 canonical entries, dimensions match the documented table"
         iconutil -c icns assets/icon/iconset -o dist/SHEYTAN-Music-Visualizer.app/Contents/Resources/AppIcon.icns
         test -s dist/SHEYTAN-Music-Visualizer.app/Contents/Resources/AppIcon.icns
         echo "icon.icns built from the tracked iconset (iconutil)"
