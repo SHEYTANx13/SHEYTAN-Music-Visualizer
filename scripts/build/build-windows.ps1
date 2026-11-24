@@ -163,7 +163,7 @@ if ($null -eq $goResolved) {
     $blockedGates = @(
         "toolchain-report", "desktop-env-check", "gofmt-verify",
         "go-mod-tidy-verify", "go-mod-verify", "go-test", "go-vet",
-        "go-build-packages", "build-executable", "run-version",
+        "go-build-packages", "build-executable", "build-shell-resource", "build-gogui-shell", "validate-pe-gui", "run-version",
         "run-self-check", "verify-build-metadata", "stage-portable",
         "verify-package-license", "validate-pe", "create-portable-zip",
         "verify-extracted-package", "forbid-bundled-media-tools",
@@ -367,18 +367,30 @@ if ($rc -ne 0) { Fail-Gate "go-build-packages" }
 
 # ---- desktop executable + runtime checks -----------------------------------
 $exeOk = $false
+# RUN 45297707372 SHIP-THE-SHELL REPAIR (the reported "Windows build did
+# not open and recorded no logs" root cause): the package used to ship
+# ONLY bin\sheytan-music-visualizer.exe - the CLI AUTHORITY, whose own
+# documentation says "It never opens a window" - linked with
+# -H=windowsgui. A user double-clicking that executable saw NOTHING: no
+# window (the CLI opens none by design) and no console (the GUI
+# subsystem has none), so the product appeared dead. The desktop
+# PRODUCT executable is the native Go-Gui shell, cmd/app-gogui:
+#   - bin\app-gogui.exe                THE product executable, GUI
+#                                      subsystem, shell icon + BETA
+#                                      VERSIONINFO resource (windres).
+#   - bin\sheytan-music-visualizer.exe the CLI authority, CONSOLE
+#                                      subsystem (restored), shipped as
+#                                      the scripting/self-check companion.
+# validate-pe verifies BOTH subsystems from the built artifacts.
 $exePath = Join-Path $repoRoot "bin\sheytan-music-visualizer.exe"
 $rc = Capture-Step -Job $job -Step "build-executable" -ToolContext "gate:build-exe" -GoTags -Command {
     $bi = "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
     $args_ = @("build", "-trimpath") + $goTags
     $ld = @()
-    # GUI SUBSYSTEM (run 42598929646 defect H): the user-facing Windows
-    # desktop executable must be linked with -H=windowsgui so launching
-    # it never attaches a command window. The token is emitted FIRST
-    # and the -X metadata tokens below stay intact (both live in the
-    # same -ldflags value); validate-pe verifies the resulting PE
-    # Optional Header subsystem is IMAGE_SUBSYSTEM_WINDOWS_GUI / 2.
-    $ld += "-H=windowsgui"
+    # CONSOLE SUBSYSTEM RESTORED (run 45297707372): the CLI authority is
+    # a console tool by design; its CI gates capture stdout/stderr
+    # normally. The -H=windowsgui token moved to the product shell
+    # build below (run 42598929646 defect H applies to the GUI exe).
     # EVERY element carries its own "-X " flag token inside the single
     # -ldflags value. Without the -X prefix the Go tool silently ignores
     # the tokens (exit 0, defaults kept) — the run 42231355353 defect
@@ -407,6 +419,58 @@ $rc = Capture-Step -Job $job -Step "build-executable" -ToolContext "gate:build-e
     go @args_
 }
 if ($rc -eq 0) { $exeOk = $true } else { Fail-Gate "build-executable" }
+
+# ---- product desktop shell (app-gogui.exe) + Windows icon resource -------
+# RUN 45297707372: the EXECUTION FILE the user double-clicks must be the
+# native Go-Gui shell AND must carry the SHEYTAN brand icon. windres
+# compiles assets/windows/app.rc (1 ICON assets/icon/icon.ico + the BETA
+# VERSIONINFO block) into cmd/app-gogui/resource.syso; the Go linker
+# embeds every *.syso in the package directory into the exe. The .syso
+# is generated fresh every build and is gitignored (a bare-name .syso
+# would otherwise be linked into non-Windows targets too).
+$shellOk = $false
+$rc = Capture-Step -Job $job -Step "build-shell-resource" -ToolContext "gate:shell-resource" -RequireRepoRoot -Command {
+    $windres = (Get-Command windres -ErrorAction SilentlyContinue)
+    if ($null -eq $windres) { $windres = (Get-Command x86_64-w64-mingw32-windres -ErrorAction SilentlyContinue) }
+    if ($null -eq $windres) {
+        Write-Output "ERROR: windres not found on PATH (MSYS2 UCRT64 required for the icon resource)"
+        exit 1
+    }
+    Write-Output ("windres: {0}" -f $windres.Source)
+    & $windres.Source "-I" $repoRoot "-i" (Join-Path $repoRoot "assets\windows\app.rc") "-O" "coff" "-o" (Join-Path $repoRoot "cmd\app-gogui\resource.syso")
+    if ($LASTEXITCODE -ne 0) {
+        Write-Output "ERROR: windres failed with exit code $LASTEXITCODE"
+        exit $LASTEXITCODE
+    }
+    $syso = Get-Item (Join-Path $repoRoot "cmd\app-gogui\resource.syso")
+    if ($syso.Length -le 0) { Write-Output "ERROR: resource.syso is empty"; exit 1 }
+    Write-Output ("resource.syso written: {0} bytes" -f $syso.Length)
+    # The tracked ICO must be reachable exactly where app.rc points.
+    if (-not (Test-Path (Join-Path $repoRoot "assets\icon\icon.ico"))) {
+        Write-Output "ERROR: assets/icon/icon.ico missing (app.rc references it)"
+        exit 1
+    }
+    exit 0
+}
+if ($rc -eq 0) { Write-Output "shell resource gate: OK" } else { Fail-Gate "build-shell-resource" }
+
+$rc = Capture-Step -Job $job -Step "build-gogui-shell" -ToolContext "gate:build-gogui-shell" -GoTags -Command {
+    $bi = "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
+    $args_ = @("build", "-trimpath") + $goTags
+    $ld = @("-H=windowsgui")
+    # GUI SUBSYSTEM (run 42598929646 defect H): launching the product
+    # shell never attaches a command window; validate-pe-gui below
+    # verifies IMAGE_SUBSYSTEM_WINDOWS_GUI / 2 from the built artifact.
+    if ($env:SHEYTAN_BUILD_VERSION) { $ld += "-X ${bi}.version=$($env:SHEYTAN_BUILD_VERSION)" }
+    if ($env:SHEYTAN_BUILD_COMMIT)  { $ld += "-X ${bi}.commit=$($env:SHEYTAN_BUILD_COMMIT)" }
+    if ($env:SHEYTAN_BUILD_DATE)    { $ld += "-X ${bi}.date=$($env:SHEYTAN_BUILD_DATE)" }
+    if ($env:SHEYTAN_BUILT_BY)      { $ld += "-X ${bi}.builtBy=$($env:SHEYTAN_BUILT_BY)" }
+    $args_ += @("-ldflags", ($ld -join " "))
+    $args_ += @("-o", "bin\app-gogui.exe", "./cmd/app-gogui")
+    Write-Output ("GO_ARGV: {0}" -f ($args_ -join " "))
+    go @args_
+}
+if ($rc -eq 0) { $shellOk = $true } else { Fail-Gate "build-gogui-shell" }
 
 if ($exeOk) {
     $rc = Capture-Step -Job $job -Step "run-version" -ToolContext "runtime:--version" -Command { & "bin\sheytan-music-visualizer.exe" --version }
@@ -565,6 +629,16 @@ if ($exeOk) {
         New-Item -ItemType Directory -Force -Path $appDir | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $appDir "tools\ffmpeg\bin") | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $appDir "data") | Out-Null
+        # RUN 45297707372 SHIP-THE-SHELL: app-gogui.exe is the PRIMARY
+        # product executable (the thing users double-click); the CLI
+        # stays as the scripting/self-check companion.
+        if ($shellOk) {
+            Copy-Item "bin\app-gogui.exe" $appDir
+        } else {
+            Write-Output "ERROR: the product desktop shell (app-gogui.exe) was not built; refusing to stage a CLI-only package"
+            exit 1
+        }
+        Copy-Item "assets\icon\icon.png" $appDir
         Copy-Item "bin\sheytan-music-visualizer.exe" $appDir
         Copy-Item "docs/license.md" $appDir
         Copy-Item "readme.md" $appDir
@@ -621,14 +695,83 @@ if ($exeOk) {
         if ($magic -ne 0x20B -and $magic -ne 0x10B) { Write-Output "ERROR: unexpected Optional Header magic 0x{0:X4}" -f $magic; exit 1 }
         $subsystem = [BitConverter]::ToUInt16($bytes, $optOff + 68)
         Write-Output ("PE optional-header magic: 0x{0:X4}; Subsystem: {1} (2 = IMAGE_SUBSYSTEM_WINDOWS_GUI, 3 = console)" -f $magic, $subsystem)
-        if ($subsystem -ne 2) {
-            Write-Output "ERROR: the Windows desktop executable is NOT a GUI-subsystem binary (-H=windowsgui missing or overridden)"
+        # RUN 45297707372: the CLI authority is a CONSOLE tool (3) by
+        # design; the GUI-subsystem assertion moved to validate-pe-gui
+        # on the product shell binary.
+        if ($subsystem -ne 3) {
+            Write-Output "ERROR: the CLI authority must stay a console-subsystem binary (subsystem 3; CI captures its stdout/stderr)"
             exit 1
         }
-        Write-Output "validate-pe PASSED: desktop executable subsystem = Windows GUI (2), verified from the built artifact"
+        Write-Output "validate-pe PASSED: CLI authority subsystem = console (3), verified from the built artifact"
         exit 0
     }
     if ($rc -ne 0) { Fail-Gate "validate-pe" }
+
+    # PRODUCT SHELL PE SUBSYSTEM + ICON RESOURCE GATE (run 45297707372):
+    # bin\app-gogui.exe must be IMAGE_SUBSYSTEM_WINDOWS_GUI (2) AND must
+    # carry the embedded icon/VERSIONINFO resource (.rsrc section from
+    # cmd/app-gogui/resource.syso). This is the gate that would have
+    # caught the "package shipped a CLI, nothing opens" defect.
+    if ($shellOk) {
+        $rc = Capture-Step -Job $job -Step "validate-pe-gui" -ToolContext "gate:validate-pe-gui" -Command {
+            $exe = "bin\app-gogui.exe"
+            $bytes = [System.IO.File]::ReadAllBytes($exe)
+            if ($bytes.Length -lt 0x100) { Write-Output "ERROR: file too small for a PE ($($bytes.Length) bytes)"; exit 1 }
+            if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) { Write-Output "ERROR: not a PE executable (missing MZ header)"; exit 1 }
+            $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
+            if ($peOff -le 0 -or ($peOff + 24 + 68) -gt $bytes.Length) { Write-Output "ERROR: implausible e_lfanew $peOff"; exit 1 }
+            if ($bytes[$peOff] -ne 0x50 -or $bytes[$peOff+1] -ne 0x45 -or $bytes[$peOff+2] -ne 0 -or $bytes[$peOff+3] -ne 0) {
+                Write-Output "ERROR: PE signature missing at e_lfanew"
+                exit 1
+            }
+            $optOff = $peOff + 4 + 20
+            $magic = [BitConverter]::ToUInt16($bytes, $optOff)
+            if ($magic -ne 0x20B -and $magic -ne 0x10B) { Write-Output "ERROR: unexpected Optional Header magic 0x{0:X4}" -f $magic; exit 1 }
+            $subsystem = [BitConverter]::ToUInt16($bytes, $optOff + 68)
+            Write-Output ("PE optional-header magic: 0x{0:X4}; Subsystem: {1} (2 = IMAGE_SUBSYSTEM_WINDOWS_GUI, 3 = console)" -f $magic, $subsystem)
+            if ($subsystem -ne 2) {
+                Write-Output "ERROR: the product desktop shell is NOT a GUI-subsystem binary (-H=windowsgui missing or overridden)"
+                exit 1
+            }
+            # Resource section presence: the windres-built .syso adds an
+            # .rsrc section to the PE. Section names live in the section
+            # table directly after the Optional Header.
+            $numSections = [BitConverter]::ToUInt16($bytes, $peOff + 6)
+            $optSize = [BitConverter]::ToUInt16($bytes, $peOff + 20)
+            $secOff = $optOff + $optSize
+            $hasResource = $false
+            for ($i = 0; $i -lt $numSections; $i++) {
+                $nameOff = $secOff + 40 * $i
+                $name = [System.Text.Encoding]::ASCII.GetString($bytes, $nameOff, 8).TrimEnd([char]0)
+                if ($name -eq ".rsrc") { $hasResource = $true }
+            }
+            if (-not $hasResource) {
+                Write-Output "ERROR: product shell has no .rsrc section (icon/VERSIONINFO resource not embedded; windres step missing?)"
+                exit 1
+            }
+            # The VERSIONINFO string table must contain the product name
+            # in UTF-16LE (bounded whole-file byte search).
+            $needle = [System.Text.Encoding]::Unicode.GetBytes("SHEYTAN Music Visualizer")
+            $found = $false
+            for ($i = 0; $i -le $bytes.Length - $needle.Length; $i++) {
+                $ok = $true
+                for ($j = 0; $j -lt $needle.Length; $j++) {
+                    if ($bytes[$i + $j] -ne $needle[$j]) { $ok = $false; break }
+                }
+                if ($ok) { $found = $true; break }
+            }
+            if (-not $found) {
+                Write-Output "ERROR: VERSIONINFO product name not found in the product shell resource"
+                exit 1
+            }
+            Write-Output "validate-pe-gui PASSED: product shell subsystem = Windows GUI (2), .rsrc present, VERSIONINFO product name present"
+            exit 0
+        }
+        if ($rc -ne 0) { Fail-Gate "validate-pe-gui" }
+    } else {
+        Write-Note "BLOCKED: gate validate-pe-gui (build-gogui-shell failed; no product shell binary to validate)"
+        Skip-Gate "validate-pe-gui" "product shell build failed"
+    }
 
     # PACKAGE ROOT CONTRACT (run 42837709122 gates B+C repair): the
     # archive must carry the APPLICATION directory as its single
@@ -735,8 +878,14 @@ if ($exeOk) {
         Expand-Archive -Path $zip -DestinationPath $extractRoot
         $appRoot = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64"
         # 1. COMPLETE required-path manifest after extraction.
+        # RUN 45297707372: the product desktop shell (app-gogui.exe) and
+        # the shell icon (icon.png) are REQUIRED package contents - a
+        # CLI-only package is the exact defect that shipped a product
+        # that "did not open".
         $requiredPaths = @(
+            "app-gogui.exe",
             "sheytan-music-visualizer.exe",
+            "icon.png",
             "license.md",
             "readme.md",
             "portable.mode",
@@ -788,11 +937,38 @@ if ($exeOk) {
         $peOff = [BitConverter]::ToInt32($bytes, 0x3C)
         $optOff = $peOff + 4 + 20
         $subsystem = [BitConverter]::ToUInt16($bytes, $optOff + 68)
-        Write-Output ("extracted EXE PE Optional Header Subsystem: {0} (2 = GUI)" -f $subsystem)
-        if ($subsystem -ne 2) {
-            Write-Output "ERROR: extracted executable lost the Windows GUI subsystem (must stay -H=windowsgui)"
+        Write-Output ("extracted EXE PE Optional Header Subsystem: {0} (3 = console)" -f $subsystem)
+        if ($subsystem -ne 3) {
+            Write-Output "ERROR: extracted CLI authority must be a console-subsystem binary (subsystem 3)"
             & $cleanup; exit 1
         }
+        # 3b. Extracted PRODUCT SHELL: GUI subsystem + embedded resource
+        # (run 45297707372 ship-the-shell gate, on the archived bytes).
+        $shellExe = Join-Path $appRoot "app-gogui.exe"
+        $shellBytes = [System.IO.File]::ReadAllBytes($shellExe)
+        if ($shellBytes.Length -lt 0x100) { Write-Output "ERROR: extracted app-gogui.exe too small for a PE"; & $cleanup; exit 1 }
+        $shellPeOff = [BitConverter]::ToInt32($shellBytes, 0x3C)
+        $shellOptOff = $shellPeOff + 4 + 20
+        $shellSubsystem = [BitConverter]::ToUInt16($shellBytes, $shellOptOff + 68)
+        Write-Output ("extracted app-gogui.exe PE Optional Header Subsystem: {0} (2 = GUI)" -f $shellSubsystem)
+        if ($shellSubsystem -ne 2) {
+            Write-Output "ERROR: extracted product shell lost the Windows GUI subsystem (must stay -H=windowsgui)"
+            & $cleanup; exit 1
+        }
+        $shellNumSections = [BitConverter]::ToUInt16($shellBytes, $shellPeOff + 6)
+        $shellOptSize = [BitConverter]::ToUInt16($shellBytes, $shellPeOff + 20)
+        $shellSecOff = $shellOptOff + $shellOptSize
+        $shellHasResource = $false
+        for ($i = 0; $i -lt $shellNumSections; $i++) {
+            $nameOff = $shellSecOff + 40 * $i
+            $name = [System.Text.Encoding]::ASCII.GetString($shellBytes, $nameOff, 8).TrimEnd([char]0)
+            if ($name -eq ".rsrc") { $shellHasResource = $true }
+        }
+        if (-not $shellHasResource) {
+            Write-Output "ERROR: extracted product shell has no .rsrc section (icon/VERSIONINFO lost)"
+            & $cleanup; exit 1
+        }
+        Write-Output "extracted product shell: GUI subsystem + .rsrc resource verified from the archived bytes"
         # 4. Runtime contract on the EXTRACTED binary via the robust
         #    runner: real exit codes, captured streams, machine-readable
         #    self-check file. The package must RUN, not merely exist.

@@ -474,11 +474,15 @@ jobs:
             exit 0
           fi
 
-          if [ "$RESULT_ANALYZE_GO" = success ] && [ "$RESULT_ANALYZE_ACTIONS" = success ]; then
-            result_codeql=success
-          else
-            result_codeql=failure
-          fi
+          # Run 45297707372 repair: the former aggregated
+          # result_codeql=success|failure local was computed but never
+          # consumed. The SC2034 finding was surfaced by actionlint's
+          # shell-check integration on the hosted runner, where that
+          # tool is preinstalled; local shells without it never saw
+          # the finding, which is why it existed only hosted. The
+          # overall conclusion belongs to the job's exit path, not to
+          # a variable; the per-job conclusions below are what the
+          # emergency report consumes.
           reason="collector_rc=$(cat collector.rc 2>/dev/null || echo unknown); collector_build_rc=$(cat collector-build.rc 2>/dev/null || echo unknown)"
 
           # Profile-aware fallback (run-45042834040 repair): only THIS

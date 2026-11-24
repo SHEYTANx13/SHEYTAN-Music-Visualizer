@@ -1,5 +1,103 @@
 # Changelog
 
+## Run 45297707372 repair — Windows ship-the-shell, first-byte crash logging, android gomobile lifecycle glue, preflight shellcheck parity, icon on the executable, scrolling/download/touch UX (2026-11-24)
+
+- **Windows "app did not open and recorded no logs" ROOT CAUSE (the
+  reported defect)**: the Windows package shipped ONLY
+  `sheytan-music-visualizer.exe` — the CLI AUTHORITY, whose own
+  documentation says "It never opens a window" — linked with
+  `-H=windowsgui`. Double-clicking it showed nothing: no window (the
+  CLI opens none by design) and no console (the GUI subsystem has
+  none). The product desktop executable is now the native Go-Gui shell
+  `app-gogui.exe` (GUI subsystem, staged first), the CLI stays the
+  console-subsystem scripting/self-check companion,
+  `validate-pe` asserts console(3) on the CLI, and the new
+  `validate-pe-gui` gate asserts GUI(2) + an `.rsrc` resource section +
+  the VERSIONINFO product name on the shell binary — both at build
+  time and on the extracted package bytes.
+- **Icon on the EXECUTION FILE**: new tracked brand assets
+  (`assets/icon/icon.png` 512px, `assets/icon/icon.ico` 7 sizes,
+  `iconset/` for macOS) generated deterministically by
+  `scripts/assets/gen_icon.py` from the design token palette (obsidian
+  plate, inverted pentagram in infernal red, ember ring, gold horn
+  caps — matching `internal/worldassets` sigil geometry).
+  `internal/appicon` embeds them (consistency-tested against the
+  tracked source). `build-windows.ps1` compiles
+  `assets/windows/app.rc` (1 ICON + BETA VERSIONINFO) with windres into
+  `cmd/app-gogui/resource.syso` (gitignored, generated per build) so
+  Explorer/taskbar/shortcuts carry the mark and metadata; the gogui
+  window uses `WindowCfg.IconPNG`; the Linux package stages
+  `icon.png` + a freedesktop launcher entry
+  (`packaging/linux/sheytan-music-visualizer.desktop`, hicolor 512);
+  the macOS bundle builds `AppIcon.icns` from the iconset via iconutil
+  (BLOCKED-recorded when absent) and ships the shell as
+  CFBundleExecutable (the CLI becomes a companion binary inside
+  `Contents/MacOS/`); gomobile reads `cmd/app-gogui/assets/icon.png`
+  for the APK launcher icon.
+- **First-byte crash logging**: `cmd/app-gogui/main.go` now opens the
+  runtime log BEFORE anything else (`logging.Bootstrap`, never fatal),
+  writes the startup banner (version/commit/go/os/arch/pid/data
+  mode/log path) as the first record, tees stderr into the log
+  (`TeeStderr` — a GUI-subsystem process without a console now
+  persists what a console process would print), logs every startup
+  phase in `gogui.Run` (design tokens, data layout, studio service,
+  renderer selection, window created — each failure with its reason),
+  persists every recovered panic as
+  `crashes/crash-<utc>.txt` + an ERROR record (`WriteCrashReport`),
+  and records the process exit code (`LogExit`). Honest boundary
+  (documented in docs/TROUBLESHOOTING.md): a panic on a non-main
+  goroutine terminates via the Go runtime whose OS-level stderr handle
+  cannot be redirected on a GUI-subsystem Windows build.
+- **Android required-APK gate repair (run 45297707372 root cause,
+  reproduced locally against NDK r28c 28.2.13676358 + the pinned
+  x/mobile revision)**: gomobile REFUSES to package a main package that
+  does not import `golang.org/x/mobile/app`
+  (`cmd/gomobile/build.go` symbol check; the NativeActivity/UIKit glue
+  is linked only when the app imports it). The glue now lives in
+  `cmd/app-gogui/gui_mobile.go` (`//go:build android || ios`): it
+  imports `golang.org/x/mobile/app` and runs the real lifecycle loop
+  (`app.Main(func(app.App))`). Runtime scope stays honest: go-gui's
+  android delivery is the Kotlin GLSurfaceView host pattern (its
+  backend panics on the desktop Run path), documented as a later
+  slice; the APK is the experimental compile-class carrier (structure,
+  identity, ABI, signature — never a runtime claim). Verified locally:
+  `gomobile build -target android/arm64 -androidapi 31` now exits 0
+  with `lib/arm64-v8a/libapp_gogui.so` + manifest. The APK step also
+  gained `emit_error` evidence plumbing
+  (`ci-logs/android-apk-build-errors.log`) so any future gate failure
+  carries its own origin into the consolidated report.
+- **Preflight shellcheck parity (run 45297707372 root cause)**: the
+  `codeql.yml` emergency-fallback step computed a `result_codeql`
+  variable it never consumed (shellcheck SC2034). actionlint runs its
+  shell-check integration only when shellcheck exists — hosted runners
+  preinstall it, local environments usually do not, which is exactly
+  why the finding appeared ONLY hosted while local runs were "clean".
+  The unused variable is removed. actionlint 1.7.12 WITH shellcheck on
+  PATH is now the local verification parity requirement.
+- **Scrolling (all sections)**: every workspace panel, the studio
+  rail and the studio main pane use a class-resolved visible
+  scroll bar (`ShellTheme.ScrollbarCfgForWidth`: 14dp thumb on
+  phone/tablet, 10dp on desktop/wide, rounded accent thumb over the
+  surface ink, 40dp minimum thumb) replacing the nearly invisible 7dp
+  theme default; the app wheel step (`ScrollMultiplier`) rises from
+  20 to 32px per wheel line; switching destinations scrolls the new
+  panel back to its top instead of restoring the previous section's
+  leftover offset.
+- **Download size/status (engine updates)**: the Media Tools & Codecs
+  panel shows the LIVE download line — transferred bytes, total (when
+  the server provides one), percent and measured speed — plus the bar
+  when the total is known and an explicit "size unknown" line when it
+  is not; the not-installed / update-available / repair-needed states
+  surface the pinned pack's compressed/installed size estimates before
+  the user chooses to download.
+- **Touch friendliness**: destination tabs and command buttons also
+  meet the class minimum WIDTH (a narrow strip can no longer shrink a
+  tab below the touch target); the class-resolved scroll bar sizing
+  above completes the touch scroll story.
+- **Version**: the product label remains BETA everywhere
+  (buildinfo authority, VERSIONINFO string table, Info.plist,
+  .desktop entry).
+
 ## Run 45182658992 repair — Android goff tag conflict, Windows CRLF log writer, preflight evidence plumbing, world assets + Blender export, responsive space management, cache disk budget (2026-11-24)
 
 - **Android required-APK gate repair (`.github/workflows/build.yml`)**: the

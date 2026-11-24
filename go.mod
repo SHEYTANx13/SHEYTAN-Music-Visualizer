@@ -17,6 +17,7 @@ require (
 	github.com/ulikunitz/xz v0.5.17
 	github.com/wailsapp/wails/v3 v3.1.0
 	golang.org/x/image v0.48.0
+	golang.org/x/mobile v0.0.0-20261117202452-47699113848a
 	golang.org/x/sys v0.50.0
 	gonum.org/v1/gonum v0.17.0
 )
@@ -46,6 +47,7 @@ require (
 	github.com/yuin/goldmark v1.8.7 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	go.yaml.in/yaml/v3 v3.0.6 // indirect
+	golang.org/x/exp/shiny v0.0.0-20261113113407-e3970619a1a4 // indirect
 	golang.org/x/term v0.47.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 )

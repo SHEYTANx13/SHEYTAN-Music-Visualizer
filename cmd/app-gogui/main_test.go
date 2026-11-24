@@ -49,7 +49,7 @@ func TestParseArgs(t *testing.T) {
 // identity and the two-party attribution.
 func TestRunVersion(t *testing.T) {
 	var out, errW bytes.Buffer
-	if rc := run([]string{"--version"}, &out, &errW); rc != 0 {
+	if rc := run([]string{"--version"}, &out, &errW, nil); rc != 0 {
 		t.Fatalf("--version exit = %d, stderr: %s", rc, errW.String())
 	}
 	text := out.String()
@@ -64,7 +64,7 @@ func TestRunVersion(t *testing.T) {
 // exactly one JSON line.
 func TestRunBuildInfoJSON(t *testing.T) {
 	var out, errW bytes.Buffer
-	if rc := run([]string{"--build-info-json"}, &out, &errW); rc != 0 {
+	if rc := run([]string{"--build-info-json"}, &out, &errW, nil); rc != 0 {
 		t.Fatalf("--build-info-json exit = %d, stderr: %s", rc, errW.String())
 	}
 	var doc map[string]string

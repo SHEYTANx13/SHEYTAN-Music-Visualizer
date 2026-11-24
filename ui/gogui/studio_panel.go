@@ -96,8 +96,11 @@ func (sh *shell) studioRail() gui.View {
 		Spacing:    gui.SpacingSmall,
 		Scrollable: true,
 		ScrollMode: gui.ScrollVerticalOnly,
-		Color:      sh.th.SurfaceColor(),
-		Content:    content,
+		// RUN 45297707372: the class-resolved scroll bar (same contract
+		// as the workspace panels).
+		ScrollbarCfgY: sh.scrollbarCfg(),
+		Color:         sh.th.SurfaceColor(),
+		Content:       content,
 	})
 }
 
@@ -105,13 +108,14 @@ func (sh *shell) studioRail() gui.View {
 // composition main area).
 func (sh *shell) studioMainPane() gui.View {
 	return gui.Column(gui.ContainerCfg{
-		ID:         "studio-main",
-		Sizing:     gui.FillFill,
-		Padding:    gui.PaddingMedium,
-		Spacing:    gui.SpacingSmall,
-		Scrollable: true,
-		ScrollMode: gui.ScrollVerticalOnly,
-		Content:    sh.studioMainContent(),
+		ID:            "studio-main",
+		Sizing:        gui.FillFill,
+		Padding:       gui.PaddingMedium,
+		Spacing:       gui.SpacingSmall,
+		Scrollable:    true,
+		ScrollMode:    gui.ScrollVerticalOnly,
+		ScrollbarCfgY: sh.scrollbarCfg(),
+		Content:       sh.studioMainContent(),
 	})
 }
 

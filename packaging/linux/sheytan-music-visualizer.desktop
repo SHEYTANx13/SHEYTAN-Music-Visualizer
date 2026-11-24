@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=BETA
+Name=SHEYTAN Music Visualizer
+GenericName=Music Visualizer
+Comment=SHEYTAN(TM) Music Visualizer BETA - real audio in, real synchronized visual out, MP4 export up to 4K via local FFmpeg
+Exec=app-gogui
+Icon=sheytan-music-visualizer
+Terminal=false
+Categories=AudioVideo;Audio;Graphics;
+StartupWMClass=SHEYTAN-Music-Visualizer
+X-Publisher=SHEYTAN (Licensor: Parsaetak)
+X-AppMode=portable-package

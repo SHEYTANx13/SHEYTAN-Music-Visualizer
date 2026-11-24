@@ -102,11 +102,14 @@ while IFS=$'\t' read -r SIZE REL; do
       ;;
   esac
   case "$REL" in
-    */sheytan-music-visualizer|*/sheytan-music-visualizer.exe)
-      # The application executable itself is exempt from the media-asset
-      # per-file bound (a Go+Fyne+wgpu binary is legitimately ~35-50 MiB);
-      # the name match is exact and everything else — including any
-      # tool/DLL pack file — stays under the bound.
+    */sheytan-music-visualizer|*/sheytan-music-visualizer.exe|\
+*/app-gogui|*/app-gogui.exe)
+      # The application executables are exempt from the media-asset
+      # per-file bound (a Go+go-gui+wgpu binary is legitimately
+      # ~35-50 MiB; run 45297707372 ships the native Go-Gui shell
+      # app-gogui beside the CLI authority); the name match is exact
+      # and everything else — including any tool/DLL pack file —
+      # stays under the bound.
       ;;
     *)
       if [ "$SIZE" -gt "$MAX_FILE_BYTES" ]; then

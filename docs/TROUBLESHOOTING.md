@@ -4,6 +4,37 @@ Status: current as of run 43541087097 (2026-11-14). This is the canonical
 user-facing diagnostics + troubleshooting document (the former separate
 `docs/diagnostics.md` was merged here — one subject, one document).
 
+## App does not open (Windows GUI-subsystem builds)
+
+- **The product executable is `app-gogui.exe`** (run 45297707372
+  ship-the-shell repair). The package also contains
+  `sheytan-music-visualizer.exe` — the CLI authority — which opens NO
+  window by design (it is the console scripting/self-check tool).
+  Double-click `app-gogui.exe`.
+- **First-byte evidence**: the shell opens the runtime log before any
+  other startup work. The FIRST record is the startup banner (version,
+  commit, Go, OS/arch, PID, data mode, log path); every startup phase
+  (design tokens, data layout, studio service, renderer selection,
+  window creation) logs success or its exact failure reason; the
+  process exit code is recorded at exit. A launch that never shows a
+  window still leaves the origin in `app.log`.
+- **Crash reports**: a recovered panic writes
+  `crashes/crash-<utc>.txt` (ASCII, with the recovered value and the
+  goroutine stack) plus an ERROR record in `app.log`.
+- **stderr teeing**: on a GUI-subsystem build there is no console; the
+  shell tees every stderr write into `app.log`, so diagnostics that a
+  console build would print are persisted.
+- **Honest boundary**: a panic on a NON-main goroutine terminates the
+  process through the Go runtime, whose OS-level stderr handle cannot
+  be redirected from inside a GUI-subsystem process. Main-goroutine
+  panics (the whole window lifecycle) are covered by the crash-report
+  boundary above; goroutine crashes are covered wherever the runtime
+  prints through the teed writer.
+- **Icon on the executable**: `app-gogui.exe` carries the SHEYTAN brand
+  icon + BETA VERSIONINFO as an embedded Windows resource (windres +
+  `.syso` at build time). If Explorer shows a generic icon, the
+  Windows icon cache is stale — the file itself carries the resource.
+
 ## Runtime log
 
 - **Location**: resolved by `internal/apppaths` at startup —

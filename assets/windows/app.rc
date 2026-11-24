@@ -1,0 +1,38 @@
+// app.rc - Windows resource script for the SHEYTAN Music Visualizer
+// desktop executable (cmd/app-gogui).
+//
+// Compiled by scripts/build/build-windows.ps1 with the UCRT64 windres
+// into cmd/app-gogui/resource.syso; the Go linker embeds the .syso so
+// the EXECUTION FILE itself carries the SHEYTAN brand icon and the
+// product metadata (run 45297707372 repair). The version label follows
+// the product's single-label policy: BETA (no numbered release labels;
+// internal/buildinfo is the version authority).
+//
+// The icon path is relative to the repository root (the script runs
+// windres with the repo root as working directory).
+
+1 ICON "assets/icon/icon.ico"
+
+1 VERSIONINFO
+FILEVERSION     0,0,0,0
+PRODUCTVERSION  0,0,0,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "SHEYTAN"
+      VALUE "FileDescription",  "SHEYTAN Music Visualizer (native Go-Gui shell)"
+      VALUE "FileVersion",      "BETA"
+      VALUE "InternalName",     "app-gogui"
+      VALUE "LegalCopyright",   "SHEYTAN(TM) Music Visualizer - Licensor Parsaetak. Proprietary; see license.md."
+      VALUE "OriginalFilename", "app-gogui.exe"
+      VALUE "ProductName",      "SHEYTAN Music Visualizer"
+      VALUE "ProductVersion",   "BETA"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

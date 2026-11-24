@@ -158,10 +158,12 @@ func (t *ShellTheme) SetTouchTargetForWidth(widthDp float32) {
 }
 
 // SpacingProfile is the token-driven responsive spacing set the shell
-// resolves per width class (run 45182658992 space-management pass).
-// Phones/tablets get roomier bars, panels and rows (touch-friendly);
+// resolves per width class (run 45182658992 space-management pass;
+// run 45297707372 adds the scroll-bar sizing). Phones/tablets get
+// roomier bars, panels, rows and scroll bars (touch-friendly);
 // desktop/wide classes tighten vertically for a denser, professional
-// workspace while keeping comfortable horizontal gutters.
+// workspace while keeping comfortable horizontal gutters and a clearly
+// visible, grabbable scroll bar.
 type SpacingProfile struct {
 	BarPadTop    float32
 	BarPadBottom float32
@@ -169,6 +171,11 @@ type SpacingProfile struct {
 	PanelPadV    float32
 	PanelPadH    float32
 	RowPadV      float32
+	// ScrollbarSize is the width of the vertical scroll-bar thumb and
+	// gutter (dp). The go-gui theme default (7dp) is too thin to see on
+	// the dark brand surfaces and too fine to grab with a finger; every
+	// scroll surface resolves this per class (run 45297707372).
+	ScrollbarSize float32
 }
 
 // SpacingForWidth resolves the profile for the responsive class of
@@ -177,13 +184,35 @@ type SpacingProfile struct {
 func (t *ShellTheme) SpacingForWidth(widthDp float32) SpacingProfile {
 	switch {
 	case widthDp < breakpoints.TabletMin:
-		return SpacingProfile{BarPadTop: 6, BarPadBottom: 6, BarPadH: 10, PanelPadV: 12, PanelPadH: 12, RowPadV: 5}
+		return SpacingProfile{BarPadTop: 6, BarPadBottom: 6, BarPadH: 10, PanelPadV: 12, PanelPadH: 12, RowPadV: 5, ScrollbarSize: 14}
 	case widthDp < breakpoints.DesktopMin:
-		return SpacingProfile{BarPadTop: 6, BarPadBottom: 6, BarPadH: 12, PanelPadV: 14, PanelPadH: 14, RowPadV: 5}
+		return SpacingProfile{BarPadTop: 6, BarPadBottom: 6, BarPadH: 12, PanelPadV: 14, PanelPadH: 14, RowPadV: 5, ScrollbarSize: 14}
 	case widthDp < breakpoints.WideMin:
-		return SpacingProfile{BarPadTop: 4, BarPadBottom: 4, BarPadH: 10, PanelPadV: 10, PanelPadH: 12, RowPadV: 3}
+		return SpacingProfile{BarPadTop: 4, BarPadBottom: 4, BarPadH: 10, PanelPadV: 10, PanelPadH: 12, RowPadV: 3, ScrollbarSize: 10}
 	default:
-		return SpacingProfile{BarPadTop: 4, BarPadBottom: 4, BarPadH: 12, PanelPadV: 12, PanelPadH: 14, RowPadV: 3}
+		return SpacingProfile{BarPadTop: 4, BarPadBottom: 4, BarPadH: 12, PanelPadV: 12, PanelPadH: 14, RowPadV: 3, ScrollbarSize: 10}
+	}
+}
+
+// ScrollbarCfgForWidth resolves the vertical scroll-bar configuration
+// for the responsive class of widthDp (run 45297707372 scrolling
+// repair): a visible, rounded thumb in the accent ink over the surface
+// ink, sized for the class (fatter on touch classes), with a 40dp
+// minimum thumb so short content stays draggable. Pure.
+func (t *ShellTheme) ScrollbarCfgForWidth(widthDp float32) gui.ScrollbarCfg {
+	sp := t.SpacingForWidth(widthDp)
+	size := sp.ScrollbarSize
+	thumb := t.Accent()
+	thumb.A = 0xC8 // ~78% alpha: clearly visible, never garish
+	bg := t.Surface()
+	bg.A = 0x50
+	return gui.ScrollbarCfg{
+		Size:            size,
+		MinThumbSize:    40,
+		RadiusThumb:     size / 2,
+		Radius:          gui.RadiusPx(size / 3),
+		ColorThumb:      guiColor(thumb),
+		ColorBackground: guiColor(bg),
 	}
 }
 

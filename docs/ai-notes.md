@@ -1211,3 +1211,60 @@ Key engineering facts established this session (full detail in
   both workflows (pinned 1.7.12 + repository ignore set); fixture
   fixture still rejected (exit 1). Android cgo APK link + hosted rerun
   remain the honest NOT RUN boundary (no push authorized).
+
+## Session record — 2026-11-24 (run 45297707372 repair, local branch `repair/run-45297707372`)
+
+- Diagnosed BOTH red lanes of run 45297707372 (commit b7cc061 = the
+  previous session's candidate pushed as BETA) and BOTH were reproduced
+  locally before any fix:
+  (1) preflight: actionlint's shell-check integration found shellcheck
+  SC2034 in codeql.yml (unused `result_codeql`); hosted runners
+  preinstall shellcheck, local runs without it were blind to the class
+  — the reason prior "clean locally" claims never matched hosted.
+  Fixed by removing the dead variable; actionlint 1.7.12 WITH
+  shellcheck now clean on both workflows, and the parity requirement is
+  documented in docs/CI-DIAGNOSTICS.md.
+  (2) build-android: gomobile refuses to package a main package without
+  the golang.org/x/mobile/app import (build.go symbol check) — the
+  glue did not exist. Reproduced with the REAL pinned NDK r28c
+  (28.2.13676358) + sdkmanager in this sandbox, then fixed with
+  cmd/app-gogui/gui_mobile.go (android||ios lifecycle glue,
+  app.Main(func(app.App))); the exact workflow command now exits 0
+  (lib/arm64-v8a/libapp_gogui.so + manifest). Honest runtime scope
+  kept: experimental compile-class carrier, no runtime claim (go-gui
+  android delivery = Kotlin GLSurfaceView host, later slice).
+- SHIP-THE-SHELL (the user-reported "Windows build did not open and
+  recorded no logs" root cause): the Windows package shipped ONLY the
+  CLI authority (-H=windowsgui, no window by design, no console) —
+  double-click did nothing visible. Now: app-gogui.exe is the product
+  executable (GUI subsystem, windres icon+VERSIONINFO .syso resource,
+  staged first), the CLI is the console companion, validate-pe asserts
+  console(3)/validate-pe-gui asserts GUI(2)+.rsrc+product name at build
+  time AND on extracted bytes. Linux stages app-gogui + icon.png +
+  freedesktop .desktop (hicolor 512); macOS bundle executable is the
+  shell (CFBundleIconFile AppIcon.icns via iconutil) with the CLI as
+  companion; gomobile APK gets cmd/app-gogui/assets/icon.png.
+- FIRST-BYTE logging: logging.Bootstrap/TeeStderr/WriteCrashReport/
+  LogExit + gogui.Run phase logging + main.go bootstrap-first main()
+  (banner as the first record; stderr tee; crash-<utc>.txt; exit code).
+  Verified LIVE on Xvfb: banner → shell phases → exit chain in
+  app.log; smoke exit 0 (30/60/90 frames, backend=cpu gpu=none —
+  honest, no GPU in sandbox).
+- UX: class-resolved visible scroll bars on every panel (14dp touch /
+  10dp desktop, accent thumb, 40dp min thumb), ScrollMultiplier 20→32,
+  scroll-to-top on destination switch; live download size/status/speed
+  line for the media-tools engine pack (unknown-total handled
+  honestly); touch minimum WIDTH on tabs and command buttons.
+- Verification: gofmt clean; tidy/-diff/verify clean; build+vet green
+  (goffi_static); full suite 42 packages ok / 0 FAIL; race green on
+  gogui/logging/appicon/app-gogui/audio/studio; actionlint+shellcheck
+  clean; fixture suites PASS (expression 4/4 negative controls,
+  docs-consistency 5/5, ci-plumbing PASS=20 FAIL=0 NOT_RUN=3 — the
+  pwsh-hosted fixtures remain NOT RUN, no pwsh in sandbox); cross
+  compiles green (windows CLI pure, windows shell purego+sheytan_nogpu
+  with mingw, wails CI profile); real APK built locally exit 0;
+  Xvfb GUI smoke exit 0 with the new logging visible in app.log.
+- Boundaries: Windows/macOS packaging runs hosted-only (no pwsh/OSX
+  here); validate-apk/apksigner and emulator evidence stay
+  UNAVAILABLE-by-contract; the hosted rerun is the confirmatory
+  evidence for the android + preflight lanes.

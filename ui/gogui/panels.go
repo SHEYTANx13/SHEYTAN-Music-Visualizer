@@ -67,6 +67,10 @@ func tabStripView(tabs *TabState, th *ShellTheme, onTab func(presentation.Destin
 			ID:        "tab-" + string(dest),
 			Label:     info.Title,
 			MinHeight: th.TouchTargetDp(),
+			// RUN 45297707372 touch repair: destination tabs also meet
+			// the class minimum WIDTH, so a narrow strip cannot shrink a
+			// tab below the touch target.
+			MinWidth: th.TouchTargetDp(),
 			Colors: func() gui.ColorSet {
 				if active {
 					return gui.ColorSet{Base: th.AccentColor()}
@@ -172,8 +176,20 @@ func (sh *shell) scrollPanel(id string, content []gui.View) gui.View {
 		Spacing:    gui.SpacingSmall,
 		Scrollable: true,
 		ScrollMode: gui.ScrollVerticalOnly,
-		Content:    content,
+		// RUN 45297707372 scrolling repair: every workspace panel uses
+		// the same class-resolved, visible, grabbable scroll bar (the
+		// 7dp theme default was nearly invisible on the dark surfaces
+		// and too fine to grab on touch screens).
+		ScrollbarCfgY: sh.scrollbarCfg(),
+		Content:       content,
 	})
+}
+
+// scrollbarCfg resolves the shell's vertical scroll-bar configuration
+// for the CURRENT width class (frame thread only).
+func (sh *shell) scrollbarCfg() *gui.ScrollbarCfg {
+	cfg := sh.th.ScrollbarCfgForWidth(sh.widthDp)
+	return &cfg
 }
 
 // section renders a heading over the following rows.
@@ -295,6 +311,10 @@ func (sh *shell) buttonRow(defs ...btnDef) gui.View {
 			ID:        d.id,
 			Label:     d.label,
 			MinHeight: sh.th.TouchTargetDp(),
+			// RUN 45297707372 touch repair: command buttons also meet the
+			// class minimum WIDTH (short labels cannot produce a sliver
+			// target on any screen size).
+			MinWidth: sh.th.TouchTargetDp(),
 			OnClick: func(ctx gui.EventCtx) {
 				ctx.Consume()
 				if d.fn != nil {
@@ -606,9 +626,18 @@ func (sh *shell) panelRequirements() []gui.View {
 		sh.line(mediaToolsStatusText(snap)),
 		sh.caption(mediaToolsPackText(snap)),
 	}
-	if snap.State == mediatools.StateDownloading && snap.Total > 0 {
-		views = append(views, sh.progressBar("mt-download",
-			float64(snap.Downloaded)/float64(snap.Total)*100))
+	if snap.State == mediatools.StateDownloading {
+		// RUN 45297707372: the download line now carries the real
+		// transferred size, the total when the server provides one, the
+		// percent and the measured speed - at every tick, not only when
+		// the total is known.
+		views = append(views, sh.caption(mediaToolsDownloadText(snap)))
+		if snap.Total > 0 {
+			views = append(views, sh.progressBar("mt-download",
+				float64(snap.Downloaded)/float64(snap.Total)*100))
+		} else {
+			views = append(views, sh.caption("Download size: unknown (the server did not send a content length); progress shows the transferred bytes."))
+		}
 	} else {
 		views = append(views, sh.caption(mediaToolsStageText(snap)))
 	}
@@ -664,6 +693,11 @@ func mediaToolsStatusText(s mediatools.Snapshot) string {
 	case mediatools.StateInstalling:
 		b = "Installing…"
 	}
+	if s.Pack != nil && (s.State == mediatools.StateNotInstalled ||
+		s.State == mediatools.StateUpdateAvailable || s.State == mediatools.StateRepairNeeded) {
+		b += fmt.Sprintf("\nDownload size when you install: ~%d MiB compressed, ~%d MiB installed (estimates)",
+			s.Pack.ApproxDownloadMB, s.Pack.ApproxInstalledMB)
+	}
 	if s.Detail != "" {
 		b += "\n" + s.Detail
 	}
@@ -685,6 +719,23 @@ func mediaToolsPackText(s mediatools.Snapshot) string {
 	}
 	return fmt.Sprintf("Pinned pack: FFmpeg %s (%s)\nDownload: ~%d MiB compressed, ~%d MiB installed (estimates)\nLicense: %s\nSource: %s\nRequired encoders after install: %v\nEncoders: %s",
 		p.Version, p.Platform, p.ApproxDownloadMB, p.ApproxInstalledMB, p.LicenseClass, p.SourceURL, p.RequiredEncoders, enc)
+}
+
+// mediaToolsDownloadText renders the live download size/status line:
+// transferred bytes, total (when known), percent and speed. All values
+// come from the mediatools snapshot (never invented).
+func mediaToolsDownloadText(s mediatools.Snapshot) string {
+	line := "Downloading: " + mediatools.HumanBytes(s.Downloaded)
+	if s.Total > 0 {
+		pct := float64(s.Downloaded) / float64(s.Total) * 100
+		line += fmt.Sprintf(" of %s (%.0f%%)", mediatools.HumanBytes(s.Total), pct)
+	} else {
+		line += " (total size unknown)"
+	}
+	if s.BytesPerSecond > 0 {
+		line += " - " + mediatools.HumanBytes(int64(s.BytesPerSecond)) + "/s"
+	}
+	return line
 }
 
 // mediaToolsStageText mirrors the media-tools dialog stage builder.

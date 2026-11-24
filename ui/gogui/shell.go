@@ -22,11 +22,13 @@ import (
 	"github.com/go-gui-org/go-gui/gui/backend"
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/design"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/appicon"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/audio"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/fileaccess"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/mediatools"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/presentation"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
@@ -54,6 +56,12 @@ type RunOptions struct {
 	// (defaults 1280x800).
 	Width  int
 	Height int
+	// Log receives the shell's startup-phase records (design tokens,
+	// data layout, studio service, renderer selection, window) and the
+	// final error, so a launch that never shows a window leaves its
+	// origin in app.log (run 45297707372 repair). Nil-safe: without a
+	// log the phases are silent exactly as before.
+	Log *logging.Log
 }
 
 // shell owns every control value of the window. All fields are owned
@@ -138,22 +146,41 @@ func Run(opts RunOptions) error {
 		opts.SmokeFrames = 0
 	}
 
+	logf := func(format string, args ...any) {
+		if opts.Log == nil || opts.Log.Logger() == nil {
+			return
+		}
+		opts.Log.Logger().Info(fmt.Sprintf(format, args...))
+	}
+
 	doc := design.MustLoad()
+	logf("shell: design tokens loaded (identity=%s)", doc.Identity)
 	th := NewShellTheme(doc)
 	// The go-gui app theme is installed BEFORE the window is created so
 	// the first frame already paints in the dark polarity; the token
 	// colors ride along through ShellTheme.
 	gui.SetTheme(gui.ThemeDark)
+	// RUN 45297707372 scrolling repair: the go-gui theme default wheel
+	// step (ScrollMultiplier 20px per wheel line) makes the long
+	// workspace panels feel glued; 32px keeps the stock, smoothed wheel
+	// path but travels a comfortable distance. Touch pans are unaffected
+	// (they move pixels 1:1 with the finger).
+	appTheme := gui.CurrentTheme()
+	appTheme.ScrollMultiplier = 32
+	gui.SetTheme(appTheme)
 
 	// Single apppaths authority; bootstrap creates the contract dirs.
 	lay := apppaths.Resolve(apppaths.OSEnv())
 	if err := apppaths.Bootstrap(lay); err != nil {
+		logf("shell: data layout bootstrap FAILED: %v", err)
 		return fmt.Errorf("gogui: data layout bootstrap: %w", err)
 	}
+	logf("shell: data layout ready (mode=%s root=%s)", lay.Mode, lay.DataRoot)
 	store := presentation.NewLayoutStore(filepath.Join(lay.Config, presentation.DefaultFilename))
 
 	svc, err := studio.New()
 	if err != nil {
+		logf("shell: studio service FAILED: %v", err)
 		return fmt.Errorf("gogui: studio service: %w", err)
 	}
 
@@ -161,6 +188,7 @@ func Run(opts RunOptions) error {
 	// shutdown (SelectRenderer falls back to CPU with honest info when
 	// no real GPU adapter can be proven).
 	renderer, rinfo := render.SelectRenderer()
+	logf("shell: renderer selected backend=%s gpu=%s api=%s adapter=%s", rinfo.Backend, rinfo.GpuState, rinfo.BackendAPI, rinfo.Adapter)
 
 	prefStore := render.OpenPreferenceStore(filepath.Join(lay.Config, "renderer-preference.json"))
 	prefStatus := ""
@@ -231,6 +259,7 @@ func Run(opts RunOptions) error {
 	// The ONE window construction of the process (newShellWindow seam).
 	win := newShellWindow(gui.WindowCfg{
 		Title:   brand.WindowTitle(),
+		IconPNG: appicon.PNG(),
 		Width:   opts.Width,
 		Height:  opts.Height,
 		State:   sh,
@@ -256,6 +285,7 @@ func Run(opts RunOptions) error {
 		sh.win = win
 		st.setWindow(win)
 	}
+	logf("shell: window created (%dx%d)", opts.Width, opts.Height)
 	if surfaceErr == nil {
 		sh.seedSurface()
 		sh.preview.Attach(surface)
@@ -418,10 +448,49 @@ func (sh *shell) view(w *gui.Window) gui.View {
 }
 
 // activateDestination switches the active tab from the strip (the
-// shared tab callback for the real shell).
+// shared tab callback for the real shell). RUN 45297707372: the newly
+// shown panel scrolls back to its top - switching sections starts the
+// new section at its heading, never at the previous section's leftover
+// offset (go-gui scroll state is keyed per panel ID and would otherwise
+// persist the old offset across the switch).
 func (sh *shell) activateDestination(d presentation.Destination) {
 	sh.tabs.SetActive(d)
 	sh.syncTabs()
+	if sh.win != nil {
+		if id, ok := panelScrollID(d); ok {
+			sh.win.ScrollVerticalTo(id, 0)
+		}
+	}
+}
+
+// panelScrollID maps a destination to its top-level scroll container ID
+// (the same IDs scrollPanel and the studio composition assign).
+func panelScrollID(d presentation.Destination) (string, bool) {
+	switch d {
+	case presentation.DestHome:
+		return "panel-home", true
+	case presentation.DestStudio:
+		return "panel-studio", true
+	case presentation.DestWorlds:
+		return "panel-worlds", true
+	case presentation.DestTemplates:
+		return "panel-templates", true
+	case presentation.DestLibrary:
+		return "panel-library", true
+	case presentation.DestExport:
+		return "panel-export", true
+	case presentation.DestRequirements:
+		return "panel-requirements", true
+	case presentation.DestDownloads:
+		return "panel-downloads", true
+	case presentation.DestSystemFiles:
+		return "panel-system-files", true
+	case presentation.DestSettings:
+		return "panel-settings", true
+	case presentation.DestDiagnostics:
+		return "panel-diagnostics", true
+	}
+	return "", false
 }
 
 // moveActiveTab reorders the ACTIVE destination within the persisted

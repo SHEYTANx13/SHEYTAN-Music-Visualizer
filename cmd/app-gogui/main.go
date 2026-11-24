@@ -17,12 +17,21 @@
 //
 // The shell owns exactly ONE top-level window; real startup errors
 // return a non-zero process exit code and are never swallowed.
+//
+// BOOTSTRAP-FIRST DIAGNOSTICS (run 45297707372 repair): main opens the
+// runtime log BEFORE any other startup work, tees stderr into it (the
+// Windows product build is -H=windowsgui and has no console, so an
+// un-logged stderr write used to be invisible), records the process
+// exit code, and persists every recovered panic as a crash report
+// under the layout's crashes directory. A user whose app fails to open
+// always finds app.log evidence; see docs/TROUBLESHOOTING.md.
 package main
 
 import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -32,6 +41,7 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/presentation"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/visualizer"
@@ -39,7 +49,35 @@ import (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	// BOOTSTRAP FIRST: the runtime log opens before flag parsing,
+	// before design tokens, before any subsystem. Every later step
+	// is logged; every failure path writes its reason. Bootstrap is
+	// best-effort by contract: an unwritable log location degrades
+	// to stderr and must never take the product down.
+	lay := apppaths.Resolve(apppaths.OSEnv())
+	if err := apppaths.Bootstrap(lay); err != nil {
+		// The layout bootstrap failure is surfaced by run()'s own
+		// error paths too; here it only means the crash-report
+		// directory may be missing. Never fatal at this point.
+		_ = err
+	}
+	boot := logging.Bootstrap(lay)
+	// The startup banner is the FIRST record: build identity, OS, arch,
+	// PID and the resolved log path - so even a crash two lines later is
+	// attributable to an exact build.
+	boot.LogStartupBanner(lay)
+	errW := boot.TeeStderr()
+	code := 1
+	defer func() {
+		if r := recover(); r != nil {
+			boot.WriteCrashReport(lay.Crashes, "app-gogui main", r, debug.Stack())
+			code = 1
+		}
+		boot.LogExit(code)
+		_ = boot.Close()
+		os.Exit(code)
+	}()
+	code = run(os.Args[1:], os.Stdout, errW, boot)
 }
 
 // mode is the parsed command-line intent.
@@ -75,12 +113,13 @@ func parseArgs(args []string, fs *flag.FlagSet) (mode, error) {
 	return m, nil
 }
 
-func run(args []string, out, errW io.Writer) int {
+func run(args []string, out, errW io.Writer, boot *logging.Log) int {
 	fs := flag.NewFlagSet(brand.ProductName+" (native Go-Gui shell)", flag.ContinueOnError)
 	fs.SetOutput(errW)
 	m, err := parseArgs(args, fs)
 	if err != nil {
 		fmt.Fprintln(errW, err)
+		logBoot(boot, "startup", "argument parse failed", err)
 		return 2
 	}
 	switch {
@@ -96,32 +135,37 @@ func run(args []string, out, errW io.Writer) int {
 	case m.SelfCheck:
 		return selfCheck(out, errW)
 	case m.Smoke > 0:
-		err := gogui.Run(gogui.RunOptions{SmokeFrames: m.Smoke})
+		err := gogui.Run(gogui.RunOptions{SmokeFrames: m.Smoke, Log: boot})
 		if err == nil {
 			return 0
 		}
 		fmt.Fprintf(errW, "%s: smoke run failed: %v\n", brand.ProductName, err)
+		logBoot(boot, "smoke", "smoke run failed", err)
 		return 1
 	default:
-		err := runGUI()
+		err := runGUI(boot)
 		if err == nil {
 			return 0
 		}
 		fmt.Fprintf(errW, "%s: startup failed: %v\n", brand.ProductName, err)
+		logBoot(boot, "startup", "shell startup failed", err)
 		return 1
 	}
 }
 
-// runGUI launches the full window with a recoverable-panic boundary.
-func runGUI() (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("unexpected panic in shell runtime: %v", r)
-			fmt.Fprintf(os.Stderr, "%s: PANIC (recoverable): %v\n%s", brand.ProductName, r, debug.Stack())
-		}
-	}()
-	return gogui.Run(gogui.RunOptions{})
+// logBoot records one startup-failure diagnosis in the runtime log
+// (nil-safe: the stderr fallback Log is never nil, but be defensive).
+func logBoot(boot *logging.Log, phase, msg string, err error) {
+	if boot == nil {
+		return
+	}
+	boot.Logger().Error(msg,
+		slogString("phase", phase), slogString("err", err.Error()))
 }
+
+// slogString keeps the call sites terse (attribute values pass the
+// ASCII contract through the handler's ReplaceAttr).
+func slogString(key, value string) slog.Attr { return slog.String(key, value) }
 
 type check struct {
 	name string

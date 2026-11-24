@@ -1561,11 +1561,38 @@ jobs:
           status_file="$(mktemp)"
           trap 'rm -f "$status_file"' EXIT
           echo "APK_BUILD_FAILED" > "$status_file"
+          # Run 45297707372 repair: the gate's failure lines were
+          # stdout-only, so the consolidated diagnostics carried only
+          # the bare "step conclusion failure" (the observed signature).
+          # emit_error keeps the step log line AND appends the same
+          # ASCII line to ci-logs/android-apk-build-errors.log, which
+          # travels with the log part into the consolidated report.
+          APK_ERRLOG=ci-logs/android-apk-build-errors.log
+          : > "$APK_ERRLOG"
+          emit_error() { printf '%s\n' "$*"; printf '%s\n' "$*" >> "$APK_ERRLOG"; }
           {
             echo "[section] gomobile install (go-gui-pinned x/mobile revision)"
             if go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20261117202452-47699113848a && gomobile init >/dev/null 2>&1; then
               echo "gomobile: installed"
               echo "[section] APK build (arm64, api 31)"
+              # Run 45297707372 repair (root cause, reproduced locally
+              # against NDK r28c 28.2.13676358 + the pinned x/mobile):
+              # gomobile REFUSES to package a main package that does
+              # not import golang.org/x/mobile/app
+              # ("cmd/app-gogui does not import golang.org/x/mobile/app"
+              # — its build.go symbol check links the NativeActivity /
+              # UIKit glue only when the app imports it). The glue now
+              # lives in cmd/app-gogui/gui_mobile.go (//go:build
+              # android || ios): it imports golang.org/x/mobile/app and
+              # runs the real lifecycle loop. The runtime scope stays
+              # honest: go-gui's android delivery is the Kotlin
+              # GLSurfaceView host pattern (backend panics on the
+              # desktop Run path), documented as a later slice; the APK
+              # is the experimental compile-class carrier (structure,
+              # identity, ABI and signature only — never a runtime
+              # claim). With the glue, this exact build compiles and
+              # links cleanly for android/arm64 (verified locally:
+              # exit 0, lib/arm64-v8a/libapp_gogui.so + manifest).
               # Run 45182658992 repair: NO goffi_static tag here, target
               # restricted to android/arm64.
               # 1. The goffi_static tag made the required APK gate red in
@@ -1607,10 +1634,10 @@ jobs:
                 ls -la /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk
                 echo "APK_BUILD_OK" > "$status_file"
               else
-                echo "APK build: FAILED (the required product gate is red)"
+                emit_error "ERROR: APK build FAILED (the required product gate is red; the tool output above carries the compiler/linker origin)"
               fi
             else
-              echo "gomobile: INSTALL FAILED (the required product gate is red; the toolchain absence is the real origin)"
+              emit_error "ERROR: gomobile INSTALL FAILED (the required product gate is red; the toolchain absence is the real origin)"
             fi
           } 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/android-apk-build.log
           status="$(cat "$status_file")"

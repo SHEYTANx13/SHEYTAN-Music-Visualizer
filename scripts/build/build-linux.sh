@@ -309,6 +309,22 @@ if [ "$MODE" = "desktop" ]; then
   TARBALL="$REPO_ROOT/dist/SHEYTAN-Music-Visualizer-linux-x64.tar.gz"
   rm -rf "$STAGE_ROOT" "$TARBALL"
   mkdir -p "$STAGE_APP/tools/ffmpeg/bin" "$STAGE_APP/data"
+  # RUN 45297707372 SHIP-THE-SHELL REPAIR: the Linux package used to
+  # ship ONLY the CLI authority (which never opens a window). The
+  # product desktop executable is the native Go-Gui shell (app-gogui);
+  # it is now staged FIRST as the primary executable, with the shell
+  # icon and the freedesktop launcher entry beside it (local hicolor
+  # + application dirs so a portable install can register them).
+  if [ "$GUI_EXE_OK" -eq 1 ]; then
+    install -m 0755 bin/app-gogui "$STAGE_APP/app-gogui"
+    install -m 0644 assets/icon/icon.png "$STAGE_APP/icon.png"
+    mkdir -p "$STAGE_APP/share/applications" "$STAGE_APP/share/icons/hicolor/512x512/apps"
+    install -m 0644 packaging/linux/sheytan-music-visualizer.desktop "$STAGE_APP/share/applications/sheytan-music-visualizer.desktop"
+    install -m 0644 assets/icon/icon.png "$STAGE_APP/share/icons/hicolor/512x512/apps/sheytan-music-visualizer.png"
+  else
+    note "BLOCKED: gate stage-portable (the product desktop shell app-gogui was not built; refusing to stage a CLI-only package)"
+    fail_gate stage-portable
+  fi
   if [ "$EXE_OK" -eq 1 ]; then
     install -m 0755 bin/sheytan-music-visualizer "$STAGE_APP/sheytan-music-visualizer"
     install -m 0644 docs/license.md "$STAGE_APP/license.md"
@@ -336,6 +352,12 @@ if [ "$MODE" = "desktop" ]; then
       cd "$STAGE_ROOT" || { echo "ERROR: staging root missing: $STAGE_ROOT"; exit 1; }
       CI_TOOL_CONTEXT="gate:stage-portable" ci_capture "$JOB" stage-portable bash -c '
         set -euo pipefail
+        # RUN 45297707372 ship-the-shell: the product desktop shell is a
+        # REQUIRED package content, beside the CLI authority.
+        test -s "SHEYTAN-Music-Visualizer-linux-x64/app-gogui" || { echo "ERROR: staged product shell app-gogui missing"; exit 1; }
+        test -x "SHEYTAN-Music-Visualizer-linux-x64/app-gogui" || { echo "ERROR: staged product shell not executable"; exit 1; }
+        test -s "SHEYTAN-Music-Visualizer-linux-x64/icon.png" || { echo "ERROR: staged shell icon missing"; exit 1; }
+        test -s "SHEYTAN-Music-Visualizer-linux-x64/share/applications/sheytan-music-visualizer.desktop" || { echo "ERROR: staged launcher entry missing"; exit 1; }
         test -s "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable missing"; exit 1; }
         test -x "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable not executable"; exit 1; }
         for f in license.md readme.md portable.mode data/DATA-FOLDERS.txt tools/ffmpeg/FFMPEG-TOOLS-LICENSING.md; do

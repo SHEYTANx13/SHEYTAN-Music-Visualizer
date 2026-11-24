@@ -194,7 +194,10 @@ def scan_archive(package_path: str) -> tuple[bool, bool, int]:
         # forbid-bundled-media-tools: a Go+Fyne+wgpu binary is
         # legitimately ~35-50 MiB; the exact-name match keeps every
         # other file under the bound).
-        if leaf in ("sheytan-music-visualizer", "sheytan-music-visualizer.exe"):
+        if leaf in ("sheytan-music-visualizer", "sheytan-music-visualizer.exe",
+                    "app-gogui", "app-gogui.exe"):
+            # Run 45297707372 ship-the-shell: the product desktop shell
+            # is exempt beside the CLI authority (same 35-50 MiB class).
             continue
         if msize > MAX_FILE_BYTES:
             clean = False

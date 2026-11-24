@@ -28,6 +28,24 @@ machine. No account, no telemetry, no bundled codec binaries.
 >   specialized GPU renderer behind `internal/render`; adapter evidence
 >   states (detected/available/selected/executed/verified) are exact and
 >   software adapters are never labeled GPU.
+
+## Launching the app (run 45297707372 ship-the-shell repair)
+
+The packaged product executable is the **native Go-Gui shell** —
+`app-gogui.exe` (Windows), `app-gogui` (Linux), or the `.app` bundle's
+`SHEYTAN-Music-Visualizer` binary (macOS). Launch THAT file; it opens
+the real window, carries the SHEYTAN icon on the executable file, and
+its version label is BETA. The package also ships
+`sheytan-music-visualizer` — the CLI authority — as a CONSOLE companion
+for scripting, `--version`, `--self-check` and headless export; it
+opens no window by design.
+
+Every launch writes first-byte diagnostics: the startup banner (exact
+build identity, OS/arch, PID, data mode, log path) is the FIRST record
+in `logs/app.log` under the data root; every startup phase logs success
+or its exact failure reason; recovered panics are persisted as
+`crashes/crash-<utc>.txt`; the process exit code is recorded at exit.
+See docs/TROUBLESHOOTING.md ("App does not open").
 ## Product build matrix (priority-B publication contract)
 
 | Platform | Required output | Publication |

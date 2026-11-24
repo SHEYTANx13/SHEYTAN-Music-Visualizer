@@ -59,3 +59,40 @@ func TestSpacingDefaultsArePhoneSafe(t *testing.T) {
 		t.Fatalf("default spacing must be the phone-safe profile: %+v", sp)
 	}
 }
+
+// TestScrollbarSizeForWidth (run 45297707372 scrolling repair): the
+// scroll bar is fatter on touch classes than on desktop/wide, always
+// visible (>= 10dp), and the resolved config carries the accent thumb
+// with a 40dp minimum thumb.
+func TestScrollbarSizeForWidth(t *testing.T) {
+	th := NewShellTheme(design.MustLoad())
+	phone := th.SpacingForWidth(360)
+	desktop := th.SpacingForWidth(1280)
+	if phone.ScrollbarSize < desktop.ScrollbarSize {
+		t.Fatalf("phone scroll bar must be >= desktop (touch-friendly): %+v vs %+v", phone, desktop)
+	}
+	for name, sp := range map[string]SpacingProfile{
+		"phone": phone, "tablet": th.SpacingForWidth(600),
+		"desktop": desktop, "wide": th.SpacingForWidth(1920),
+	} {
+		if sp.ScrollbarSize < 10 {
+			t.Fatalf("%s scroll bar too thin to be visible/grabbable: %+v", name, sp)
+		}
+	}
+	cfg := th.ScrollbarCfgForWidth(360)
+	if cfg.Size != phone.ScrollbarSize {
+		t.Fatalf("scrollbar cfg size %v != profile %v", cfg.Size, phone.ScrollbarSize)
+	}
+	if cfg.MinThumbSize < 40 {
+		t.Fatalf("minimum thumb %v must stay draggable (>= 40)", cfg.MinThumbSize)
+	}
+	// gui.Color is a struct value; the thumb must be the visible accent
+	// ink (explicitly set, opaque, non-black).
+	c := cfg.ColorThumb
+	if c.A == 0 {
+		t.Fatalf("thumb color must be opaque enough to be visible (alpha %d)", c.A)
+	}
+	if c.R == 0 && c.G == 0 && c.B == 0 {
+		t.Fatalf("thumb color must be the visible accent ink, not black")
+	}
+}

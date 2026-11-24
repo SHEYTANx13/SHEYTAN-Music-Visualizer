@@ -109,6 +109,26 @@ patterns from everything it writes. It never prints runner credential
 files or full environment dumps. Gate records carry only allowlisted
 environment metadata.
 
+## actionlint MUST run WITH shellcheck (hosted parity)
+
+actionlint integrates shellcheck when a shellcheck binary is on PATH.
+Hosted ubuntu runners preinstall shellcheck; most local environments do
+not. A local "clean" actionlint run WITHOUT shellcheck is therefore
+NOT hosted parity: run 45297707372's preflight failed on a shellcheck
+finding (SC2034, an unused variable in codeql.yml's emergency-fallback
+step) that no local no-shellcheck run could ever see. Before claiming a
+local actionlint pass, install shellcheck (for example the pinned
+v0.10.0 release tarball) and rerun:
+
+```bash
+actionlint -ignore 'unexpected key "queue" for "concurrency" section'   -ignore 'property "run_started_at" is not defined'
+```
+
+with `shellcheck` on PATH, and confirm `shellcheck --version` prints
+first. A comment line whose first word after `#` is `shellcheck` is
+parsed as a shellcheck DIRECTIVE — never write prose lines in `run:`
+blocks that start that way.
+
 ## Diagnosing a red run, in order
 
 1. Open the run page; check which required job(s) are red.

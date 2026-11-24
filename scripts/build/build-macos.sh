@@ -69,6 +69,19 @@ else
     skip_gate run-version "executable build failed"
   fi
 
+  # RUN 45297707372 SHIP-THE-SHELL REPAIR: the .app bundle used to carry
+  # the CLI authority as CFBundleExecutable - a binary that never opens a
+  # window, so double-clicking the app appeared dead. The bundle now
+  # carries the native Go-Gui shell (cmd/app-gogui) as its executable,
+  # with the shell icon (icon.icns from the tracked iconset via
+  # iconutil) and the CLI as a companion tool.
+  GUI_EXE_OK=0
+  if ci_capture "$JOB" build-gogui-shell go build -trimpath "${LDFLAGS[@]}" -o bin/app-gogui ./cmd/app-gogui; then
+    GUI_EXE_OK=1
+  else
+    fail_gate build-gogui-shell
+  fi
+
   # Parity gates (go-test-race, export-validation, audio-validation,
   # gpu-validation, gui-smoke) run as build.yml workflow steps AFTER this
   # script; they are neither blocked nor claimed here. This script only
@@ -76,12 +89,28 @@ else
   # gate verdict).
   note "parity gates (race/export/audio/gpu/gui-smoke) run as build-macos workflow steps; see the job log for their authoritative gate records"
 
-  if [ -f bin/sheytan-music-visualizer ]; then
+  if [ "$GUI_EXE_OK" -eq 1 ] && [ -f bin/sheytan-music-visualizer ]; then
     ci_capture "$JOB" package-macos bash -c '
       set -Eeuo pipefail
-      mkdir -p dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS
-      cp bin/sheytan-music-visualizer dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/SHEYTAN-Music-Visualizer
+      mkdir -p dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS dist/SHEYTAN-Music-Visualizer.app/Contents/Resources
+      # RUN 45297707372 ship-the-shell: CFBundleExecutable is the native
+      # Go-Gui shell (the binary that actually opens the window); the
+      # CLI authority ships beside it as the scripting companion.
+      cp bin/app-gogui dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/SHEYTAN-Music-Visualizer
+      cp bin/sheytan-music-visualizer dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/sheytan-music-visualizer-cli
       chmod +x dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/SHEYTAN-Music-Visualizer
+      chmod +x dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/sheytan-music-visualizer-cli
+      # Shell icon: build icon.icns from the tracked iconset with
+      # iconutil (present on every macOS runner). A missing iconutil is
+      # recorded, never faked - the bundle then ships without an icon
+      # and the gate records the honest state.
+      if command -v iconutil >/dev/null 2>&1; then
+        iconutil -c icns assets/icon/iconset -o dist/SHEYTAN-Music-Visualizer.app/Contents/Resources/AppIcon.icns
+        test -s dist/SHEYTAN-Music-Visualizer.app/Contents/Resources/AppIcon.icns
+        echo "icon.icns built from the tracked iconset (iconutil)"
+      else
+        echo "iconutil UNAVAILABLE on this runner; the bundle ships without an icon (honestly recorded)"
+      fi
       cat > dist/SHEYTAN-Music-Visualizer.app/Contents/Info.plist <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -91,6 +120,7 @@ else
   <key>CFBundleDisplayName</key><string>SHEYTAN Music Visualizer</string>
   <key>CFBundleIdentifier</key><string>com.sheytan.music-visualizer</string>
   <key>CFBundleExecutable</key><string>SHEYTAN-Music-Visualizer</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>BETA</string>
   <key>CFBundleVersion</key><string>BETA</string>
@@ -105,6 +135,9 @@ PLIST
       ls -l dist/
       test -f dist/SHEYTAN-Music-Visualizer.app/Contents/Info.plist
       test -f dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/SHEYTAN-Music-Visualizer
+      # RUN 45297707372: the bundle executable must be the SHELL, not
+      # the CLI authority (the CLI never opens a window).
+      test -s dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/sheytan-music-visualizer-cli
     ' || fail_gate package-macos
   else
     skip_gate package-macos "executable build failed"
