@@ -172,7 +172,7 @@ jobs:
           exit "$rc"
 
       - name: Initialize CodeQL (Go)
-        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        uses: github/codeql-action/init@e0462179768953fd6790193e15caaef674ff709e # v4.39.4
         with:
           languages: go
           build-mode: manual
@@ -194,7 +194,7 @@ jobs:
           exit "$rc"
 
       - name: Perform CodeQL Analysis (Go)
-        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        uses: github/codeql-action/analyze@e0462179768953fd6790193e15caaef674ff709e # v4.39.4
         with:
           category: '/language:go'
 
@@ -255,13 +255,13 @@ jobs:
             ci_capture "$CI_JOB_ID" codeql-actions-config bash -c 'echo "language: actions"; echo "build-mode: none"; echo "note: workflow definitions are analyzed; no traced build is required"'
 
       - name: Initialize CodeQL (Actions)
-        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        uses: github/codeql-action/init@e0462179768953fd6790193e15caaef674ff709e # v4.39.4
         with:
           languages: actions
           build-mode: none
 
       - name: Perform CodeQL Analysis (Actions)
-        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        uses: github/codeql-action/analyze@e0462179768953fd6790193e15caaef674ff709e # v4.39.4
         with:
           category: '/language:actions'
 

@@ -9,9 +9,11 @@ package wails
 // purego build tag; see doc.go for the boundary rules.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -25,6 +27,7 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/export"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/mediatools"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/presentation"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/render"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio"
@@ -159,6 +162,17 @@ type SheytanService struct {
 	// the web shell renders evidence, it does not render frames.
 	rendererOnce sync.Once
 	rendererInfo render.BackendInfo
+
+	// media owns the app-managed FFmpeg/FFprobe download lifecycle for
+	// the downloads pane (run 45532045379: real file size + real status
+	// for updating engines). Built lazily on the resolved apppaths data
+	// root - the same manager the go-gui shell constructs - so the
+	// facade serves REAL progress bytes and states, never synthetic
+	// download animation. All access goes through mediaManager (nil
+	// never escapes; mediaMu guards construction and Install goroutine).
+	mediaMu   sync.Mutex
+	mediaOnce sync.Once
+	media     *mediatools.Manager
 }
 
 // NewService builds the facade over the given studio. A nil studio is
@@ -421,6 +435,62 @@ func (s *SheytanService) GetDiagnostics() presentation.DiagnosticsDTO {
 		CheckedAt:  time.Now().UTC(),
 		SelfChecks: checks,
 	}
+}
+
+// mediaManager builds the mediatools manager once on the resolved data
+// root. Construction is passive (state inspection only, no network, no
+// goroutines), so first use is safe from any request goroutine.
+func (s *SheytanService) mediaManager() *mediatools.Manager {
+	s.mediaMu.Lock()
+	defer s.mediaMu.Unlock()
+	s.mediaOnce.Do(func() {
+		lay := apppaths.Resolve(apppaths.OSEnv())
+		s.media = mediatools.New(mediatools.Options{DataRoot: lay.DataRoot})
+	})
+	return s.media
+}
+
+// GetMediaToolsStatus returns the REAL app-managed media-tools snapshot:
+// state, stage, downloaded bytes, total bytes and throughput for the
+// pinned-pack update lifecycle. This is the downloads-pane data source
+// (the go-gui shell serves the same snapshot from the same package).
+func (s *SheytanService) GetMediaToolsStatus() mediatools.Snapshot {
+	return s.mediaManager().Snapshot()
+}
+
+// CheckMediaToolsUpdate re-inspects the installed pack against the
+// pinned manifest (no download) and returns the refreshed snapshot.
+func (s *SheytanService) CheckMediaToolsUpdate() (mediatools.Snapshot, error) {
+	snap, err := s.mediaManager().CheckForUpdate(context.Background())
+	if err != nil {
+		return snap, &FacadeError{Kind: KindRejected, Reason: err.Error()}
+	}
+	return snap, nil
+}
+
+// InstallMediaTools starts the pinned-pack download/verify/install in a
+// background goroutine and returns immediately; progress flows through
+// GetMediaToolsStatus (state=downloading, stage, bytes). Re-entrant
+// calls are refused by the manager itself (already in progress).
+func (s *SheytanService) InstallMediaTools() error {
+	m := s.mediaManager()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// The manager cleans up its own state on panic; a
+				// background panic must never take the shell down.
+				log.Printf("wails shell: mediatools install panicked: %v", r)
+			}
+		}()
+		_ = m.Install(context.Background())
+	}()
+	return nil
+}
+
+// CancelMediaToolsInstall cancels an in-flight install; the manager
+// restores the previous stable state and reports it in the snapshot.
+func (s *SheytanService) CancelMediaToolsInstall() {
+	s.mediaManager().Cancel()
 }
 
 // GetCommands returns the honest command catalog: the supported subset
@@ -691,6 +761,32 @@ func NewAssetHandler(svc *SheytanService) http.Handler {
 	get("/api/commands", func(w http.ResponseWriter, _ *http.Request) error {
 		writeJSON(w, http.StatusOK, svc.GetCommands())
 		return nil
+	})
+
+	// App-managed media-tools lifecycle (downloads pane): real bytes and
+	// real states for the pinned FFmpeg/FFprobe update.
+	get("/api/mediatools", func(w http.ResponseWriter, _ *http.Request) error {
+		writeJSON(w, http.StatusOK, svc.GetMediaToolsStatus())
+		return nil
+	})
+	api.HandleFunc("POST /api/mediatools/check", func(w http.ResponseWriter, _ *http.Request) {
+		snap, err := svc.CheckMediaToolsUpdate()
+		if err != nil {
+			writeFacadeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, snap)
+	})
+	api.HandleFunc("POST /api/mediatools/install", func(w http.ResponseWriter, _ *http.Request) {
+		if err := svc.InstallMediaTools(); err != nil {
+			writeFacadeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, svc.GetMediaToolsStatus())
+	})
+	api.HandleFunc("POST /api/mediatools/cancel", func(w http.ResponseWriter, _ *http.Request) {
+		svc.CancelMediaToolsInstall()
+		writeJSON(w, http.StatusOK, svc.GetMediaToolsStatus())
 	})
 
 	// Unknown /api paths are an explicit 404 JSON error, never an

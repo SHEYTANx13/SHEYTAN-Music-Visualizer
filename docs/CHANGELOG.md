@@ -1,5 +1,79 @@
 # Changelog
 
+## Run 45532045379 repair — Windows go-test logging-test env leak, macOS canonical Go link profile, invisible-diagnostics parser gap, self-describing gate failures, adaptive web-shell platform layer, download size/status surface, action bumps (2026-11-25)
+
+- **build-windows go-test RED — ROOT CAUSE FOUND AND FIXED**: the gate
+  process exports `SHEYTAN_LOG_DIR` / `SHEYTAN_DATA_DIR` for its runtime
+  captures, and the dd65d46 Bootstrap-override change made the six
+  Bootstrap-based tests in `internal/logging` honor the leaked override:
+  `Bootstrap(lay)` wrote the runtime log into the CI's shared app-logs
+  directory while the tests asserted on their own layout paths. Reproduced
+  locally byte-for-byte (six `--- FAIL` records under the exact gate
+  environment; green without it — which is why every local suite passed
+  while hosted Windows failed). Fixed BOTH sides: the tests pin their
+  environment hermetic (`clearLogDirEnv`, `t.Setenv` restores afterwards)
+  and the go-test/go-vet/go-build gates clear both overrides in their own
+  child process. Full suite re-run WITH the CI-style leaks: 42 packages ok.
+- **build-macos RED (no .app.zip again) — link-profile repair + named
+  failures**: the in-script gates ran bare `go test/vet/build` without the
+  repository-canonical `goffi_static` tag and without pinned CGO. Without
+  the tag, the goffi v0.6.8 dynamic-loader path fails to link
+  (reproduced: "unhandled relocation ... SDYNIMPORT" for cmd/app-gogui and
+  the ui/gogui, internal/studio, internal/transport/wails test binaries on
+  linux/amd64; the purego/goffi fakecgo duplicate-`_cgo_init` link error on
+  CGO-disabled darwin). build-macos.sh now pins `CGO_ENABLED=1` and
+  `-tags goffi_static` for every Go gate (the profile the workflow's own
+  parity steps already use), so the hosted lane links under the canonical
+  profile regardless of runner defaults. The exact hosted macOS gate of
+  run 45532045379 remains at the hosted-evidence boundary (job logs need
+  admin auth); the repaired diagnostics chain now NAMES the failing gate.
+- **Invisible diagnostics class closed (no exit 1 without a specific
+  explanation)**: `internal/cilog` extracted compiler diagnostics only
+  when the tool printed a severity token; go build/link errors
+  ("path.go:42:5: undefined: X", "link: duplicated definition of symbol",
+  clang "Undefined symbols for architecture arm64:", goffi stub
+  "unhandled relocation") fell through unrecorded — the exact reason both
+  failing lanes produced almost no consolidated-log records. New contract
+  rules (records_linker_test.go pairs every rule with negative cases) and
+  conservative guards (URLs never parse as positions; generic
+  no-severity positions only for known compiler source extensions).
+- **Self-describing gate failures**: fail_gate (build-macos.sh) and
+  Fail-Gate (build-windows.ps1) now emit an explicit, extractable
+  "ERROR: gate <name> FAILED" record beside the captured output, so a
+  failing gate whose tool output matches no diagnostic pattern still
+  lands in the consolidated log with its name.
+- **Adaptive web-shell platform layer** (structure applied from the
+  "Adaptive Wails UI Platform" blueprint, 25 Nov 2026): the workspace is a
+  CSS container (`workspace-root`) with the blueprint's four screen
+  classes (compact < 640, medium 640-1023, expanded 1024-1439,
+  wide 1440+); pane-level container queries adapt the grids; pointer-
+  media touch contract (44 px minimum targets on coarse pointers, larger
+  scroll bars); pane scroll surfaces get touch-action/overscroll/
+  momentum behavior plus pointer-drag panning (wireDragScroll — mouse,
+  pen and touch-native fallback); reduced-motion respected.
+- **Download size and download status in the web shell**: the Wails
+  facade now owns the same real mediatools manager the go-gui shell uses
+  (`GetMediaToolsStatus` / check / install-in-background / cancel; real
+  JSON-tagged mediatools.Snapshot — state, stage, downloadedBytes,
+  totalBytes, bytesPerSecond, pack). The downloads pane renders the real
+  file size, progress bar, transfer speed and lifecycle actions; no
+  synthetic bytes (contract-tested in service_media_test.go).
+- **Action bumps (SHA-pinned, tag-verified via git ls-remote)**:
+  msys2/setup-msys2 v2.33.0 -> v2.34.0
+  (3c51bf698df1e37b2261f53cb67797b97761185c);
+  github/codeql-action init/analyze v4.39.3 -> v4.39.4
+  (e0462179768953fd6790193e15caaef674ff709e, four sites).
+  actions/setup-go was already at the target v7.1.0: the pinned SHA
+  d8cbb8045d7f43706b9177cceb36c1f91a6644d5 IS the official v7.1.0 tag
+  (verified) — no change needed. golang.org/x/net 0.62.0->0.63.0,
+  fyne.io/fyne/v2 2.8.2->2.8.3 and chromedp/chromedp 0.23.1->0.24.0 +
+  cdproto 0.160.3->0.160.8 are NOT APPLICABLE to this tree: x/net
+  contributes zero packages (only stdlib vendor copies are built; the
+  module graph selects v0.60.0 transitively via wails), fyne is fully
+  retired with the enforced check-no-fyne gate, chromedp/cdproto are not
+  in the module graph. Adding unused modules to satisfy a version string
+  would violate the minimal-dependency contract; recorded instead.
+
 ## Run 45455106994 repair — run-manifest env desync (collect-logs red), complete emergency-fallback verdicts, iconutil `.iconset` source-name contract, license pointer (2026-11-25)
 
 - **collect-logs ROOT CAUSE (run manifest MISSING, collector rc=2, emergency

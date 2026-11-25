@@ -485,6 +485,155 @@ function wireButtons() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Downloads: app-managed media tools (REAL bytes, REAL states)        */
+/*                                                                     */
+/* Run 45532045379: the downloads pane shows the download FILE SIZE,   */
+/* the downloaded/total progress and the transfer speed straight from  */
+/* the Go mediatools manager (pinned manifest, digest verification,    */
+/* allowlisted hosts). The UI never invents progress: no bytes field   */
+/* is faked, an unreachable API renders an explicit error state.       */
+/* ------------------------------------------------------------------ */
+
+const MEDIA_ACTIVE_STATES = new Set([
+    "downloading", "verifying", "installing",
+]);
+
+function fmtBytes(n) {
+    if (!Number.isFinite(n) || n <= 0) return "\u2014";
+    const units = ["B", "KiB", "MiB", "GiB"];
+    let v = n;
+    let i = 0;
+    while (v >= 1024 && i < units.length - 1) {
+        v /= 1024;
+        i += 1;
+    }
+    return (i === 0 ? v : v.toFixed(1)) + " " + units[i];
+}
+
+function renderMediaTools(snap) {
+    const stateEl = $("mediatools-state");
+    const stageEl = $("mediatools-stage");
+    const progEl = $("mediatools-progress");
+    const fill = $("mediatools-fill");
+    const bar = $("mediatools-bar");
+    const sizeEl = $("mediatools-size");
+    const bytesEl = $("mediatools-bytes");
+    const speedEl = $("mediatools-speed");
+    const detailEl = $("mediatools-detail");
+    const checkBtn = $("mediatools-check");
+    const installBtn = $("mediatools-install");
+    const cancelBtn = $("mediatools-cancel");
+    if (!stateEl) return;
+
+    const state = String(snap.state || "unknown");
+    stateEl.textContent = state.replace(/-/g, " ");
+    stateEl.dataset.state = state.replace(/-/g, "_");
+
+    const active = MEDIA_ACTIVE_STATES.has(state);
+    const showProgress = active && Number(snap.totalBytes) > 0;
+    if (progEl) progEl.hidden = !showProgress;
+    if (stageEl) {
+        stageEl.hidden = !(active && snap.stage);
+        setText(stageEl, active && snap.stage ? "stage: " + snap.stage : "");
+    }
+
+    if (showProgress) {
+        const pct = Math.max(0, Math.min(100, (snap.downloadedBytes / snap.totalBytes) * 100));
+        if (fill) fill.style.width = pct.toFixed(1) + "%";
+        if (bar) bar.setAttribute("aria-valuenow", String(Math.round(pct)));
+        setText(sizeEl, "total " + fmtBytes(Number(snap.totalBytes)));
+        setText(bytesEl, fmtBytes(Number(snap.downloadedBytes)) + " / " + fmtBytes(Number(snap.totalBytes))
+            + " (" + pct.toFixed(0) + "%)");
+        setText(speedEl, snap.bytesPerSecond > 0 ? fmtBytes(Number(snap.bytesPerSecond)) + "/s" : "\u2014");
+    } else {
+        setText(sizeEl, snap.pack && snap.pack.sizeBytes ? "pinned " + fmtBytes(Number(snap.pack.sizeBytes)) : "\u2014");
+        setText(bytesEl, "\u2014");
+        setText(speedEl, "\u2014");
+    }
+
+    setText(detailEl, snap.lastError ? "error: " + snap.lastError : (snap.detail || ""));
+
+    if (checkBtn) checkBtn.disabled = active;
+    if (installBtn) installBtn.disabled = active
+        || state === "unsupported-platform"
+        || (!snap.installed && state !== "not-installed" && state !== "failed" && state !== "repair-needed" && state !== "ready");
+    if (cancelBtn) cancelBtn.disabled = !active;
+}
+
+async function loadMediaTools() {
+    const snap = await fetchJSON("/api/mediatools");
+    renderMediaTools(snap);
+}
+
+async function mediaAction(path) {
+    try {
+        const snap = await fetchJSON(path, { method: "POST" });
+        renderMediaTools(snap);
+        setStatus("media tools: " + (snap.state || "updated"));
+    } catch (err) {
+        showAPIError(err.message);
+        setStatus("media tools action failed: " + err.message);
+    }
+}
+
+function wireMediaTools() {
+    const check = $("mediatools-check");
+    const install = $("mediatools-install");
+    const cancel = $("mediatools-cancel");
+    if (check) check.addEventListener("click", () => mediaAction("/api/mediatools/check"));
+    if (install) install.addEventListener("click", () => mediaAction("/api/mediatools/install"));
+    if (cancel) cancel.addEventListener("click", () => mediaAction("/api/mediatools/cancel"));
+}
+
+/* ------------------------------------------------------------------ */
+/* Drag-to-scroll: every section pans with finger, pen and mouse drag  */
+/* ------------------------------------------------------------------ */
+
+function wireDragScroll() {
+    // Pointer-based drag scrolling for every scrollable pane. Vertical
+    // finger scrolling stays native (touch-action: pan-y); this adds
+    // mouse-drag panning and pointer capture so a drag that leaves the
+    // pane keeps scrolling until release.
+    for (const el of document.querySelectorAll(".pane")) {
+        let dragging = false;
+        let startY = 0;
+        let startScroll = 0;
+        let moved = false;
+        el.addEventListener("pointerdown", (ev) => {
+            if (ev.pointerType === "touch") return; // native scroll for touch
+            if (ev.button !== 0) return;
+            dragging = true;
+            moved = false;
+            startY = ev.clientY;
+            startScroll = el.scrollTop;
+        });
+        el.addEventListener("pointermove", (ev) => {
+            if (!dragging) return;
+            const dy = ev.clientY - startY;
+            if (!moved && Math.abs(dy) > 4) {
+                moved = true;
+                el.classList.add("drag-scrolling");
+                try { el.setPointerCapture(ev.pointerId); } catch (err) { /* pane may be gone */ }
+            }
+            if (moved) {
+                el.scrollTop = startScroll - dy;
+                ev.preventDefault();
+            }
+        });
+        const endDrag = (ev) => {
+            if (!dragging) return;
+            dragging = false;
+            el.classList.remove("drag-scrolling");
+            if (moved && ev.pointerId !== undefined) {
+                try { el.releasePointerCapture(ev.pointerId); } catch (err) { /* already released */ }
+            }
+        };
+        el.addEventListener("pointerup", endDrag);
+        el.addEventListener("pointercancel", endDrag);
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Full load + polling                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -502,6 +651,7 @@ async function loadAll() {
             loadPresets(),
             loadCommands(),
             loadDiagnostics(),
+            loadMediaTools(),
         ]);
         markAPIHealthy();
         setStatus("all surfaces refreshed");
@@ -517,6 +667,9 @@ function startTransportPolling() {
         if (!apiHealthy) return;
         try {
             await loadTransport();
+            // The downloads pane polls at the same low cadence: real
+            // progress bytes for an in-flight engine download.
+            await loadMediaTools();
         } catch (err) {
             showAPIError(err.message);
         }
@@ -526,6 +679,8 @@ function startTransportPolling() {
 
 function boot() {
     wireButtons();
+    wireMediaTools();
+    wireDragScroll();
     loadAll();
     startTransportPolling();
 }

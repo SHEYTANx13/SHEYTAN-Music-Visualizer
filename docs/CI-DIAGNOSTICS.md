@@ -189,3 +189,45 @@ carries its own ERROR line before the gate exits.
    adapter or missing Windows FFmpeg as a defect.
 6. If a package is marked TEST-ONLY, the package itself passed all
    package-level checks; only non-package gates failed.
+
+## No-severity compiler/linker diagnostics are diagnostics (run 45532045379)
+
+The extractor historically required a severity token (go: "path:LINE:COL:
+error: text") or a FAIL prefix. Go build/link errors print NO severity
+("path:LINE:COL: text", "link: duplicated definition of symbol ..."), clang
+prints "Undefined symbols for architecture ..." and goffi stub failures
+print "name: unhandled relocation for symbol". Every gate failure of that
+class surfaced as a bare exit code with no consolidated-log record — the
+run 45455106994 and 45532045379 build-macos lanes both failed this way.
+
+Contract since run 45532045379 (internal/cilog/records.go, pinned by
+records_linker_test.go):
+
+- Go positions without severity (`*.go:LINE:COL: text`) are go-compiler
+  ERROR records; URLs never parse as positions.
+- Generic positions without severity are accepted only for known compiler
+  source extensions (.c/.h/.cpp/.hpp/.cc/.cxx/.m/.mm/.rs/.swift/.kt/.kts/
+  .s/.asm/.zig); text like "12:30: meeting" stays non-diagnostic.
+- Linker shapes ("link: duplicated/undefined...", "Undefined symbols
+  for ...", "name: unhandled relocation for ...") are go-linker ERROR
+  records.
+
+## Failed gates are self-describing (run 45532045379)
+
+fail_gate (scripts/build/build-macos.sh) and Fail-Gate
+(scripts/build/build-windows.ps1) emit an explicit, extractable
+`ERROR: gate <name> FAILED (...)` record beside the captured output, so a
+gate whose raw tool output matches no diagnostic pattern still produces a
+specific consolidated-log record naming the gate. Any NEW gate in either
+script must go through these helpers — a bare exit without the ERROR line
+violates the no-unexplained-exit-code contract.
+
+## Go gates must not inherit runtime env overrides (run 45532045379)
+
+build-windows.ps1 sets SHEYTAN_LOG_DIR/SHEYTAN_DATA_DIR for its runtime
+captures; the go-test/go-vet/go-build gates clear both overrides in their
+own child process (Capture-Step command block), and the internal/logging
+tests pin the environment hermetic regardless (clearLogDirEnv). Contract:
+environment overrides set for RUNTIME evidence must never leak into Go
+gates; tests that call Bootstrap/Init/Dir must clear SHEYTAN_LOG_DIR in
+their own scope so the suite passes on any host with the override set.

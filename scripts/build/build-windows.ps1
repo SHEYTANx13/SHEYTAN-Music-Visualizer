@@ -187,6 +187,13 @@ if ($null -eq $goResolved) {
 function Fail-Gate([string]$gate) {
     $script:failures++
     $script:failedGates += $gate
+    # RUN 45532045379 repair (no exit 1 without a specific explanation):
+    # a failed gate emits an explicit, extractable ERROR line naming the
+    # gate, so a hosted failure whose raw tool output matches no
+    # diagnostic pattern still produces a specific consolidated-log
+    # record (the build-macos.sh fail_gate contract, mirrored here).
+    Write-Output ("ERROR: gate {0} FAILED (see the captured gate output above; the gate result JSON in ci-logs/gate-results carries the exit code and timing)" -f $gate)
+    Write-Note ("ERROR: gate {0} FAILED (see the captured gate output above; the gate result JSON in ci-logs/gate-results carries the exit code and timing)" -f $gate)
 }
 function Skip-Gate([string]$gate, [string]$reason) {
     $script:skippedGates += $gate
@@ -356,13 +363,21 @@ if ($rc -ne 0) { Fail-Gate "go-mod-verify" }
 # TestPaletteReachesGPUShader is owned EXCLUSIVELY by this job's
 # gpu-validation gate; it is excluded here ONLY by that exact name. Every
 # other internal/render test stays in the default suite.
-$rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -GoTags -Command { go test $goTags -skip '^TestPaletteReachesGPUShader$' ./... }
+# RUN 45532045379 repair (test hermeticity): SHEYTAN_LOG_DIR and
+# SHEYTAN_DATA_DIR are set for the RUNTIME captures of this script; the
+# Go test/vet/build gates must NOT inherit them - the leaked override
+# redirected the Bootstrap-based logging tests away from their own
+# layouts and failed the whole go-test gate on hosted Windows
+# (reproduced locally, six tests). The Go gates clear both overrides in
+# their own child process; runtime gates re-apply the documented values
+# explicitly where they need them.
+$rc = Capture-Step -Job $job -Step "go-test" -ToolContext "gate:go-test" -GoTags -Command { $env:SHEYTAN_LOG_DIR = $null; $env:SHEYTAN_DATA_DIR = $null; go test $goTags -skip '^TestPaletteReachesGPUShader$' ./... }
 if ($rc -ne 0) { Fail-Gate "go-test" }
 
-$rc = Capture-Step -Job $job -Step "go-vet" -ToolContext "gate:go-vet" -GoTags -Command { go vet $goTags ./... }
+$rc = Capture-Step -Job $job -Step "go-vet" -ToolContext "gate:go-vet" -GoTags -Command { $env:SHEYTAN_LOG_DIR = $null; $env:SHEYTAN_DATA_DIR = $null; go vet $goTags ./... }
 if ($rc -ne 0) { Fail-Gate "go-vet" }
 
-$rc = Capture-Step -Job $job -Step "go-build-packages" -ToolContext "gate:go-build" -GoTags -Command { go build $goTags ./... }
+$rc = Capture-Step -Job $job -Step "go-build-packages" -ToolContext "gate:go-build" -GoTags -Command { $env:SHEYTAN_LOG_DIR = $null; $env:SHEYTAN_DATA_DIR = $null; go build $goTags ./... }
 if ($rc -ne 0) { Fail-Gate "go-build-packages" }
 
 # ---- desktop executable + runtime checks -----------------------------------

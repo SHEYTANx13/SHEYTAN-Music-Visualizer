@@ -12,8 +12,21 @@ import (
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 )
 
+// clearLogDirEnv pins the Bootstrap/Dir environment hermetic (run
+// 45532045379 repair): the Windows gate process exports SHEYTAN_LOG_DIR
+// for its runtime captures, and the leaked override silently redirected
+// every Bootstrap-based test away from its own layout, failing six tests
+// on hosted Windows while all local suites stayed green. Every test that
+// calls Bootstrap (or asserts on a layout log path) clears the override
+// for its own scope; t.Setenv restores the caller's value afterwards.
+func clearLogDirEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("SHEYTAN_LOG_DIR", "")
+}
+
 func testLayout(t *testing.T) apppaths.Layout {
 	t.Helper()
+	clearLogDirEnv(t)
 	root := t.TempDir()
 	lay := apppaths.Layout{
 		Mode:     "test",
@@ -61,6 +74,8 @@ func TestBootstrapOpensRuntimeLog(t *testing.T) {
 func TestBootstrapHonorsLogDirOverride(t *testing.T) {
 	lay := testLayout(t)
 	override := filepath.Join(t.TempDir(), "ci-logs", "app-logs")
+	// testLayout already cleared the ambient override; this test pins
+	// its OWN override explicitly (the documented contract).
 	t.Setenv("SHEYTAN_LOG_DIR", override)
 	l := Bootstrap(lay)
 	defer l.Close()

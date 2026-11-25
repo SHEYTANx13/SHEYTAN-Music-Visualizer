@@ -31,7 +31,7 @@
         <button type="button" id="error-retry">Retry</button>
     </div>
 
-    <main id="workspace" class="workspace">
+    <main id="workspace" class="workspace workspace-root">
 
         <section id="pane-home" class="pane" data-dest="home" hidden>
             <h2>Home</h2>
@@ -130,7 +130,30 @@
 
         <section id="pane-downloads" class="pane" data-dest="downloads" hidden>
             <h2>Downloads</h2>
-            <div class="empty-state" id="empty-downloads"></div>
+            <p class="pane-desc">App-managed engine downloads: real file size, real progress, real status.</p>
+            <div class="card download-card">
+                <div class="download-head">
+                    <h3>Media tools (FFmpeg / FFprobe)</h3>
+                    <span id="mediatools-state" class="download-state" role="status" aria-live="polite">unknown</span>
+                </div>
+                <p class="download-stage" id="mediatools-stage" hidden></p>
+                <div class="download-progress" id="mediatools-progress" hidden>
+                    <div class="download-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="mediatools-bar">
+                        <div class="download-fill" id="mediatools-fill"></div>
+                    </div>
+                    <dl class="kv download-kv">
+                        <div><dt>File size</dt><dd id="mediatools-size">&mdash;</dd></div>
+                        <div><dt>Progress</dt><dd id="mediatools-bytes">&mdash;</dd></div>
+                        <div><dt>Speed</dt><dd id="mediatools-speed">&mdash;</dd></div>
+                    </dl>
+                </div>
+                <p class="note" id="mediatools-detail"></p>
+                <div class="download-actions">
+                    <button type="button" id="mediatools-check" class="btn">Check for update</button>
+                    <button type="button" id="mediatools-install" class="btn btn-primary">Download and install</button>
+                    <button type="button" id="mediatools-cancel" class="btn" disabled>Cancel</button>
+                </div>
+            </div>
         </section>
 
         <section id="pane-system-files" class="pane" data-dest="system-files" hidden>

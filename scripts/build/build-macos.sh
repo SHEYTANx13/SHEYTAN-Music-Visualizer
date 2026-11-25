@@ -27,9 +27,32 @@ SKIPPED_GATES=""
 FAILED_GATES=""
 
 note() { printf '%s\n' "$*" | tee -a "$CI_LOG_FILE"; }
-fail_gate() { FAILED_GATES="$FAILED_GATES $1"; }
+# RUN 45532045379 repair (no exit 1 without a specific explanation): a
+# failed gate now emits an explicit, extractable ERROR line that names
+# the gate and points at its captured output. The previous silent
+# summary-only contract left hosted failures with no consolidated-log
+# record when the failing tool output matched no diagnostic pattern.
+fail_gate() {
+  FAILED_GATES="$FAILED_GATES $1"
+  printf 'ERROR: gate %s FAILED (see the captured output above in this step; the gate result JSON in ci-logs/gate-results carries the exit code and timing)\n' "$1" | tee -a "$CI_LOG_FILE" >&2
+}
 skip_gate() { SKIPPED_GATES="$SKIPPED_GATES $1"; printf 'SKIPPED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"; }
 blocked_gate() { SKIPPED_GATES="$SKIPPED_GATES $1"; printf 'BLOCKED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"; }
+
+# RUN 45532045379 repair (canonical Go profile): every Go gate below
+# pins the repository-canonical link profile documented in
+# scripts/build/build-windows.ps1 and used by the build-macos workflow
+# steps (CGO_ENABLED=1, build tag goffi_static). Without the tag, the
+# goffi v0.6.8 dynamic-loader path fails to link (its dl stubs JMP to
+# cgo_import_dynamic symbols that resolve only under the goffi_static
+# static profile or real external cgo linking), which reproduced
+# locally as "unhandled relocation ... (SDYNIMPORT)" for
+# cmd/app-gogui and the ui/gogui, internal/studio and
+# internal/transport/wails test binaries. Pinning CGO_ENABLED=1 also
+# excludes the purego/goffi fakecgo duplicate-symbol link error class
+# on CGO-disabled runners.
+export CGO_ENABLED=1
+GO_TAGS=(-tags goffi_static)
 
 note "SHEYTAN MUSIC VISUALIZER :: PHASE 2 LOCAL VERIFICATION (MACOS)"
 note "Mode: desktop (reduced parity set; see header)"
@@ -55,13 +78,13 @@ else
 
   ci_capture "$JOB" go-mod-verify go mod verify || fail_gate go-mod-verify
 
-  ci_capture "$JOB" go-test go test ./... || fail_gate go-test
-  ci_capture "$JOB" go-vet go vet ./... || fail_gate go-vet
-  ci_capture "$JOB" go-build-packages go build ./... || fail_gate go-build-packages
+  ci_capture "$JOB" go-test go test "${GO_TAGS[@]}" ./... || fail_gate go-test
+  ci_capture "$JOB" go-vet go vet "${GO_TAGS[@]}" ./... || fail_gate go-vet
+  ci_capture "$JOB" go-build-packages go build "${GO_TAGS[@]}" ./... || fail_gate go-build-packages
 
   BI=github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo
   LDFLAGS=(-ldflags "-X ${BI}.version=${SHEYTAN_BUILD_VERSION:-BETA} -X ${BI}.commit=${SHEYTAN_BUILD_COMMIT:-unknown} -X ${BI}.date=${SHEYTAN_BUILD_DATE:-unknown} -X ${BI}.builtBy=${SHEYTAN_BUILT_BY:-github-actions}")
-  if ci_capture "$JOB" build-executable go build -trimpath "${LDFLAGS[@]}" -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer; then
+  if ci_capture "$JOB" build-executable go build -trimpath "${GO_TAGS[@]}" "${LDFLAGS[@]}" -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer; then
     CI_TOOL_CONTEXT="runtime:--version" ci_capture "$JOB" run-version bash -c './bin/sheytan-music-visualizer --version | tee /tmp/version.txt; grep -q "version: BETA" /tmp/version.txt || grep -q "version BETA" /tmp/version.txt || grep -q "BETA" /tmp/version.txt' ||
       fail_gate run-version
   else
@@ -76,7 +99,7 @@ else
   # with the shell icon (icon.icns from the tracked iconset via
   # iconutil) and the CLI as a companion tool.
   GUI_EXE_OK=0
-  if ci_capture "$JOB" build-gogui-shell go build -trimpath "${LDFLAGS[@]}" -o bin/app-gogui ./cmd/app-gogui; then
+  if ci_capture "$JOB" build-gogui-shell go build -trimpath "${GO_TAGS[@]}" "${LDFLAGS[@]}" -o bin/app-gogui ./cmd/app-gogui; then
     GUI_EXE_OK=1
   else
     fail_gate build-gogui-shell

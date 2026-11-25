@@ -6,14 +6,14 @@ package cilog
 //
 // The final artifact contains ONLY lines with these prefixes:
 //
-//	WARNING|...
-//	ERROR|...
+//      WARNING|...
+//      ERROR|...
 //
 // in the fixed field order
 //
-//	<SEVERITY>|platform=<p>|job=<j>|step=<s>|gate=<g>|command=<c>|
-//	exit=<n>|tool=<t>|file=<f>|line=<n>|column=<n>|source=<s>|
-//	hint=<h>|message=<m>
+//      <SEVERITY>|platform=<p>|job=<j>|step=<s>|gate=<g>|command=<c>|
+//      exit=<n>|tool=<t>|file=<f>|line=<n>|column=<n>|source=<s>|
+//      hint=<h>|message=<m>
 //
 // Fields that are genuinely unavailable are omitted. The source field
 // is always emitted: EXACT (file+line+column reported by the tool),
@@ -237,6 +237,16 @@ var (
 	reGoTestFail = regexp.MustCompile(`^--- FAIL: (\S+)(?: \((\d+\.\d+)s\))?$`)
 	reGoPkgFail  = regexp.MustCompile(`^FAIL[ \t]+(\S+?)[ \t]+\[build failed\]`)
 	reGoPkgFail2 = regexp.MustCompile(`^FAIL[ \t]+(\S+?)[ \t]+([0-9.]+s)`)
+	// RUN 45532045379 repair (no exit 1 without a specific
+	// explanation): linker diagnostics carry no severity token and no
+	// file position. The Go internal linker prints "link: duplicated
+	// definition of symbol X" / clang prints "Undefined symbols for
+	// architecture arm64:"; the goffi stub resolution failure prints
+	// "stub_name: unhandled relocation for symbol (...)". These exact
+	// classes hid the hosted build failures from the consolidated log
+	// (run 45455106994 build-macos, run 45532045379 build-macos).
+	reLinkerDiag = regexp.MustCompile(`(?i)^(?:link: )?(?:duplicated? definition of symbol|undefined symbols? for|duplicate symbol)`)
+	reRelocDiag  = regexp.MustCompile(`^\S{1,512}?: unhandled relocation for \S{1,512}?(?: |$)`)
 )
 
 // extractDiag parses one raw log line into a Record when it carries an
@@ -292,6 +302,26 @@ func extractDiag(line string) (Record, bool) {
 	}
 	if m := reGoPkgFail2.FindStringSubmatch(trim); m != nil {
 		return Record{Severity: SevError, Tool: "go-test", ExitCode: -1, Source: SourceNotProvided, Message: "package failed: " + m[1]}, true
+	}
+	// RUN 45532045379 repair: compiler positions WITHOUT a severity
+	// token (go build prints "path:LINE:COL: text"; vet and clang
+	// print the same shape) were invisible to this extractor - every
+	// gate failure they caused was an unexplained exit code in the
+	// consolidated log. The extraction stays conservative: a URL can
+	// never be a position, and the generic (non-.go) form is accepted
+	// only for known compiler-source extensions so ordinary text like
+	// "12:30: meeting" stays non-diagnostic.
+	if m := reRelocDiag.FindStringSubmatch(trim); m != nil {
+		return Record{Severity: SevError, Tool: "go-linker", ExitCode: -1, Source: SourceNotProvided, Message: singleLineMessage(trim)}, true
+	}
+	if m := reLinkerDiag.FindStringSubmatch(trim); m != nil {
+		return Record{Severity: SevError, Tool: "go-linker", ExitCode: -1, Source: SourceNotProvided, Message: singleLineMessage(trim)}, true
+	}
+	if m := reGoPosNoSev.FindStringSubmatch(trim); m != nil && !strings.Contains(m[1], "://") {
+		return toolRecord("go-compiler", m[1], m[2], m[3], "error", m[4]), true
+	}
+	if m := reGenericPosNoSev.FindStringSubmatch(trim); m != nil && !strings.Contains(m[1], "://") && strings.Contains(m[1], ".") && isCompilerSourceExt(m[1]) {
+		return toolRecord(toolFromPath(m[1]), m[1], m[2], m[3], "error", m[4]), true
 	}
 	if m := rePlainError.FindStringSubmatch(trim); m != nil {
 		r := Record{Severity: SevError, Tool: "generic", ExitCode: -1, Source: SourceNotProvided, Message: m[1]}
@@ -359,6 +389,22 @@ func toolFromPath(path string) string {
 	default:
 		return "generic-compiler"
 	}
+}
+
+// isCompilerSourceExt reports whether a path carries a known compiler
+// source extension (the conservative whitelist for the no-severity
+// generic-position extraction; .go is handled by the dedicated Go rule).
+func isCompilerSourceExt(path string) bool {
+	p := strings.ToLower(path)
+	for _, ext := range []string{
+		".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".m", ".mm",
+		".rs", ".swift", ".kt", ".kts", ".s", ".asm", ".zig",
+	} {
+		if strings.HasSuffix(p, ext) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyAnnotationProps parses GitHub annotation properties

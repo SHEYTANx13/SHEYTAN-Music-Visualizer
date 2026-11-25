@@ -1,5 +1,34 @@
 # Dependencies — exact upgrade record (2026-11-16 v3 work order)
 
+## Run 45532045379 upgrades (2026-11-25)
+
+- **msys2/setup-msys2 v2.33.0 → v2.34.0** (`.github/workflows/build.yml`,
+  the only active setup-msys2 reference): pin moved to
+  `uses: msys2/setup-msys2@3c51bf698df1e37b2261f53cb67797b97761185c # v2.34.0`.
+  The target SHA equals the remote `refs/tags/v2.34.0` (verified via
+  `git ls-remote`); the previous pin was verified as the v2.33.0 tag the
+  same way.
+- **github/codeql-action init/analyze v4.39.3 → v4.39.4** (four sites in
+  `.github/workflows/codeql.yml`): pin moved to
+  `uses: github/codeql-action/{init,analyze}@e0462179768953fd6790193e15caaef674ff709e # v4.39.4`
+  (target SHA equals the remote `refs/tags/v4.39.4`, `git ls-remote`
+  verified).
+- **actions/setup-go**: already at the target v7.1.0 — the pinned SHA
+  `d8cbb8045d7f43706b9177cceb36c1f91a6644d5` IS the official
+  `refs/tags/v7.1.0` (git ls-remote verified); no change.
+- **NOT APPLICABLE (verified against the actual module graph)**:
+  `golang.org/x/net` 0.62.0→0.63.0 (the module contributes ZERO build
+  packages — `go list -deps all` carries only the stdlib
+  `vendor/golang.org/x/net/...` copies; the graph selects v0.60.0
+  transitively via wails v3.1.0 and nothing imports it);
+  `fyne.io/fyne/v2` 2.8.2→2.8.3 (Fyne is fully retired with the enforced
+  `scripts/ci/check-no-fyne.sh` gate — no module reference exists);
+  `github.com/chromedp/chromedp` 0.23.1→0.24.0 and
+  `github.com/chromedp/cdproto` 0.160.3→0.160.8 (not in the module graph).
+  Adding unused modules only to match a version string would violate the
+  minimal-dependency contract, so the intended-but-inapplicable bumps are
+  recorded here instead of introduced.
+
 ## Run 45097038674 upgrades (2026-11-23)
 
 - **astral-sh/setup-uv v10.3.3 → v10.4.0** (`.github/workflows/build.yml`,
