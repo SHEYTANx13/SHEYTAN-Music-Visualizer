@@ -517,12 +517,17 @@ fi
   export REF='refs/heads/release/v1.0"weird\κυρία}'   # quotes, backslash, Unicode, slashes
   export EVENT=workflow_dispatch REPO='SHEYTANx13/SHEYTAN-Music-Visualizer' RUNNER_OS_LABEL=Linux
   export STARTED_AT=""   # optional value may be empty
-  # Five-platform contract (run 44330231458 expansion): the writer
-  # fail-closes unless every platform conclusion is present via env.
+  # Five-platform contract: the writer demands EXACTLY the env names
+  # build.yml's "Write run manifest" step passes (preflight + four product
+  # platforms). Run 45455106994 repair: this fixture previously still
+  # exported RESULT_IOS/DOWNLOAD_IOS, which MASKED the writer/Workflow env
+  # desync - the writer demanded iOS names the workflow no longer passes,
+  # every hosted manifest step failed closed, and collect-logs went red
+  # with the run-42376176493 signature while this suite stayed green.
   export RESULT_PREFLIGHT=success RESULT_WINDOWS=skipped RESULT_LINUX=failure
-  export RESULT_MACOS=success RESULT_ANDROID=skipped RESULT_IOS=skipped
+  export RESULT_MACOS=success RESULT_ANDROID=skipped
   export DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=skipped DOWNLOAD_LINUX=success
-  export DOWNLOAD_MACOS=success DOWNLOAD_ANDROID=skipped DOWNLOAD_IOS=skipped
+  export DOWNLOAD_MACOS=success DOWNLOAD_ANDROID=skipped
   python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m1/manifest.json >writer.out 2>&1
   echo $? > writer.rc
 )
@@ -585,6 +590,53 @@ if [ "$(cat "$T/m2.rc")" = 2 ] && grep -q "RUN_ATTEMPT" "$T/m2.out" \
   report PASS "H31" "manifest writer fails closed with precise reasons and never leaves a manifest file"
 else
   report FAIL "H31" "manifest writer fail-closed fixtures failed"
+fi
+
+# ---------- H33: manifest env parity (run 45455106994 repair) --------------
+# The writer and the workflow must demand EXACTLY the same RESULT_*/DOWNLOAD_*
+# env names, in BOTH directions. The run-45347124889 update removed the iOS
+# job's env rows from build.yml but left RESULT_IOS/DOWNLOAD_IOS required by
+# write-manifest.py; every hosted run then failed closed inside the manifest
+# step ("required environment variable RESULT_IOS is empty or unset"), the
+# manifest never existed, and collect-logs went red with the
+# run-42376176493 signature while every local suite stayed green because
+# THIS fixture file still exported the iOS names. This parity pin makes the
+# desync class structurally impossible: adding/removing a platform now
+# requires touching both sides at once or this fixture fails.
+(
+  cd "$T" || exit 3
+  python3 - "$REPO_ROOT" > h33.txt 2>&1 <<'PYH33'
+import re, sys
+
+root = sys.argv[1]
+wf = open(root + "/.github/workflows/build.yml", encoding="utf-8").read()
+after_name = wf.split("Write run manifest", 1)[1]
+env_block = after_name.split("env:", 1)[1].split("\n        run:", 1)[0]
+wf_results = sorted(re.findall(r"^\s+(RESULT_[A-Z0-9_]+):", env_block, re.M))
+wf_downloads = sorted(re.findall(r"^\s+(DOWNLOAD_[A-Z0-9_]+):", env_block, re.M))
+wm = open(root + "/scripts/ci/write-manifest.py", encoding="utf-8").read()
+
+
+def tuple_names(name):
+    m = re.search(name + r"\s*=\s*\(([^)]*)\)", wm, re.S)
+    assert m, name + " tuple not found in write-manifest.py"
+    return sorted(re.findall(r'"([A-Z0-9_]+)"', m.group(1)))
+
+
+py_results = tuple_names("REQUIRED_CALLER_RESULTS")
+py_downloads = tuple_names("REQUIRED_CALLER_DOWNLOADS")
+assert wf_results == py_results, ("build.yml RESULT_* vs writer tuple", wf_results, py_results)
+assert wf_downloads == py_downloads, ("build.yml DOWNLOAD_* vs writer tuple", wf_downloads, py_downloads)
+everywhere = "".join(wf_results + py_results + wf_downloads + py_downloads)
+assert "IOS" not in everywhere, "iOS env names must stay retired (run-45347124889)"
+print("H33-OK")
+PYH33
+  echo $? > h33.rc
+)
+if [ "$(cat "$T/h33.rc")" = 0 ] && grep -q "H33-OK" "$T/h33.txt"; then
+  report PASS "H33" "manifest env parity: build.yml manifest-step env and write-manifest.py required tuples list EXACTLY the same RESULT_*/DOWNLOAD_* names in both directions (iOS stays retired)"
+else
+  report FAIL "H33" "manifest env parity fixture failed: $(cat "$T/h33.txt" 2>/dev/null | tail -3)"
 fi
 
 # ---------- H32: emergency report disambiguates the manifest state ---------

@@ -148,9 +148,39 @@ else
           exit 1
         fi
         echo "iconset validated: 10 canonical entries, dimensions match the documented table"
-        iconutil -c icns assets/icon/iconset -o dist/SHEYTAN-Music-Visualizer.app/Contents/Resources/AppIcon.icns
-        test -s dist/SHEYTAN-Music-Visualizer.app/Contents/Resources/AppIcon.icns
-        echo "icon.icns built from the tracked iconset (iconutil)"
+        # RUN 45455106994 repair (the run-45347124889 follow-up): the
+        # iconutil contract requires the SOURCE DIRECTORY ITSELF to be a
+        # ".iconset" folder - the tool takes only specially named folders
+        # (Apple iconset contract). The previous gate pointed iconutil at
+        # assets/icon/iconset (no .iconset suffix), so even after the
+        # dimension repair of run 45347124889 the conversion still failed
+        # opaquely and the job again produced NO .app.zip. The tracked
+        # directory is copied to a properly named dist/AppIcon.iconset and
+        # converted from there; every failure mode now carries its own
+        # explicit ERROR line instead of an opaque exit under pipefail.
+        # NOTE: this gate body is a single-quoted bash -c argument; no
+        # apostrophe may appear anywhere in it.
+        icns_out="dist/SHEYTAN-Music-Visualizer.app/Contents/Resources/AppIcon.icns"
+        rm -rf dist/AppIcon.iconset
+        cp -R assets/icon/iconset dist/AppIcon.iconset
+        if [ ! -f dist/AppIcon.iconset/icon_16x16.png ]; then
+          echo "ERROR: dist/AppIcon.iconset copy is incomplete (cp -R failed); listing:" >&2
+          ls -la dist/AppIcon.iconset >&2 || true
+          exit 1
+        fi
+        icon_err=0
+        iconutil -c icns dist/AppIcon.iconset -o "$icns_out" 2>&1 || icon_err=$?
+        if [ "$icon_err" -ne 0 ]; then
+          echo "ERROR: iconutil -c icns failed with exit code $icon_err (source dist/AppIcon.iconset, output $icns_out)"
+          echo "       the iconset folder must be named *.iconset and carry exactly the documented Apple table"
+          exit 1
+        fi
+        rm -rf dist/AppIcon.iconset
+        if [ ! -s "$icns_out" ]; then
+          echo "ERROR: AppIcon.icns missing or empty after iconutil reported success ($icns_out)"
+          exit 1
+        fi
+        echo "icon.icns built from the tracked iconset via dist/AppIcon.iconset (iconutil, .iconset-named source)"
       else
         echo "iconutil UNAVAILABLE on this runner; the bundle ships without an icon (honestly recorded)"
       fi

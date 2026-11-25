@@ -43,13 +43,26 @@ VALID_RESULTS = ("success", "failure", "cancelled", "skipped")
 VALID_OUTCOMES = ("success", "failure", "cancelled", "skipped")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 
+# Run 45455106994 repair: REQUIRED_CALLER_RESULTS / REQUIRED_CALLER_DOWNLOADS
+# must list EXACTLY the env names the "Write run manifest" step of
+# build.yml passes. The run-45347124889 update removed the iOS job and its
+# env rows from build.yml but left RESULT_IOS / DOWNLOAD_IOS required here;
+# on every hosted run the writer then failed closed with "required
+# environment variable RESULT_IOS is empty or unset" BEFORE writing the
+# manifest, so the collector refused (rc=2), the emergency fallback ran and
+# collect-logs went red with "run manifest MISSING: the manifest step did
+# not create it" (the run-42376176493 signature). iOS is not a live target;
+# these tuples now match the five live platforms. The env-parity contract is
+# enforced structurally by the fixture in scripts/ci/tests/test-ci-plumbing.sh
+# (it parses build.yml's manifest-step env block and asserts BOTH directions:
+# every name build.yml passes is required here, and every required name is
+# passed there), so a future job addition/removal can never desync again.
 REQUIRED_CALLER_RESULTS = (
     "RESULT_PREFLIGHT",
     "RESULT_WINDOWS",
     "RESULT_LINUX",
     "RESULT_MACOS",
     "RESULT_ANDROID",
-    "RESULT_IOS",
 )
 REQUIRED_CALLER_DOWNLOADS = (
     "DOWNLOAD_PREFLIGHT",
@@ -57,7 +70,6 @@ REQUIRED_CALLER_DOWNLOADS = (
     "DOWNLOAD_LINUX",
     "DOWNLOAD_MACOS",
     "DOWNLOAD_ANDROID",
-    "DOWNLOAD_IOS",
 )
 
 

@@ -1,5 +1,60 @@
 # Changelog
 
+## Run 45455106994 repair — run-manifest env desync (collect-logs red), complete emergency-fallback verdicts, iconutil `.iconset` source-name contract, license pointer (2026-11-25)
+
+- **collect-logs ROOT CAUSE (run manifest MISSING, collector rc=2, emergency
+  fallback)**: the run-45347124889 update removed the iOS job, its manifest
+  env rows from build.yml and the iOS job rows from the manifest schema —
+  but left `RESULT_IOS` / `DOWNLOAD_IOS` in `write-manifest.py`'s
+  `REQUIRED_CALLER_RESULTS` / `REQUIRED_CALLER_DOWNLOADS`. On every hosted
+  run the manifest step then failed closed ("required environment variable
+  RESULT_IOS is empty or unset") BEFORE writing `ci-parts/manifest.json`,
+  the collector's `[ -s ]` guard refused (rc=2), the emergency fallback
+  published an UNVERIFIED report and collect-logs went red with the
+  run-42376176493 signature ("the manifest step did not create it"). The
+  local H30 fixture masked the desync by still exporting the iOS names —
+  first fixture executed with the real env set reproduced the failure
+  exactly (rc=2), and the repaired writer passes with build.yml's exact
+  five-platform env. The retired tuples are gone, and a NEW H33 parity
+  fixture in `test-ci-plumbing.sh` parses build.yml's manifest-step env
+  block and asserts BOTH directions (workflow env == writer tuples, iOS
+  stays retired), so a future platform addition/removal cannot desync the
+  pair again.
+- **emergency-fallback verdict completeness**: the fallback step passed
+  only preflight/windows/linux conclusions to `emergency-report.sh`, so a
+  red macOS or Android lane produced NO record in an emergency report —
+  run 45455106994's `build-macos` failure was invisible in the consolidated
+  log (exactly the "exit without specific explanations" class). The step
+  now passes all five platform conclusions; verified locally that a
+  manifest-missing fallback emits the macOS record
+  (`platform=macos-arm64|job=build-macos`) alongside windows.
+- **build-macos package-macos ROOT CAUSE (follow-up)**: iconutil's
+  documented contract requires the SOURCE DIRECTORY to be a `.iconset`
+  folder; the gate pointed it at `assets/icon/iconset` (no suffix), so the
+  run-45347124889 dimension repair alone still left the conversion failing
+  and no `.app.zip` was produced. The gate now copies the validated set to
+  `dist/AppIcon.iconset`, converts from there, and every failure mode
+  (failed copy, iconutil exit, missing/empty output) carries an explicit
+  ERROR line instead of an opaque pipefail death.
+- **build-windows staging proof**: the run-45347124889 filesystem-derived
+  stage-portable body and the license-identity preconditions were executed
+  for the first time through the REAL Capture-Step child-pwsh mechanism
+  (pwsh 7.4.6, StrictMode 3.0, exit epilogue) against a simulated job
+  workspace: staging green with the full 8-file tree, license byte-identity
+  green, and the negative control (missing `bin/app-gogui.exe`) fails rc=1
+  with the loud self-describing ERROR. The lane's remaining red in this run
+  is upstream of staging; with the collector fixed, the next hosted run
+  names the failing gate in the consolidated report.
+- **LICENSE**: a root `LICENSE` pointer file was added (GitHub
+  discoverability) explicitly deferring all legal authority to
+  `docs/license.md`, the sole licensing artifact (Parsaetak Proprietary
+  License v1.1); the readme License section states the pointer contract.
+- **iOS removal completion**: `scripts/build/build-ios.sh` still existed in
+  the tree (the run-45347124889 deletion did not survive the squash into
+  main) even though the workflow, manifest, collector mapping and roadmap
+  all record the lane as removed; the orphan is deleted and the tree now
+  matches the documented state everywhere.
+
 ## Run 45347124889 repair — dsp race-gate timeout, P7 repo-root fixture, Windows staging child-safety root cause, macOS iconutil contract, go-gui v0.99.1, iOS removal, drag-to-scroll, logging override (2026-11-24)
 
 - **build-linux go-test + go-test-race ROOT CAUSE (both records one

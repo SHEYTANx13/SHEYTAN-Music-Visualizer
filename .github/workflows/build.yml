@@ -1943,6 +1943,14 @@ jobs:
           RESULT_PREFLIGHT: ${{ needs.preflight.result }}
           RESULT_WINDOWS: ${{ needs.build-windows.result }}
           RESULT_LINUX: ${{ needs.build-linux.result }}
+          # Run 45455106994 repair: every platform conclusion is passed so
+          # an emergency report is COMPLETE. This run's build-macos failure
+          # was invisible in the consolidated log because only
+          # preflight/windows/linux reached the fallback (the macOS lane
+          # went red while the fallback report carried no macOS record at
+          # all - exactly the "exit without specific explanations" class).
+          RESULT_MACOS: ${{ needs.build-macos.result }}
+          RESULT_ANDROID: ${{ needs.build-android.result }}
         run: |
           set -Eeuo pipefail
           mkdir -p ci-out ci-parts ci-logs
@@ -1969,7 +1977,9 @@ jobs:
             --reason "$reason" \
             --result-preflight "${RESULT_PREFLIGHT:-unknown}" \
             --result-build-windows "${RESULT_WINDOWS:-unknown}" \
-            --result-build-linux "${RESULT_LINUX:-unknown}"
+            --result-build-linux "${RESULT_LINUX:-unknown}" \
+            --result-build-macos "${RESULT_MACOS:-unknown}" \
+            --result-build-android "${RESULT_ANDROID:-unknown}"
           printf 'used\n' > collector-fallback.used
 
       - name: Validate the final consolidated report before upload

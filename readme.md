@@ -365,8 +365,10 @@ Keyboard: **Space** play/pause, **←/→** seek, **F11** fullscreen toggle,
 ## License
 
 Proprietary — see [docs/license.md](docs/license.md) (Parsaetak Proprietary License
-v1.1). SHEYTAN™ is a trademark of Parsaetak; third-party dependencies remain
-under their own licenses as inventoried there.
+v1.1), the sole licensing artifact; the root [`LICENSE`](LICENSE) file is a
+discoverability pointer with no independent legal authority. SHEYTAN™ is a
+trademark of Parsaetak; third-party dependencies remain under their own
+licenses as inventoried there.
 
 - Licensor / rights holder: Parsaetak — https://linktr.ee/Parsaetak
 - Product / brand / project home: SHEYTAN — https://github.com/SHEYTANx13

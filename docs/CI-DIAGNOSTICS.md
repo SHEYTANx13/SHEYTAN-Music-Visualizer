@@ -147,6 +147,37 @@ P13 fixture (`scripts/ci/tests/audit-gate-bodies.py`, invoked by
 parent-only variable references; extend it whenever a gate gains a new
 documented preamble variable.
 
+Manifest env parity (run 45455106994): the run manifest is written by
+`scripts/ci/write-manifest.py`, whose `REQUIRED_CALLER_RESULTS` /
+`REQUIRED_CALLER_DOWNLOADS` tuples must list EXACTLY the `RESULT_*` /
+`DOWNLOAD_*` names the "Write run manifest" step of build.yml passes.
+The writer fail-closes on any missing name BEFORE a manifest exists, so a
+desync is always the "run manifest MISSING: the manifest step did not
+create it" signature (run-42376176493 class). The run-45347124889 iOS
+removal desynced the pair (writer still demanded RESULT_IOS) while the
+H30 fixture masked it by exporting the iOS names; the H33 fixture in
+`test-ci-plumbing.sh` now parses build.yml's manifest-step env block and
+asserts both directions, so adding/removing a platform without updating
+both sides fails locally.
+
+Emergency-fallback completeness (run 45455106994): the fallback step of
+collect-logs must pass ALL five platform conclusions to
+`emergency-report.sh` (`--result-preflight`, `--result-build-windows`,
+`--result-build-linux`, `--result-build-macos`, `--result-build-android`).
+The script intentionally invents no records for unpassed arguments, so a
+missing argument means a red lane with NO record in an emergency report —
+the "exit without specific explanations" class. Any new required gate
+must gain both a `RESULT_*` env row and a `--result-*` argument in the
+same change.
+
+macOS iconset contract (runs 45347124889 + 45455106994): iconutil
+requires the iconset CONTENT (the documented Apple table, exact
+names/dimensions, no extra entries) AND the SOURCE DIRECTORY named
+`*.iconset`. The package-macos gate pre-validates the content file-by-file
+(sips dimension reads with per-file ERROR lines) and converts from a
+properly named `dist/AppIcon.iconset` copy; every conversion failure
+carries its own ERROR line before the gate exits.
+
 ## Diagnosing a red run, in order
 
 1. Open the run page; check which required job(s) are red.

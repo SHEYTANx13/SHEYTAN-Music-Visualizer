@@ -1,0 +1,28 @@
+LICENSE - SHEYTAN Music Visualizer
+
+Copyright (c) 2024-2026 Parsaetak (https://linktr.ee/Parsaetak).
+Product and brand identity: SHEYTAN (https://github.com/SHEYTANx13).
+Authored by Parsa Tak.
+
+THE SOLE LICENSING ARTIFACT of SHEYTAN Music Visualizer is
+docs/license.md in this repository (the Parsaetak Proprietary License
+v1.1, with the licensing model, trademark notice, third-party
+attribution notices and governance/contact points in one document).
+
+This root LICENSE file is a DISCOVERABILITY POINTER ONLY. It carries no
+independent legal authority, grants no rights, and imposes no terms of
+its own; in any question of interpretation only docs/license.md is
+authoritative. In short, per docs/license.md:
+
+  * All first-party material in this repository - and every artifact
+    built from it - is proprietary software governed by the Parsaetak
+    Proprietary License v1.1 (a developer license: use, study and
+    modification are governed by that document's terms).
+  * The repository is public so the engineering can be read, studied
+    and improved around the globe; public availability is NOT an
+    license to reuse, redistribute, or build upon the material except
+    as docs/license.md explicitly allows.
+  * "SHEYTAN" and "SHEYTAN Music Visualizer" are trademarks of their
+    owner; see the trademark notice in docs/license.md.
+
+Full legal text: docs/license.md
