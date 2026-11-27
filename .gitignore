@@ -18,3 +18,16 @@ ci-parts/
 # never committed - a bare .syso would be linked into every platform).
 cmd/app-gogui/resource.syso
 __pycache__/
+
+# Cross-compile outputs (go build with GOOS=windows writes *.exe to cwd)
+/*.exe
+
+# Full-tree go build outputs (go build ./... writes main-package
+# binaries named after their package directory into the cwd)
+/app-wails
+/app-gogui
+/sheytan-music-visualizer
+/ci-log-collector
+/cisanitize
+/timedrun
+/civalidate

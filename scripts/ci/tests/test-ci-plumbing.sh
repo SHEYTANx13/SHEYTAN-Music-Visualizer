@@ -569,27 +569,48 @@ fi
   : > env.txt
   # missing required env -> fail-closed rc 2
   env -i PATH="$PATH" python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m2/manifest.json >m2.out 2>&1; echo $? > m2.rc
-  # invalid result value -> rc 2
-  RUN_ID=1 RUN_ATTEMPT=1 COMMIT_SHA=bf50c8e5f6b1866c64a274f610fc3f7a6359d289 REF=refs/heads/main \
+  # Run 45678113841 conclusion-vocabulary contract: the OBSERVED hosted
+  # value "abandoned" (needs.build-macos.result; runner lost mid-job) is
+  # recorded verbatim, and an unrecognized garbage value ("green") is
+  # classified failure + result_raw instead of destroying the manifest —
+  # the collector must always get a manifest so the consolidated report
+  # is always produced. The manifest must EXIST after this fixture.
+  RUN_ID=45678113841 RUN_ATTEMPT=1 COMMIT_SHA=bf50c8e5f6b1866c64a274f610fc3f7a6359d289 REF=refs/heads/main \
   EVENT=push REPO=r/x RUNNER_OS_LABEL=Linux STARTED_AT='' \
-  RESULT_PREFLIGHT=green RESULT_WINDOWS=success RESULT_LINUX=success RESULT_CODEQL=success \
+  RESULT_PREFLIGHT=green RESULT_WINDOWS=success RESULT_LINUX=success RESULT_MACOS=abandoned RESULT_ANDROID=skipped \
   DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=success DOWNLOAD_LINUX=success \
-  DOWNLOAD_CODEQL_GO=success DOWNLOAD_CODEQL_ACTIONS=success \
+  DOWNLOAD_MACOS=success DOWNLOAD_ANDROID=success \
   python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m3/manifest.json >m3.out 2>&1; echo $? > m3.rc
-  # bad SHA -> rc 2
+  # Verify the recorded conclusions (run 45678113841 contract) while the
+  # subshell is still active; the outer condition stays heredoc-free.
+  python3 - "$T" > m3verify.out 2>&1 <<'PYM3'
+import json, sys, os
+doc = json.load(open(os.path.join(sys.argv[1], "m3/manifest.json")))
+jobs = {j["name"]: j for j in doc["jobs"]}
+assert jobs["build-macos"]["result"] == "abandoned", jobs["build-macos"]
+assert "result_raw" not in jobs["build-macos"], "a known conclusion must not carry result_raw"
+pf = jobs["preflight"]
+assert pf["result"] == "failure" and pf["result_raw"] == "green", pf
+assert "conclusion-vocabulary contract" in pf["result_note"], pf
+assert os.path.getsize(os.path.join(sys.argv[1], "m3/manifest.json")) > 0
+print("M3-OK")
+PYM3
+  echo $? > m3verify.rc
+  # bad SHA -> rc 2 (a repository input defect, not GitHub vocabulary)
   RUN_ID=1 RUN_ATTEMPT=1 COMMIT_SHA=not-a-sha REF=refs/heads/main EVENT=push REPO=r/x \
   RUNNER_OS_LABEL=Linux STARTED_AT='' RESULT_PREFLIGHT=success RESULT_WINDOWS=success \
-  RESULT_LINUX=success RESULT_CODEQL=success DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=success \
-  DOWNLOAD_LINUX=success DOWNLOAD_CODEQL_GO=success DOWNLOAD_CODEQL_ACTIONS=success \
+  RESULT_LINUX=success RESULT_MACOS=success RESULT_ANDROID=success DOWNLOAD_PREFLIGHT=success DOWNLOAD_WINDOWS=success \
+  DOWNLOAD_LINUX=success DOWNLOAD_MACOS=success DOWNLOAD_ANDROID=success \
   python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile caller --out m4/manifest.json >m4.out 2>&1; echo $? > m4.rc
 )
 if [ "$(cat "$T/m2.rc")" = 2 ] && grep -q "RUN_ATTEMPT" "$T/m2.out" \
-   && [ "$(cat "$T/m3.rc")" = 2 ] && grep -q "RESULT_PREFLIGHT='green'" "$T/m3.out" \
+   && [ "$(cat "$T/m3.rc")" = 0 ] && grep -q "M3-OK" "$T/m3verify.out" \
+   && [ "$(cat "$T/m3verify.rc")" = 0 ] \
    && [ "$(cat "$T/m4.rc")" = 2 ] && grep -q "not a 40/64-char" "$T/m4.out" \
-   && [ ! -e "$T/m2/manifest.json" ] && [ ! -e "$T/m3/manifest.json" ] && [ ! -e "$T/m4/manifest.json" ]; then
-  report PASS "H31" "manifest writer fails closed with precise reasons and never leaves a manifest file"
+   && [ ! -e "$T/m2/manifest.json" ] && [ ! -e "$T/m4/manifest.json" ]; then
+  report PASS "H31" "manifest writer: missing env / bad SHA fail closed with precise reasons; run-45678113841 conclusions (abandoned verbatim, garbage as failure+result_raw) always produce a manifest"
 else
-  report FAIL "H31" "manifest writer fail-closed fixtures failed"
+  report FAIL "H31" "manifest writer conclusion-vocabulary fixtures failed"
 fi
 
 # ---------- H33: manifest env parity (run 45455106994 repair) --------------

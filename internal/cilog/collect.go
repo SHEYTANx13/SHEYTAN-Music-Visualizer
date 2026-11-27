@@ -81,6 +81,19 @@ const (
 	ResultFailure   = "failure"
 	ResultCancelled = "cancelled"
 	ResultSkipped   = "skipped"
+	// Run 45678113841 repair: the complete GitHub Actions job-conclusion
+	// vocabulary. "abandoned" was OBSERVED hosted on that run
+	// (needs.build-macos.result: the macos-26 runner was lost mid-job);
+	// the historical four-value whitelist made the manifest writer fail
+	// closed, so the whole diagnostics chain collapsed into the emergency
+	// fallback. These values are recorded verbatim and classified as
+	// required-job failures; "abandoned" additionally names the
+	// runner-lost class in the report.
+	ResultNeutral        = "neutral"
+	ResultTimedOut       = "timed_out"
+	ResultActionRequired = "action_required"
+	ResultStartupFailure = "startup_failure"
+	ResultAbandoned      = "abandoned"
 )
 
 // Overall result values for Result.Overall.
@@ -101,7 +114,9 @@ var (
 // JobSpec declares one expected log-producing job.
 type JobSpec struct {
 	Name string `json:"name"`
-	// Result is one of: success, failure, cancelled, skipped.
+	// Result is one of: success, failure, cancelled, skipped, neutral,
+	// timed_out, action_required, startup_failure, abandoned (the complete
+	// GitHub job-conclusion vocabulary; run 45678113841 repair).
 	Result string `json:"result"`
 	// Artifact is the expected artifact directory name under the parts
 	// root. Empty means the job is expected to contribute no log part.
@@ -290,7 +305,9 @@ var (
 
 func validResult(r string) bool {
 	switch r {
-	case ResultSuccess, ResultFailure, ResultCancelled, ResultSkipped:
+	case ResultSuccess, ResultFailure, ResultCancelled, ResultSkipped,
+		ResultNeutral, ResultTimedOut, ResultActionRequired,
+		ResultStartupFailure, ResultAbandoned:
 		return true
 	}
 	return false
@@ -319,7 +336,7 @@ func Collect(opts Options) (Result, error) {
 			return res, fmt.Errorf("cilog: manifest contains a job with an empty name")
 		}
 		if !validResult(j.Result) {
-			return res, fmt.Errorf("cilog: job %q has invalid result %q (want success|failure|cancelled|skipped)", j.Name, j.Result)
+			return res, fmt.Errorf("cilog: job %q has invalid result %q (want a GitHub job conclusion: success|failure|cancelled|skipped|neutral|timed_out|action_required|startup_failure|abandoned)", j.Name, j.Result)
 		}
 		if j.Artifact != "" {
 			if prev, ok := seenArtifacts[j.Artifact]; ok {
@@ -343,8 +360,13 @@ func Collect(opts Options) (Result, error) {
 		abs := filepath.Join(opts.PartsRoot, j.Artifact)
 		info, err := os.Stat(abs)
 		if err != nil || !info.IsDir() {
-			res.MissingSources = append(res.MissingSources,
-				fmt.Sprintf("%s (expected artifact directory %q under parts root)", j.Name, j.Artifact))
+			if j.Result == ResultAbandoned {
+				res.MissingSources = append(res.MissingSources,
+					fmt.Sprintf("%s (conclusion: abandoned - runner lost mid-job; no log part could be uploaded)", j.Name))
+			} else {
+				res.MissingSources = append(res.MissingSources,
+					fmt.Sprintf("%s (expected artifact directory %q under parts root)", j.Name, j.Artifact))
+			}
 			continue
 		}
 		var jobFiles []logFile
@@ -756,6 +778,8 @@ func deriveFailures(meta RunMeta, apiJobs []JobConclusion) (failed, reconciled [
 			// still counts (the manifest row may be an aggregate).
 		case ResultFailure, ResultCancelled:
 			manifestBad = j.Result
+		case ResultAbandoned:
+			manifestBad = "abandoned (runner lost mid-job)"
 		case ResultSkipped:
 			manifestBad = "skipped (NEVER_STARTED)"
 		default:
@@ -797,7 +821,8 @@ func deriveFailedSteps(meta RunMeta, apiJobs []JobConclusion) []string {
 		}
 		for _, st := range aj.Steps {
 			if st.Conclusion == "failure" || st.Conclusion == "cancelled" ||
-				st.Conclusion == "timed_out" || st.Conclusion == "startup_failure" {
+				st.Conclusion == "timed_out" || st.Conclusion == "startup_failure" ||
+				st.Conclusion == "abandoned" {
 				out = append(out, fmt.Sprintf("%s / step %d %q: %s", declared.Name, st.Number, st.Name, st.Conclusion))
 			}
 		}

@@ -212,6 +212,39 @@ records_linker_test.go):
   for ...", "name: unhandled relocation for ...") are go-linker ERROR
   records.
 
+## Job conclusions are recorded, never rejected (run 45678113841)
+
+Hosted run 45678113841: `build-macos` concluded **"abandoned"** (runner
+lost mid-job on macos-26). The manifest writer's historical
+four-value whitelist (`success|failure|cancelled|skipped`) failed
+closed, the run manifest never existed, the collector refused (rc=2)
+and the emergency fallback published UNVERIFIED coverage — the
+run-42376176493 "manifest MISSING" signature returning through a
+different door: this time the trigger was GitHub's OWN vocabulary, not
+a repo bug.
+
+Contract (enforced at both enforcement points, pinned by fixtures):
+
+1. `scripts/ci/write-manifest.py` records the COMPLETE GitHub
+   job-conclusion vocabulary verbatim: success, failure, cancelled,
+   skipped, neutral, timed_out, action_required, startup_failure,
+   abandoned. An unrecognized value is NEVER fail-closed: it is
+   recorded as `result: "failure"` plus `result_raw`/`result_note`
+   carrying the raw value, so the collector always receives a manifest
+   and the consolidated report is always produced. Fail-closed remains
+   for genuine input defects (missing env, non-numeric run/attempt,
+   malformed SHA) — those are repository bugs.
+2. `internal/cilog` accepts the same vocabulary. A required job whose
+   conclusion is anything but success is a named failure; "abandoned"
+   additionally names the runner-lost class in the failure row and in
+   the missing-log-source classification (a lost runner can never have
+   uploaded a log part). Genuinely invalid values ("green") remain a
+   hard manifest error.
+3. Consequence contract: a runner loss or a red preflight can make the
+   RUN red (honest), but it can no longer blind the diagnostics chain.
+   The next hosted run with any red lane produces a REAL consolidated
+   report naming the failing job and its captured gate evidence.
+
 ## Failed gates are self-describing (run 45532045379)
 
 fail_gate (scripts/build/build-macos.sh) and Fail-Gate

@@ -69,6 +69,23 @@ function renderKV(dl, pairs) {
     }
 }
 
+/* Busy-state helper: one canonical visual + a11y treatment for any
+ * button running a real backend operation. Never fakes completion:
+ * the caller clears it when the API answers (or fails). */
+function setBusy(btn, busy, labelWhileBusy) {
+    if (!btn) return;
+    if (busy) {
+        if (!btn.dataset.originalLabel) btn.dataset.originalLabel = btn.textContent;
+        btn.classList.add("busy");
+        btn.disabled = true;
+        if (labelWhileBusy) btn.textContent = labelWhileBusy;
+    } else {
+        btn.classList.remove("busy");
+        btn.disabled = false;
+        if (btn.dataset.originalLabel) btn.textContent = btn.dataset.originalLabel;
+    }
+}
+
 function formatDuration(nanos) {
     const total = Math.max(0, Math.floor(nanos / 1e9));
     const m = Math.floor(total / 60);
@@ -185,6 +202,7 @@ const state = {
     transport: null,
     build: null,
     library: null,
+    media: null,
 };
 
 /* ------------------------------------------------------------------ */
@@ -352,12 +370,16 @@ function renderIntensityOptions() {
 async function loadPresets() {
     const data = await fetchJSON("/api/presets");
     state.presets = data.presets || [];
+    setText($("templates-note"),
+        "Applying a preset reconfigures the shared visualizer catalog the renderers consume. The live frame preview and user-authored template packs stay native-shell surfaces in this slice; this pane edits nothing silently.");
     const list = $("preset-list");
     if (!list) return;
     clearNode(list);
     for (const p of state.presets) {
         const li = document.createElement("li");
         li.className = "preset-item";
+        const head = document.createElement("div");
+        head.className = "preset-head";
         const name = document.createElement("span");
         name.className = "preset-name";
         name.textContent = String(p.name);
@@ -369,11 +391,37 @@ async function loadPresets() {
         btn.textContent = "Apply";
         btn.dataset.command = "visualizer.preset.apply";
         btn.addEventListener("click", () => runCommand("visualizer.preset.apply", { name: p.name }));
-        li.appendChild(name);
-        li.appendChild(mode);
-        li.appendChild(btn);
+        head.appendChild(name);
+        head.appendChild(mode);
+        head.appendChild(btn);
+        li.appendChild(head);
+        // Real preset parameters, verbatim from the backend catalog:
+        // scalar config values rendered as text, nothing invented.
+        const params = document.createElement("div");
+        params.className = "preset-params";
+        params.textContent = presetParamText(p.config);
+        li.appendChild(params);
         list.appendChild(li);
     }
+}
+
+/* presetParamText renders the real scalar fields of a preset config as
+ * one bounded text line ("key=value" pairs). Objects and arrays are
+ * summarized as "(composed)" so the line never explodes. */
+function presetParamText(config) {
+    if (!config || typeof config !== "object") return "";
+    const parts = [];
+    for (const [k, v] of Object.entries(config)) {
+        if (k === "name") continue;
+        if (v === null || v === undefined) continue;
+        if (typeof v === "object") {
+            parts.push(k + "=(composed)");
+        } else {
+            parts.push(k + "=" + String(v));
+        }
+        if (parts.length >= 6) break;
+    }
+    return parts.join("  ");
 }
 
 async function loadCommands() {
@@ -480,6 +528,8 @@ function wireButtons() {
         glow.addEventListener("change", () =>
             runCommand("theme.reduced-glow.set", { enabled: glow.checked }));
     }
+    const probe = $("network-probe");
+    if (probe) probe.addEventListener("click", () => probeNetwork());
     const retry = $("error-retry");
     if (retry) retry.addEventListener("click", () => loadAll());
 }
@@ -562,17 +612,48 @@ function renderMediaTools(snap) {
 
 async function loadMediaTools() {
     const snap = await fetchJSON("/api/mediatools");
+    state.media = snap;
     renderMediaTools(snap);
+    renderRequirementsMirror(snap);
 }
 
-async function mediaAction(path) {
+/* Requirements pane mirrors the SAME real manager snapshot the
+ * downloads pane consumes (one fetch, one source of truth). */
+function renderRequirementsMirror(snap) {
+    const stateEl = $("req-mediatools-state");
+    if (!stateEl) return;
+    const st = String(snap.state || "unknown");
+    stateEl.textContent = st.replace(/-/g, " ");
+    stateEl.dataset.state = st.replace(/-/g, "_");
+    const rows = [
+        ["Installed", snap.installed ? "yes" : "no"],
+        ["Pinned pack", snap.pack && snap.pack.version ? String(snap.pack.version) : (snap.pack ? "pinned" : "unknown")],
+        ["Pinned size", snap.pack && snap.pack.sizeBytes ? fmtBytes(Number(snap.pack.sizeBytes)) : "unknown"],
+    ];
+    if (snap.state === "downloading" && Number(snap.totalBytes) > 0) {
+        rows.push(["Progress", fmtBytes(Number(snap.downloadedBytes)) + " / " + fmtBytes(Number(snap.totalBytes))]);
+    }
+    renderKV($("req-mediatools-kv"), rows);
+    setText($("req-mediatools-detail"), snap.lastError ? "error: " + snap.lastError : (snap.detail || ""));
+}
+
+async function mediaAction(path, btn, busyLabel) {
+    setBusy(btn, true, busyLabel);
     try {
         const snap = await fetchJSON(path, { method: "POST" });
+        state.media = snap;
         renderMediaTools(snap);
+        renderRequirementsMirror(snap);
         setStatus("media tools: " + (snap.state || "updated"));
     } catch (err) {
         showAPIError(err.message);
         setStatus("media tools action failed: " + err.message);
+    } finally {
+        setBusy(btn, false);
+        // The manager state owns the real button availability; refresh
+        // the disabled states from the snapshot instead of leaving the
+        // busy-reset guesses in place.
+        if (state.media) renderMediaTools(state.media);
     }
 }
 
@@ -580,9 +661,9 @@ function wireMediaTools() {
     const check = $("mediatools-check");
     const install = $("mediatools-install");
     const cancel = $("mediatools-cancel");
-    if (check) check.addEventListener("click", () => mediaAction("/api/mediatools/check"));
-    if (install) install.addEventListener("click", () => mediaAction("/api/mediatools/install"));
-    if (cancel) cancel.addEventListener("click", () => mediaAction("/api/mediatools/cancel"));
+    if (check) check.addEventListener("click", () => mediaAction("/api/mediatools/check", check, "Checking..."));
+    if (install) install.addEventListener("click", () => mediaAction("/api/mediatools/install", install, "Starting..."));
+    if (cancel) cancel.addEventListener("click", () => mediaAction("/api/mediatools/cancel", cancel, "Cancelling..."));
 }
 
 /* ------------------------------------------------------------------ */
@@ -634,14 +715,136 @@ function wireDragScroll() {
 }
 
 /* ------------------------------------------------------------------ */
+/* System profile: REAL machine snapshot (run 45678113841)             */
+/*                                                                     */
+/* Data comes from sysprofile via /api/system: OS, CPU, memory, power, */
+/* audio and renderer facts with explicit provenance. Unknown facts    */
+/* arrive as "unknown (reason)" text — nothing is guessed here.        */
+/* ------------------------------------------------------------------ */
+
+function factText(f) {
+    if (!f || typeof f !== "object") return String(f);
+    if (f.value !== undefined && f.value !== "") return String(f.value);
+    if (f.state === "failed") return "failed: " + (f.reason || "no reason given");
+    return f.reason ? "unknown (" + f.reason + ")" : "unknown";
+}
+
+function quantityText(q) {
+    if (!q || typeof q !== "object") return String(q);
+    if (q.value !== undefined && q.value !== 0) return String(q.value);
+    return q.reason ? "unknown (" + q.reason + ")" : "unknown";
+}
+
+async function loadSystem() {
+    const p = await fetchJSON("/api/system");
+    renderKV($("system-kv"), [
+        ["OS", factText(p.os && p.os.family) + " " + factText(p.os && p.os.version) + " (" + factText(p.os && p.os.arch) + ")"],
+        ["CPU", factText(p.cpu && p.cpu.model)],
+        ["Logical CPUs", quantityText(p.cpu && p.cpu.logicalCPUs)],
+        ["Parallelism", quantityText(p.cpu && p.cpu.effectiveParallelism)],
+        ["SIMD features", factText(p.cpu && p.cpu.features && p.cpu.features.present) ],
+        ["Memory total", p.memory && p.memory.totalBytes ? quantityText(p.memory.totalBytes) + " bytes" : "unknown"],
+        ["Memory available", p.memory && p.memory.availableBytes ? quantityText(p.memory.availableBytes) + " bytes" : "unknown"],
+        ["Power", factText(p.power && p.power.state)],
+        ["Audio backend", factText(p.audio && p.audio.backend)],
+        ["Renderer decision", (p.render && p.render.decision) || "unknown"],
+        ["Renderer verified", p.render && p.render.verified ? "yes (frames executed and validated)" : "no (evidence only)"],
+    ]);
+    setText($("system-note"),
+        "Collected " + (p.collectedAt ? new Date(p.collectedAt).toLocaleString() : "at an unknown time")
+        + " by " + (p.collector || "unknown collector") + ". Facts unknown to this build state their exact reason instead of a guess.");
+}
+
+/* ------------------------------------------------------------------ */
+/* Network & security: immutable policy + user-triggered probe          */
+/*                                                                     */
+/* The policy block is served from the Go origin authority (ghreq).     */
+/* The probe NEVER runs automatically: it fires only when the user      */
+/* clicks the test button, is bounded by a hard backend timeout,        */
+/* targets only the allowlisted origin and sends no credentials.        */
+/* ------------------------------------------------------------------ */
+
+async function loadNetwork() {
+    const status = await fetchJSON("/api/network");
+    const pol = status.policy || {};
+    renderKV($("network-policy-kv"), [
+        ["Transport security", pol.httpsOnly ? "HTTPS only" : "not enforced"],
+        ["Allowed hosts", (pol.allowedHosts || []).join(", ") || "(none)"],
+        ["Redirect limit", String(pol.maxRedirects) + " hops, same policy"],
+        ["Credentials sent", pol.credentialsSent ? "YES" : "never"],
+        ["Private addresses", pol.privateAddrsBlocked || "blocked"],
+        ["Downloads", (pol.digestVerified ? "digest verified" : "digest unknown")
+            + ", " + (pol.sizeBoundsApply ? "size bounded" : "unbounded")],
+        ["Auto probe", pol.autoProbeEnabled ? "enabled" : "disabled (user-triggered only)"],
+    ]);
+    const chip = $("network-probe-state");
+    if (chip) {
+        chip.textContent = (status.probeStatus || "never-probed").replace(/-/g, " ");
+        chip.dataset.state = String(status.probeStatus || "never-probed");
+    }
+    renderProbeResult(status.lastProbe);
+    setText($("network-note"),
+        "Every outbound request is HTTPS-only against the allowlisted hosts above; redirect hops follow the same policy and credentials are never forwarded. The connection test runs only when you ask for it.");
+}
+
+function renderProbeResult(probe) {
+    const chip = $("network-probe-state");
+    if (!probe) {
+        renderKV($("network-probe-kv"), []);
+        return;
+    }
+    if (chip) {
+        chip.textContent = probe.reachable ? "reachable" : "unreachable";
+        chip.dataset.state = probe.reachable ? "reachable" : "unreachable";
+    }
+    const rows = [
+        ["Outcome", probe.reachable ? "origin reachable" : "origin unreachable"],
+        ["Checked", probe.checkedAt ? new Date(probe.checkedAt).toLocaleTimeString() : "unknown"],
+    ];
+    if (probe.httpStatus) rows.push(["HTTP status", String(probe.httpStatus)]);
+    if (probe.latencyMs) rows.push(["Latency", probe.latencyMs + " ms"]);
+    if (probe.error) rows.push(["Detail", probe.error]);
+    renderKV($("network-probe-kv"), rows);
+}
+
+async function probeNetwork() {
+    const btn = $("network-probe");
+    setBusy(btn, true, "Testing...");
+    try {
+        const status = await fetchJSON("/api/network/probe", { method: "POST" });
+        const chip = $("network-probe-state");
+        if (chip) {
+            chip.textContent = (status.probeStatus || "probed").replace(/-/g, " ");
+            chip.dataset.state = String(status.probeStatus || "probed");
+        }
+        renderProbeResult(status.lastProbe);
+        if (status.lastProbe && status.lastProbe.reachable) {
+            setStatus("connection test: origin reachable");
+        } else {
+            setStatus("connection test: origin unreachable (" + (status.lastProbe && status.lastProbe.error ? status.lastProbe.error : "no detail") + ")");
+        }
+    } catch (err) {
+        showAPIError(err.message);
+        setStatus("connection test failed: " + err.message);
+    } finally {
+        setBusy(btn, false);
+        await loadNetwork();
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Full load + polling                                                 */
 /* ------------------------------------------------------------------ */
 
 async function loadAll() {
+    showBootSkeletons();
     try {
+        setStatus("loading design tokens...");
         await applyTokens();
+        setStatus("loading workspace catalog...");
         await loadDestinations();
         renderDescriptions(state.destinations);
+        setStatus("loading surfaces...");
         await Promise.all([
             loadBuildInfo(),
             loadTransport(),
@@ -651,13 +854,39 @@ async function loadAll() {
             loadPresets(),
             loadCommands(),
             loadDiagnostics(),
+            loadSystem(),
+            loadNetwork(),
             loadMediaTools(),
         ]);
+        hideBootSkeletons();
         markAPIHealthy();
         setStatus("all surfaces refreshed");
     } catch (err) {
+        hideBootSkeletons();
         showAPIError(err.message);
     }
+}
+
+/* Boot skeletons: bounded shimmer placeholders shown only while the
+ * first load is in flight. They are LOADING states (never fake data):
+ * they disappear the moment real data lands or the error banner shows. */
+function showBootSkeletons() {
+    for (const pane of document.querySelectorAll(".pane")) {
+        if (pane.querySelector(".boot-skeleton")) continue;
+        const sk = document.createElement("div");
+        sk.className = "boot-skeleton";
+        sk.setAttribute("aria-hidden", "true");
+        for (let i = 0; i < 4; i++) {
+            const line = document.createElement("div");
+            line.className = "skeleton-line";
+            sk.appendChild(line);
+        }
+        pane.prepend(sk);
+    }
+}
+
+function hideBootSkeletons() {
+    for (const sk of document.querySelectorAll(".boot-skeleton")) sk.remove();
 }
 
 /* The 2 s timer refreshes ONLY the transport snapshot, per the slice

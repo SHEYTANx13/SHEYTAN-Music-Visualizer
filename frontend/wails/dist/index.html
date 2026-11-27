@@ -96,6 +96,7 @@
             <h2>Templates</h2>
             <p class="pane-desc" id="templates-desc"></p>
             <ul id="preset-list" class="preset-list"></ul>
+            <p class="note" id="templates-note"></p>
         </section>
 
         <section id="pane-library" class="pane" data-dest="library" hidden>
@@ -121,10 +122,14 @@
         <section id="pane-requirements" class="pane" data-dest="requirements" hidden>
             <h2>Requirements</h2>
             <p class="pane-desc" id="requirements-desc"></p>
-            <div class="empty-state">
-                Local media-tool (FFmpeg/FFprobe) status is managed by the
-                native shell in this vertical slice; the mediatools.install
-                and mediatools.open commands are not wired to the web layer.
+            <div class="card download-card">
+                <div class="download-head">
+                    <h3>Local media tools (FFmpeg / FFprobe)</h3>
+                    <span id="req-mediatools-state" class="download-state" role="status" aria-live="polite">unknown</span>
+                </div>
+                <dl class="kv" id="req-mediatools-kv"></dl>
+                <p class="note" id="req-mediatools-detail"></p>
+                <p class="note">Full install lifecycle lives in the Downloads pane; this card mirrors the same real manager state.</p>
             </div>
         </section>
 
@@ -187,6 +192,21 @@
             <fieldset class="settings-group">
                 <legend>Renderer preference (read-only evidence)</legend>
                 <p class="note" id="renderer-pref-note"></p>
+            </fieldset>
+            <fieldset class="settings-group">
+                <legend>System profile (this machine, real snapshot)</legend>
+                <dl id="system-kv" class="kv"></dl>
+                <p class="note" id="system-note"></p>
+            </fieldset>
+            <fieldset class="settings-group">
+                <legend>Network &amp; security</legend>
+                <dl id="network-policy-kv" class="kv"></dl>
+                <div class="probe-row">
+                    <button type="button" id="network-probe" class="btn">Test connection now</button>
+                    <span id="network-probe-state" class="status-chip" role="status" aria-live="polite">never probed</span>
+                </div>
+                <dl id="network-probe-kv" class="kv"></dl>
+                <p class="note" id="network-note"></p>
             </fieldset>
         </section>
 

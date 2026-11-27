@@ -173,6 +173,12 @@ type SheytanService struct {
 	mediaMu   sync.Mutex
 	mediaOnce sync.Once
 	media     *mediatools.Manager
+
+	// system owns the system-profile cache and the last user-requested
+	// network probe (service_system.go, run 45678113841). Instance
+	// state, never package globals, so tests and shells stay isolated.
+	systemOnce sync.Once
+	system     *systemState
 }
 
 // NewService builds the facade over the given studio. A nil studio is
@@ -787,6 +793,22 @@ func NewAssetHandler(svc *SheytanService) http.Handler {
 	api.HandleFunc("POST /api/mediatools/cancel", func(w http.ResponseWriter, _ *http.Request) {
 		svc.CancelMediaToolsInstall()
 		writeJSON(w, http.StatusOK, svc.GetMediaToolsStatus())
+	})
+
+	// System profile + secure network status (run 45678113841): the
+	// REAL machine snapshot and the immutable origin/security policy.
+	// The probe is USER-TRIGGERED only (POST) and bounded; nothing
+	// here probes automatically or on a timer.
+	get("/api/system", func(w http.ResponseWriter, _ *http.Request) error {
+		writeJSON(w, http.StatusOK, svc.GetSystemProfile())
+		return nil
+	})
+	get("/api/network", func(w http.ResponseWriter, _ *http.Request) error {
+		writeJSON(w, http.StatusOK, svc.GetNetworkStatus())
+		return nil
+	})
+	api.HandleFunc("POST /api/network/probe", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, svc.ProbeNetwork())
 	})
 
 	// Unknown /api paths are an explicit 404 JSON error, never an

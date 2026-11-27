@@ -9,9 +9,23 @@ and the step left a ZERO-BYTE manifest behind. The collector's
 hard error class "invalid/missing manifest") and the emergency fallback
 reported "MANIFEST MISSING OR EMPTY" with environment-derived job results.
 
-Contract (run-42376176493 repair phase 5):
+Contract (run-42376176493 repair phase 5; conclusion vocabulary extended
+for run 45678113841):
   * All context arrives via environment variables — never via shell string
     interpolation into JSON, never via heredocs.
+  * Hosted run 45678113841 repair: GitHub can emit job conclusions outside
+    the historical four-value whitelist — that run's build-macos concluded
+    "abandoned" (runner lost mid-job), the writer failed closed, the run
+    manifest never existed, the collector refused (rc=2) and the emergency
+    fallback published UNVERIFIED coverage (the run-42376176493 signature
+    class returned through a different door). The writer now records the
+    complete GitHub conclusion vocabulary verbatim and maps any future
+    unrecognized value to "failure" + result_raw/result_note instead of
+    destroying the manifest: the collector always runs, the consolidated
+    report is always produced, and a required job that did not succeed is
+    always red. Fail-closed remains for genuine input defects (missing env,
+    non-numeric ids, malformed SHA) — those are repository bugs, not
+    GitHub vocabulary evolution.
   * JSON is produced with the Python standard library `json` module only.
   * The manifest is written to a temporary file in the SAME directory,
     fsynced, re-read, parsed, schema-checked (required keys/types, result
@@ -39,7 +53,23 @@ import re
 import sys
 import tempfile
 
-VALID_RESULTS = ("success", "failure", "cancelled", "skipped")
+# Run 45678113841 repair: the complete GitHub Actions job-conclusion
+# vocabulary. "abandoned" was OBSERVED hosted (needs.build-macos.result on
+# run 45678113841: the macos-26 runner was lost mid-job); the rest are the
+# documented workflow-syntax conclusions. Step outcomes (download steps)
+# can additionally be "success"/"failure"/"cancelled"/"skipped" only, so
+# the outcome tuple stays conservative.
+VALID_RESULTS = (
+    "success",
+    "failure",
+    "cancelled",
+    "skipped",
+    "neutral",
+    "timed_out",
+    "action_required",
+    "startup_failure",
+    "abandoned",
+)
 VALID_OUTCOMES = ("success", "failure", "cancelled", "skipped")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$|^[0-9a-f]{64}$")
 
@@ -89,14 +119,26 @@ def env(name: str, required: bool = True) -> str:
     return value
 
 
-def checked_result(name: str) -> str:
+def checked_result(name: str) -> tuple[str, str, str]:
+    """Return (result, result_raw, result_note).
+
+    Known conclusions are recorded verbatim. An unrecognized value is
+    NEVER fail-closed (run 45678113841 class): it is recorded as
+    result="failure" (a required job that did not succeed is red) with
+    the raw value and a note kept verbatim, so the evidence chain
+    (manifest -> collector -> consolidated report) always survives GitHub
+    conclusion-vocabulary evolution. An EMPTY value is still fail-closed
+    (env() raises): an absent conclusion means the workflow wiring broke.
+    """
     value = env(name)
-    if value not in VALID_RESULTS:
-        raise ManifestError(
-            f"{name}={value!r} is not a workflow job conclusion "
-            f"(want one of {', '.join(VALID_RESULTS)})"
-        )
-    return value
+    if value in VALID_RESULTS:
+        return value, "", ""
+    return (
+        "failure",
+        value,
+        "unrecognized workflow conclusion recorded verbatim and classified "
+        "as failure (run 45678113841 conclusion-vocabulary contract)",
+    )
 
 
 def checked_outcome(name: str) -> str:
@@ -107,6 +149,15 @@ def checked_outcome(name: str) -> str:
             f"(want one of {', '.join(VALID_OUTCOMES)})"
         )
     return value
+
+
+def _raw_fields(raws: dict, notes: dict, name: str) -> dict:
+    """Emit result_raw/result_note ONLY for unrecognized conclusions, so
+    the manifest stays byte-stable for the known vocabulary (the summary
+    and the collector never see empty noise fields)."""
+    if not raws.get(name):
+        return {}
+    return {"result_raw": raws[name], "result_note": notes[name]}
 
 
 def build_caller_manifest() -> dict:
@@ -122,7 +173,10 @@ def build_caller_manifest() -> dict:
     if not run_id.isdigit():
         raise ManifestError(f"RUN_ID={run_id!r} is not numeric")
 
-    results = {name: checked_result(name) for name in REQUIRED_CALLER_RESULTS}
+    checked = {name: checked_result(name) for name in REQUIRED_CALLER_RESULTS}
+    results = {name: value[0] for name, value in checked.items()}
+    raws = {name: value[1] for name, value in checked.items()}
+    notes = {name: value[2] for name, value in checked.items()}
     downloads = {name: checked_outcome(name) for name in REQUIRED_CALLER_DOWNLOADS}
 
     artifacts = {
@@ -172,6 +226,7 @@ def build_caller_manifest() -> dict:
                 "result_basis": "needs.preflight.result (workflow conclusion)",
                 "artifact": artifacts["preflight"],
                 "required": True,
+                **_raw_fields(raws, notes, "RESULT_PREFLIGHT"),
             },
             {
                 "name": "build-windows",
@@ -180,6 +235,7 @@ def build_caller_manifest() -> dict:
                 "result_basis": "needs.build-windows.result (workflow conclusion)",
                 "artifact": artifacts["windows"],
                 "required": True,
+                **_raw_fields(raws, notes, "RESULT_WINDOWS"),
             },
             {
                 "name": "build-linux",
@@ -188,6 +244,7 @@ def build_caller_manifest() -> dict:
                 "result_basis": "needs.build-linux.result (workflow conclusion)",
                 "artifact": artifacts["linux"],
                 "required": True,
+                **_raw_fields(raws, notes, "RESULT_LINUX"),
             },
             {
                 "name": "build-macos",
@@ -195,6 +252,7 @@ def build_caller_manifest() -> dict:
                 "result": results["RESULT_MACOS"],
                 "result_basis": "needs.build-macos.result (workflow conclusion)",
                 "artifact": artifacts["macos"],
+                **_raw_fields(raws, notes, "RESULT_MACOS"),
                 # Required: macOS is a desktop parity target. The job's
                 # gate contract is a documented reduced subset of the
                 # Linux contract; not-yet-ported parity gates are
@@ -207,6 +265,7 @@ def build_caller_manifest() -> dict:
                 "result": results["RESULT_ANDROID"],
                 "result_basis": "needs.build-android.result (workflow conclusion)",
                 "artifact": artifacts["android"],
+                **_raw_fields(raws, notes, "RESULT_ANDROID"),
                 # REQUIRED product target: a real arm64 APK is built,
                 # validated and published through the workflow-wide
                 # publisher. Emulator runtime evidence remains honestly

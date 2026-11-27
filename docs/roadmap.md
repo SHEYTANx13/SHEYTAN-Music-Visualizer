@@ -30,8 +30,12 @@ restrained. Black dominates; red is the accent. Identity tokens live in
   coordination, the deterministic frame timeline, render scheduling,
   configuration, diagnostics and export orchestration. First-party engines
   are Go-only and local.
-- **Fyne** owns the native desktop UI only — never the media renderer or
-  export-frame renderer.
+- **Presentation shells** own the desktop UI only — never the media
+  renderer or export-frame renderer. The native shell is Go-Gui
+  (`ui/gogui`, goffi profile) and the web-technology shell is Wails v3
+  (`internal/transport/wails`, `cmd/app-wails`); both consume the same
+  toolkit-free core contracts. Fyne is retired by the enforced
+  `scripts/ci/check-no-fyne.sh` gate (run 44462492262 migration).
 - **Local storage** owns project metadata, presets, thumbnails and user
   settings; source media is referenced, not copied unnecessarily.
 - **Audio, graphics and video backend integrations sit behind narrow Go
@@ -264,3 +268,23 @@ performance), and two measured output-identical optimizations (DSP
 allocations −98%, render bars −18.7% — see
 `docs/performance-baseline.md`). Hosted verification of this source
 update remains NOT RUN (no push permitted).
+
+## Update session (2026-11-27, run 45678113841 repair)
+
+DELIVERED locally (hosted CI remains NOT RUN for the candidate — no push
+was authorized; the same honesty boundary as every prior session):
+
+- Conclusion-vocabulary repair for the hosted diagnostics chain: the
+  run-45678113841 `build-macos` "abandoned" conclusion can no longer
+  blind the collector (see `docs/CI-DIAGNOSTICS.md`, "Job conclusions
+  are recorded, never rejected").
+- Real system-profile and secure-network surfaces in the Wails web
+  shell (`/api/system`, `/api/network`, user-triggered bounded probe).
+- Honest state repairs (downloads catalog row, requirements pane,
+  templates pane real parameters) and staged loading/boot skeletons.
+- PLANNED (not delivered here): user-authored custom visualizer
+  template packs for 3D/world scenes — the web slice states this
+  boundary verbatim and the native shell owns live editing; a full
+  authoring pipeline needs new studio persistence, native-shell parity
+  and content-integrity gates before any DELIVERED claim.
+

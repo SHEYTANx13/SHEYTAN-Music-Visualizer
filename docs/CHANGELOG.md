@@ -1,5 +1,62 @@
 # Changelog
 
+## Run 45678113841 repair — conclusion-vocabulary collapse (manifest writer + collector), full system-profile and secure-network surfaces, honest requirements/templates panes, staged loading and animations (2026-11-27)
+
+- **collect-logs RED (manifest MISSING, collector rc=2, emergency
+  fallback, UNVERIFIED coverage) — ROOT CAUSE FOUND AND FIXED**: hosted
+  run 45678113841's `build-macos` job concluded **"abandoned"** (the
+  macos-26 runner was lost mid-job). `scripts/ci/write-manifest.py`
+  whitelisted only success/failure/cancelled/skipped, so the writer
+  failed closed, the run manifest never existed, the collector refused
+  (rc=2, "the manifest step did not create it" — the run-42376176493
+  signature through a different door), and the emergency fallback
+  published environment-derived rows with UNVERIFIED coverage. Fixed at
+  BOTH enforcement points with the complete GitHub conclusion
+  vocabulary (success, failure, cancelled, skipped, neutral, timed_out,
+  action_required, startup_failure, **abandoned**): the writer records
+  known conclusions verbatim and maps any FUTURE unrecognized value to
+  failure + result_raw/result_note (never destroys the manifest), and
+  `internal/cilog` accepts the same vocabulary, names the abandoned
+  class ("runner lost mid-job") in failure/missing-source records, and
+  keeps genuinely invalid values ("green") as hard manifest errors.
+  Contract fixtures: `collect_conclusion_test.go` (abandoned named and
+  red, extended vocabulary accepted, garbage rejected,
+  deriveFailures naming) and the reworked H30/H31 plumbing fixtures
+  (abandoned verbatim, garbage as failure+result_raw, manifest ALWAYS
+  produced).
+- **System information surface**: the facade now serves the REAL
+  sysprofile snapshot (`/api/system`, `GetSystemProfile`, 30 s TTL
+  cache, instance-scoped state): OS family/version/arch, CPU model,
+  logical CPUs, effective parallelism, SIMD features, physical memory,
+  power state, audio backend facts and the active renderer evidence
+  verbatim — every fact with explicit provenance, unknowns stated with
+  their exact reason. Settings pane renders it (System profile card).
+- **Secure network status surface**: `/api/network` serves the
+  immutable origin/security policy from the ghreq authority
+  (HTTPS-only, allowlisted hosts, bounded redirects, credentials never
+  sent, SSRF-guarded dial, digest-verified size-bounded downloads) and
+  the last USER-TRIGGERED probe outcome. The probe
+  (`ghreq.Probe`, `POST /api/network/probe`) is bounded (6 s), targets
+  only the pinned allowlisted origin, sends no credentials, treats an
+  HTML error page behind HTTP 200 as NOT healthy, and never runs
+  automatically. Fixtures: `probe_test.go` (policy classes, honest
+  unreachable, HTML guard, 500, context cancel) +
+  `service_system_test.go` (real snapshot + TTL, immutable policy,
+  never-probed default, honest probe outcomes, route wiring).
+- **Honest state repairs**: the destination catalog no longer claims
+  Downloads is "not implemented in this build" (the real download
+  manager has been wired since run 45532045379); the Requirements pane
+  now mirrors the SAME real mediatools snapshot instead of a stale
+  "not wired" note; the Templates pane renders each preset's REAL
+  config parameters and states the customization boundary explicitly.
+- **Loading mechanisms and animations**: staged boot status
+  (tokens -> catalog -> surfaces), bounded boot skeletons (shimmer,
+  removed when real data lands or the error banner shows), and busy
+  states with spinners on every real backend action (media tools
+  check/install/cancel, connection test). Both animations degrade to
+  static under prefers-reduced-motion and the reduced-motion
+  preference.
+
 ## Run 45532045379 repair — Windows go-test logging-test env leak, macOS canonical Go link profile, invisible-diagnostics parser gap, self-describing gate failures, adaptive web-shell platform layer, download size/status surface, action bumps (2026-11-25)
 
 - **build-windows go-test RED — ROOT CAUSE FOUND AND FIXED**: the gate

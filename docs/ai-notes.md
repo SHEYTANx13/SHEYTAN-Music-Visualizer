@@ -1268,3 +1268,57 @@ Key engineering facts established this session (full detail in
   here); validate-apk/apksigner and emulator evidence stay
   UNAVAILABLE-by-contract; the hosted rerun is the confirmatory
   evidence for the android + preflight lanes.
+
+## Session 2026-11-27: run 45678113841 repair + system/network surfaces
+
+- HOSTED RUN ANALYZED: build.yml #14 (45678113841) on main @ 3d38f53
+  (the run-45532045379 repair, pushed) concluded FAILURE with 4
+  diagnostics: collector rc=2 -> emergency fallback (UNVERIFIED),
+  preflight conclusion failure, build-macos conclusion ABANDONED,
+  manifest MISSING (run-42376176493 signature class).
+- ROOT CAUSE (reproduced byte-exact): GitHub emitted
+  needs.build-macos.result = "abandoned" (macos-26 runner lost
+  mid-job); the manifest writer whitelist (success|failure|cancelled|
+  skipped) failed closed -> no manifest -> collector refused rc=2 ->
+  fallback. Reproduced with the committed pre-fix writer + the exact
+  hosted inputs (rc=2, no manifest).
+- REPAIR: full GitHub conclusion vocabulary recorded verbatim at BOTH
+  enforcement points (write-manifest.py: known values verbatim,
+  unrecognized -> failure + result_raw/result_note, NEVER fail-closed
+  on GitHub vocabulary; internal/cilog: same set accepted, abandoned
+  named "runner lost mid-job" in failures + missing-source rows,
+  garbage still hard-errors). Fixtures: collect_conclusion_test.go
+  (4 tests) + reworked H30/H31 plumbing + probe/roof tests.
+- PREFLIGHT FAILURE: every locally-runnable preflight gate PASSES on
+  this tree (docs-consistency 5/5, expression-syntax,
+  verdict-expression, sanitizer-portable, py_compile, no-fyne,
+  record-gate-result self-test, build-linux --mode preflight). The
+  hosted-only steps (setup-uv, pinned zizmor 1.32.0 online audit,
+  actionlint download) remain the honest boundary; the repaired chain
+  will NAME the failing step on the next hosted run via the preflight
+  log part.
+- SURFACES: /api/system (REAL sysprofile snapshot, 30s TTL, instance
+  state) + /api/network (immutable ghreq origin policy) +
+  POST /api/network/probe (user-triggered, 6s bounded, allowlisted
+  origin only, no credentials, HTML-error-page guard, honest
+  outcomes). ghreq.Probe + probe_test.go (7 tests); facade +
+  service_system_test.go (5 tests). Settings pane renders both;
+  requirements pane mirrors the REAL mediatools snapshot; templates
+  pane renders real preset parameters; staged boot + skeletons +
+  busy-spinners (reduced-motion safe).
+- VERIFICATION: gofmt clean; tidy/-diff/verify clean; build+vet green;
+  full suite 42 packages ok / 0 FAIL; race green on cilog/ghreq/wails;
+  --version + --self-check PASS; plumbing PASS=21 FAIL=0 NOT_RUN=3;
+  docs-consistency 5/5; YAML parse 9+4 jobs; cross-compiles green
+  (windows pure + windows goffi_static + darwin arm64 purego);
+  node --check OK; HTML well-formed.
+- DELIVERY: local-only branch repair/run-45678113841, 1 commit on top
+  of main @ 3d38f53; no push/PR/tag/release (not authorized). Source
+  ZIP excludes generated binaries (incl. the 20 MB app-wails binary my
+  own full-tree build had swept into the commit - removed, .gitignore
+  guards added for every cmd/* build output).
+- BOUNDARIES: hosted CI on the candidate NOT RUN (no push authorized);
+  probe on the real internet NOT exercised from tests (stubbed);
+  physical touch/GPU hardware UNAVAILABLE by contract; user-authored
+  3D template packs remain PLANNED (stated verbatim in the templates
+  pane, roadmap and note).
