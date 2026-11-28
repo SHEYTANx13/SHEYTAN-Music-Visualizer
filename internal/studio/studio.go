@@ -298,6 +298,16 @@ func (s *Studio) DNA() *songdna.DNA {
 	return s.dna
 }
 
+// UserCustomized reports whether the user has manually customized the
+// visualizer configuration since import. When false, the derived Song
+// DNA artistic defaults are applied to the live configuration (see
+// runAnalysisJob); when true, the user's choices take precedence.
+func (s *Studio) UserCustomized() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.userCustomized
+}
+
 // WorldPlan returns the per-track premade music-video world plan
 // (nil when the v3 analysis is unavailable, e.g. legacy-only fallback).
 // The plan is deterministic for the loaded track: same fingerprint,

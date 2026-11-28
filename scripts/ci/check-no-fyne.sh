@@ -14,6 +14,11 @@
 # Historical mentions inside comments, changelogs and evidence notes
 # are allowed (history stays history); this gate checks IMPORTS,
 # MODULE DEPENDENCIES and the production directory, not prose.
+# Repair/run-46033044814: the retired-UI guard now covers BOTH removed
+# toolkits — Fyne (run 44462492262) and the Go-Gui desktop shell
+# (ui/gogui + cmd/app-gogui, removed when cmd/app-wails became the only
+# desktop UI). The gomobile Android carrier (cmd/app-android) is the
+# one sanctioned remaining native entry.
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +28,16 @@ fail=0
 
 if [ -d ui/fyne ]; then
   echo "FAIL: ui/fyne exists; the Fyne production UI must be removed after verified parity"
+  fail=1
+fi
+
+if [ -d ui/gogui ]; then
+  echo "FAIL: ui/gogui exists; the Go-Gui desktop shell was removed (the desktop product is cmd/app-wails)"
+  fail=1
+fi
+
+if [ -d cmd/app-gogui ]; then
+  echo "FAIL: cmd/app-gogui exists; the Go-Gui desktop shell was removed (the Android carrier is cmd/app-android)"
   fail=1
 fi
 
@@ -41,6 +56,14 @@ if grep -q 'fyne' go.sum 2>/dev/null; then
   echo "FAIL: go.sum still references Fyne"
   fail=1
 fi
+if grep -q 'go-gui' go.mod 2>/dev/null; then
+  echo "FAIL: go.mod still references the go-gui module"
+  fail=1
+fi
+if grep -q 'go-gui' go.sum 2>/dev/null; then
+  echo "FAIL: go.sum still references the go-gui module"
+  fail=1
+fi
 
 # The CLI authority must not open windows: importing a shell package is
 # a second production UI by stealth.
@@ -53,4 +76,4 @@ if [ "$fail" -ne 0 ]; then
   echo "check-no-fyne: FAIL"
   exit 1
 fi
-echo "check-no-fyne: PASS (no Fyne production UI, imports, or module dependencies)"
+echo "check-no-fyne: PASS (no Fyne or Go-Gui production UI, imports, or module dependencies)"

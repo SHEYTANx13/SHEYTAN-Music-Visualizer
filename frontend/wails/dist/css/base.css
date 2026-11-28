@@ -1,0 +1,132 @@
+/* SHEYTAN Music Visualizer web shell - base: reset, brand decoration, accessibility. */
+/* Split from the single-shell stylesheet (repair/run-46033044814):
+   one file per UI element, imported in cascade order by index.html. */
+
+/*
+ * sheytan.css — SHEYTAN Music Visualizer BETA web shell theme.
+ *
+ * The canonical values live in tokens.json (byte-identical to
+ * design/tokens.json); main.js injects them as CSS custom properties.
+ * The values below are the same identity constants as static fallbacks
+ * so the shell stays readable before tokens load or when the API is
+ * unreachable. They are fallbacks only, never a second authority.
+ */
+
+:root {
+    /* surfaces */
+    --c-surface-obsidian: #080808;
+    --c-surface-deepCharcoal: #111111;
+    --c-surface-volcanic: #190909;
+    /* accents */
+    --c-accent-darkBlood: #9F0B18;
+    --c-accent-infernalRed: #D51D2A;
+    --c-accent-emberHighlight: #FF453A;
+    --c-accent-hotEmber: #FF7043;
+    /* secondary */
+    --c-secondary-antiqueGold: #B98A3E;
+    /* text */
+    --c-text-primary: #F2EEEE;
+    --c-text-secondary: #A9A0A0;
+    /* line */
+    --c-line-divider: #342020;
+    /* status */
+    --c-status-success: #4CAF6E;
+    --c-status-warning: #D9A441;
+    --c-status-error: #E6402F;
+    --c-status-info: #A9A0A0;
+    /* motion */
+    --motion-fast: 120ms;
+    --motion-base: 200ms;
+    --motion-slow: 320ms;
+    --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+    /* focus ring */
+    --focus-ring-color: #FF453A;
+    --focus-ring-width: 2px;
+    --focus-ring-offset: 2px;
+    /* radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    /* intensity-driven decoration (seeded from tokens by main.js) */
+    --decoration-opacity: 0.1;
+    --glow-strength: 0.35;
+    /* breakpoints (from tokens by main.js) */
+    --bp-tablet: 600px;
+    --bp-desktop: 960px;
+    --bp-wide: 1680px;
+
+    color-scheme: dark;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    min-height: 100%;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    background:
+        radial-gradient(
+            circle at 50% 0%,
+            rgba(159, 11, 24, calc(0.16 * var(--decoration-opacity) * 4)) 0%,
+            transparent 55%
+        ),
+        var(--c-surface-obsidian);
+    color: var(--c-text-primary);
+    font: 14px/1.5 system-ui, "Noto Sans", "Segoe UI", Roboto, sans-serif;
+}
+
+/* Decoration is a low-opacity backdrop only; it never obscures text or
+ * controls (tokens.json decoration contract). */
+body.reduced-glow {
+    background:
+        radial-gradient(
+            circle at 50% 0%,
+            rgba(159, 11, 24, 0.02) 0%,
+            transparent 55%
+        ),
+        var(--c-surface-obsidian);
+}
+
+/* ------------------------------------------------------------------ */
+/* Accessibility                                                       */
+/* ------------------------------------------------------------------ */
+
+:focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring-color);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+body.reduced-motion *,
+body.reduced-motion *::before,
+body.reduced-motion *::after {
+    transition-duration: 0.01ms !important;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}

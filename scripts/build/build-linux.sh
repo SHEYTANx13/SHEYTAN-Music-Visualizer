@@ -228,11 +228,14 @@ if [ "$MODE" = "desktop" ]; then
   # ("toolkit-free authority"), so the gate failed with "application
   # exited before its window became viewable". The GUI shell is built
   # here under the SAME canonical tags and smoke-tested below.
+  # Repair/run-46033044814: the desktop product shell is the Wails v3
+  # web shell (cmd/app-wails); the Go-Gui shell was removed. It builds
+  # under the SAME canonical tags plus the purego web-shell profile.
   GUI_EXE_OK=0
-  if CI_TOOL_CONTEXT="gate:build-gogui-shell" ci_capture "$JOB" build-gogui-shell go build -trimpath $GO_TAGS "${LDFLAGS[@]+"${LDFLAGS[@]}"}" -o bin/app-gogui ./cmd/app-gogui; then
+  if CI_TOOL_CONTEXT="gate:build-wails-shell" ci_capture "$JOB" build-wails-shell go build -trimpath $GO_TAGS -tags "purego,sheytan_nogpu" "${LDFLAGS[@]+"${LDFLAGS[@]}"}" -o bin/app-wails ./cmd/app-wails; then
     GUI_EXE_OK=1
   else
-    fail_gate build-gogui-shell
+    fail_gate build-wails-shell
   fi
 
   if [ "$EXE_OK" -eq 1 ]; then
@@ -249,13 +252,13 @@ if [ "$MODE" = "desktop" ]; then
   # item 2.6: keep the CLI self-check a separate non-GUI test; the GUI
   # shell's renderer-frame self-check is the GPU/CPU evidence source).
   if [ "$GUI_EXE_OK" -eq 1 ]; then
-    CI_TOOL_CONTEXT="runtime:--version (gui shell)" ci_capture "$JOB" run-gogui-version ./bin/app-gogui --version ||
-      fail_gate run-gogui-version
-    CI_TOOL_CONTEXT="runtime:--self-check (gui shell)" ci_capture "$JOB" run-gogui-self-check env SHEYTAN_LOG_DIR="$(pwd)/ci-logs/app-logs" ./bin/app-gogui --self-check ||
-      fail_gate run-gogui-self-check
+    CI_TOOL_CONTEXT="runtime:--version (wails shell)" ci_capture "$JOB" run-wails-version ./bin/app-wails --version ||
+      fail_gate run-wails-version
+    CI_TOOL_CONTEXT="runtime:--build-info-json (wails shell)" ci_capture "$JOB" run-wails-build-info ./bin/app-wails --build-info-json ||
+      fail_gate run-wails-build-info
   else
-    skip_gate run-gogui-version "gui shell build failed"
-    skip_gate run-gogui-self-check "gui shell build failed"
+    skip_gate run-wails-version "wails shell build failed"
+    skip_gate run-wails-build-info "wails shell build failed"
   fi
 
   # Package-status evidence note (run 43712071111): the record is
@@ -311,18 +314,18 @@ if [ "$MODE" = "desktop" ]; then
   mkdir -p "$STAGE_APP/tools/ffmpeg/bin" "$STAGE_APP/data"
   # RUN 45297707372 SHIP-THE-SHELL REPAIR: the Linux package used to
   # ship ONLY the CLI authority (which never opens a window). The
-  # product desktop executable is the native Go-Gui shell (app-gogui);
+  # product desktop executable is the Wails web shell (app-wails);
   # it is now staged FIRST as the primary executable, with the shell
   # icon and the freedesktop launcher entry beside it (local hicolor
   # + application dirs so a portable install can register them).
   if [ "$GUI_EXE_OK" -eq 1 ]; then
-    install -m 0755 bin/app-gogui "$STAGE_APP/app-gogui"
+    install -m 0755 bin/app-wails "$STAGE_APP/app-wails"
     install -m 0644 assets/icon/icon.png "$STAGE_APP/icon.png"
     mkdir -p "$STAGE_APP/share/applications" "$STAGE_APP/share/icons/hicolor/512x512/apps"
     install -m 0644 packaging/linux/sheytan-music-visualizer.desktop "$STAGE_APP/share/applications/sheytan-music-visualizer.desktop"
     install -m 0644 assets/icon/icon.png "$STAGE_APP/share/icons/hicolor/512x512/apps/sheytan-music-visualizer.png"
   else
-    note "BLOCKED: gate stage-portable (the product desktop shell app-gogui was not built; refusing to stage a CLI-only package)"
+    note "BLOCKED: gate stage-portable (the product desktop shell app-wails was not built; refusing to stage a CLI-only package)"
     fail_gate stage-portable
   fi
   if [ "$EXE_OK" -eq 1 ]; then
@@ -354,8 +357,8 @@ if [ "$MODE" = "desktop" ]; then
         set -euo pipefail
         # RUN 45297707372 ship-the-shell: the product desktop shell is a
         # REQUIRED package content, beside the CLI authority.
-        test -s "SHEYTAN-Music-Visualizer-linux-x64/app-gogui" || { echo "ERROR: staged product shell app-gogui missing"; exit 1; }
-        test -x "SHEYTAN-Music-Visualizer-linux-x64/app-gogui" || { echo "ERROR: staged product shell not executable"; exit 1; }
+        test -s "SHEYTAN-Music-Visualizer-linux-x64/app-wails" || { echo "ERROR: staged product shell app-wails missing"; exit 1; }
+        test -x "SHEYTAN-Music-Visualizer-linux-x64/app-wails" || { echo "ERROR: staged product shell not executable"; exit 1; }
         test -s "SHEYTAN-Music-Visualizer-linux-x64/icon.png" || { echo "ERROR: staged shell icon missing"; exit 1; }
         test -s "SHEYTAN-Music-Visualizer-linux-x64/share/applications/sheytan-music-visualizer.desktop" || { echo "ERROR: staged launcher entry missing"; exit 1; }
         test -s "SHEYTAN-Music-Visualizer-linux-x64/sheytan-music-visualizer" || { echo "ERROR: staged executable missing"; exit 1; }
@@ -750,7 +753,7 @@ CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race
   #
   # PREREQUISITE GUARD (run 42598929646 defect E repair; target
   # corrected by run 44648357437 item 2.6): the smoke launches the REAL
-  # GUI shell (./bin/app-gogui). When the GUI-shell build failed, the
+  # GUI shell (./bin/app-wails). When the shell build failed, the
   # gate is recorded BLOCKED with the exact reason — it must NEVER
   # attempt to execute a nonexistent binary (that produced the
   # misleading "No such file or directory" launch failure), and it must
@@ -829,7 +832,7 @@ CI_TOOL_CONTEXT="gate:go-test-race" ci_capture "$JOB" go-test-race go test -race
       #    signal; map state must reach IsViewable to pass. A live process
       #    without a viewable window FAILS — including the
       #    run-42376176493 case where the XID existed but stayed IsUnMapped.
-      ALSA_CONFIG_PATH="$PWD/$ALSA_NULL_CONF" SHEYTAN_LOG_DIR="$(pwd)/$SMOKE_DIR/app-logs" ./bin/app-gogui >"$SMOKE_DIR/app.log" 2>&1 &
+      ALSA_CONFIG_PATH="$PWD/$ALSA_NULL_CONF" SHEYTAN_LOG_DIR="$(pwd)/$SMOKE_DIR/app-logs" ./bin/app-wails >"$SMOKE_DIR/app.log" 2>&1 &
       AP=$!
       echo "app_pid=$AP"
       WINDOW_MAPPED=0

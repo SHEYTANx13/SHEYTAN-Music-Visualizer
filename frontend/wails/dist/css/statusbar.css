@@ -1,0 +1,26 @@
+/* Status strip. */
+/* Split from the single-shell stylesheet (repair/run-46033044814):
+   one file per UI element, imported in cascade order by index.html. */
+
+/* ------------------------------------------------------------------ */
+/* Status strip                                                        */
+/* ------------------------------------------------------------------ */
+
+.statusstrip {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--c-line-divider);
+    background: var(--c-surface-deepCharcoal);
+    color: var(--c-text-secondary);
+    font-size: 12px;
+}
+
+.status-spacer {
+    flex: 1;
+}
+
+.status-footer {
+    color: var(--c-text-secondary);
+}

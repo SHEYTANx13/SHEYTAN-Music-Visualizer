@@ -1168,3 +1168,30 @@ claims are historical; the current contract is the run-42939743766 entry below) 
 - Hosted GitHub Actions evidence for this source update is pending a
   user-triggered run on the delivered commit (no push was made by the
   repair session).
+
+
+## 2026-11-28 — repair/run-46033044814 (local-only candidate)
+
+- Diagnostics chain evidence: runs 46033044814 (build.yml) and
+  46033044805 (codeql.yml) analyzed line by line; every record carried
+  into the consolidated deliverable log. The hosted manifest/zizmor
+  step-level evidence remained unread (API rate limit boundary); both
+  failures are recorded verbatim as the honest boundary.
+- Go-Gui retirement: `ui/gogui` and the desktop `cmd/app-gogui` shell
+  removed; `go.mod`/`go.sum` no longer reference go-gui; the gomobile
+  Android carrier moved to `cmd/app-android` (x/mobile glue only);
+  `scripts/ci/check-no-fyne.sh` now guards BOTH retired toolkits.
+- Product packaging lanes switch the desktop executable to the Wails
+  v3 web shell (`cmd/app-wails`, purego + sheytan_nogpu profile) in
+  `scripts/build/build-{linux,macos,windows}` and build.yml.
+- Web shell redesign: `frontend/wails/dist` is now one HTML document,
+  fourteen vanilla ES modules under `js/` (one file per element) and
+  eleven per-element stylesheets under `css/` — the monolithic
+  `sheytan.css` is removed. Tokens stay byte-identical (guarded test).
+- Product surfaces: `import.audio` and `export.start`/`export.cancel`
+  are dispatched through a native dialog host (`host.go` + Wails v3
+  dialogs); Song DNA is served at `/api/songdna` and export job state
+  at `/api/export`; the Song DNA workspace destination is canonical
+  (twelve destinations now). The DNA pane renders the measured DSP
+  features and the artistic defaults the studio applies to the
+  visualizer config.

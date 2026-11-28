@@ -5,7 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
     <title>SHEYTAN Music Visualizer — BETA (Web Shell)</title>
-    <link rel="stylesheet" href="sheytan.css">
+    <!-- One stylesheet per element (repair/run-46033044814): the cascade
+         order below is the design order - tokens and base first, then
+         top-level chrome, then element surfaces, then responsive and
+         the adaptive platform layer last. -->
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/topbar.css">
+    <link rel="stylesheet" href="css/tabstrip.css">
+    <link rel="stylesheet" href="css/workspace.css">
+    <link rel="stylesheet" href="css/transport.css">
+    <link rel="stylesheet" href="css/controls.css">
+    <link rel="stylesheet" href="css/dna.css">
+    <link rel="stylesheet" href="css/export.css">
+    <link rel="stylesheet" href="css/statusbar.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/adaptive.css">
 </head>
 <body>
     <header id="topbar" class="topbar">
@@ -21,7 +35,7 @@
     </header>
 
     <nav id="tabstrip" class="tabstrip" aria-label="Workspace destinations">
-        <!-- Tab buttons are rendered by main.js from /api/destinations
+        <!-- Tab buttons are rendered by js/tabs.js from /api/destinations
              (the canonical DestinationCatalog, including honest empty
              states for unavailable destinations). -->
     </nav>
@@ -56,15 +70,19 @@
                 </div>
             </div>
             <p class="note">
-                This web shell is a control/status surface. Real-time visual
-                preview lives in the native shell; the renderer evidence above
-                is reported honestly from the backend renderer state machine.
+                Make a music video in three steps: import your music in the
+                Studio, let the measured Song DNA tune the visualizer (see the
+                Song DNA tab), then export the MP4 from the Export tab.
             </p>
         </section>
 
         <section id="pane-studio" class="pane" data-dest="studio" hidden>
             <h2>Studio</h2>
             <p class="pane-desc" id="studio-desc"></p>
+            <div class="studio-import">
+                <button type="button" id="cmd-import" class="btn btn-primary" data-command="import.audio">Import Music</button>
+                <span class="note">Opens the native file dialog (WAV / MP3 / FLAC / Ogg). The file is analyzed by the real DSP pipeline; the derived Song DNA drives the music video.</span>
+            </div>
             <div class="transport">
                 <div class="transport-buttons">
                     <button type="button" id="cmd-play-pause" data-command="transport.play-pause">Play / Pause</button>
@@ -104,19 +122,105 @@
             <p class="pane-desc" id="library-desc"></p>
             <dl id="library-summary" class="kv"></dl>
             <p class="note">
-                Import is a native-shell action in this vertical slice
-                (command import.audio is not wired to the web layer).
+                Import Music in the Studio tab picks a file through the native
+                dialog; the chosen path is consumed inside the Go core and is
+                never exposed to the web layer.
             </p>
+        </section>
+
+        <section id="pane-songdna" class="pane" data-dest="songdna" hidden>
+            <h2>Song DNA</h2>
+            <p class="pane-desc" id="dna-desc"></p>
+            <div class="dna-state-row">
+                <span id="dna-state" class="dna-state" data-state="no-track" role="status" aria-live="polite">no track</span>
+                <span id="dna-track" class="note"></span>
+            </div>
+            <p class="note" id="dna-note"></p>
+            <div id="dna-features" class="dna-hero"></div>
+            <div class="dna-grid">
+                <div class="card">
+                    <h3>Artistic defaults (applied to the music video)</h3>
+                    <dl id="dna-defaults" class="kv"></dl>
+                </div>
+                <div class="card">
+                    <h3>Measured features (real DSP analysis)</h3>
+                    <dl id="dna-measured" class="kv"></dl>
+                </div>
+            </div>
+            <p class="dna-descriptor" id="dna-descriptor"></p>
+            <p class="dna-applied" id="dna-applied"></p>
         </section>
 
         <section id="pane-export" class="pane" data-dest="export" hidden>
             <h2>Export</h2>
             <p class="pane-desc" id="export-desc"></p>
-            <div class="empty-state">
-                Deterministic MP4 export is not wired to this web shell slice:
-                the export.start and export.cancel commands are intentionally
-                unsupported here. Use the native shell for exports.
+            <div class="export-form">
+                <div class="export-field">
+                    <label for="export-width">Resolution</label>
+                    <select id="export-width">
+                        <option value="1280" data-height="720">1280 &times; 720 (HD)</option>
+                        <option value="1920" selected data-height="1080">1920 &times; 1080 (Full HD)</option>
+                        <option value="2560" data-height="1440">2560 &times; 1440 (QHD)</option>
+                        <option value="3840" data-height="2160">3840 &times; 2160 (4K UHD)</option>
+                    </select>
+                </div>
+                <div class="export-field">
+                    <label for="export-height">Height</label>
+                    <select id="export-height">
+                        <option value="720">720</option>
+                        <option value="1080" selected>1080</option>
+                        <option value="1440">1440</option>
+                        <option value="2160">2160</option>
+                    </select>
+                </div>
+                <div class="export-field">
+                    <label for="export-fps">Frame rate</label>
+                    <select id="export-fps">
+                        <option value="24">24 fps</option>
+                        <option value="25">25 fps</option>
+                        <option value="30" selected>30 fps</option>
+                        <option value="50">50 fps</option>
+                        <option value="60">60 fps</option>
+                    </select>
+                </div>
+                <div class="export-field">
+                    <label for="export-codec">Video codec</label>
+                    <select id="export-codec">
+                        <option value="" selected>H.264 (compatibility)</option>
+                        <option value="hevc">HEVC (H.265)</option>
+                    </select>
+                </div>
+                <div class="export-field">
+                    <label for="export-quality">Quality</label>
+                    <select id="export-quality">
+                        <option value="" selected>High (default)</option>
+                        <option value="balanced">Balanced</option>
+                        <option value="compat">Compatibility</option>
+                    </select>
+                </div>
             </div>
+            <div class="export-actions">
+                <button type="button" id="cmd-export-start" class="btn btn-primary">Export Music Video</button>
+                <button type="button" id="cmd-export-cancel" class="btn" disabled>Cancel export</button>
+                <span id="export-state" class="status-chip" data-state="idle" role="status" aria-live="polite">idle</span>
+            </div>
+            <div class="export-progress" id="export-progress" hidden>
+                <div class="export-progress-head">
+                    <span id="export-phase" class="export-phase">phase: rendering</span>
+                    <span id="export-percent" class="export-percent">0%</span>
+                </div>
+                <div class="export-bar" id="export-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div class="export-bar-fill" id="export-bar-fill"></div>
+                </div>
+            </div>
+            <p class="export-result" id="export-result"></p>
+            <p class="export-error" id="export-error" hidden></p>
+            <p class="note">
+                The destination is chosen in the native save dialog. The job
+                runs through the bounded export lane with the real FFmpeg
+                engines; progress and the finished-file metadata above come
+                from the job itself, never synthesized.
+            </p>
         </section>
 
         <section id="pane-requirements" class="pane" data-dest="requirements" hidden>
@@ -129,7 +233,7 @@
                 </div>
                 <dl class="kv" id="req-mediatools-kv"></dl>
                 <p class="note" id="req-mediatools-detail"></p>
-                <p class="note">Full install lifecycle lives in the Downloads pane; this card mirrors the same real manager state.</p>
+                <p class="note">Full install lifecycle lives in the Downloads pane; this card mirrors the SAME real manager state.</p>
             </div>
         </section>
 
@@ -166,7 +270,7 @@
             <p class="pane-desc" id="systemfiles-desc"></p>
             <div class="empty-state">
                 Selected-scope file analysis is a native-shell surface in this
-                vertical slice; the systemfiles.analyze command is not wired
+                slice; the systemfiles.analyze command is not wired
                 to the web layer.
             </div>
         </section>

@@ -1,0 +1,40 @@
+/* Responsive breakpoints (from tokens.json). */
+/* Split from the single-shell stylesheet (repair/run-46033044814):
+   one file per UI element, imported in cascade order by index.html. */
+
+/* ------------------------------------------------------------------ */
+/* Responsive breakpoints (from tokens.json)                           */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 599px) {
+    .workspace {
+        padding: 12px 8px;
+    }
+
+    .topbar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .transport-buttons button {
+        flex: 1 1 40%;
+        min-height: 48px;
+    }
+
+    .tab {
+        min-height: 48px;
+    }
+}
+
+@media (min-width: 600px) and (max-width: 959px) {
+    .transport-buttons button {
+        min-height: 48px;
+    }
+}
+
+@media (min-width: 1680px) {
+    .workspace {
+        padding: 24px;
+    }
+}

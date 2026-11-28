@@ -163,7 +163,7 @@ if ($null -eq $goResolved) {
     $blockedGates = @(
         "toolchain-report", "desktop-env-check", "gofmt-verify",
         "go-mod-tidy-verify", "go-mod-verify", "go-test", "go-vet",
-        "go-build-packages", "build-executable", "build-shell-resource", "build-gogui-shell", "validate-pe-gui", "run-version",
+        "go-build-packages", "build-executable", "build-wails-shell", "run-version",
         "run-self-check", "verify-build-metadata", "stage-portable",
         "verify-package-license", "validate-pe", "create-portable-zip",
         "verify-extracted-package", "forbid-bundled-media-tools",
@@ -389,8 +389,8 @@ $exeOk = $false
 # -H=windowsgui. A user double-clicking that executable saw NOTHING: no
 # window (the CLI opens none by design) and no console (the GUI
 # subsystem has none), so the product appeared dead. The desktop
-# PRODUCT executable is the native Go-Gui shell, cmd/app-gogui:
-#   - bin\app-gogui.exe                THE product executable, GUI
+# PRODUCT executable is the Wails web shell, cmd/app-wails:
+#   - bin\app-wails.exe                THE product executable, web shell
 #                                      subsystem, shell icon + BETA
 #                                      VERSIONINFO resource (windres).
 #   - bin\sheytan-music-visualizer.exe the CLI authority, CONSOLE
@@ -435,11 +435,11 @@ $rc = Capture-Step -Job $job -Step "build-executable" -ToolContext "gate:build-e
 }
 if ($rc -eq 0) { $exeOk = $true } else { Fail-Gate "build-executable" }
 
-# ---- product desktop shell (app-gogui.exe) + Windows icon resource -------
+# ---- product desktop shell (app-wails.exe) + Windows icon resource -------
 # RUN 45297707372: the EXECUTION FILE the user double-clicks must be the
 # native Go-Gui shell AND must carry the SHEYTAN brand icon. windres
 # compiles assets/windows/app.rc (1 ICON assets/icon/icon.ico + the BETA
-# VERSIONINFO block) into cmd/app-gogui/resource.syso; the Go linker
+# VERSIONINFO block) into cmd/app-wails/resource.syso; the Go linker
 # embeds every *.syso in the package directory into the exe. The .syso
 # is generated fresh every build and is gitignored (a bare-name .syso
 # would otherwise be linked into non-Windows targets too).
@@ -452,12 +452,12 @@ $rc = Capture-Step -Job $job -Step "build-shell-resource" -ToolContext "gate:she
         exit 1
     }
     Write-Output ("windres: {0}" -f $windres.Source)
-    & $windres.Source "-I" $repoRoot "-i" (Join-Path $repoRoot "assets\windows\app.rc") "-O" "coff" "-o" (Join-Path $repoRoot "cmd\app-gogui\resource.syso")
+    & $windres.Source "-I" $repoRoot "-i" (Join-Path $repoRoot "assets\windows\app.rc") "-O" "coff" "-o" (Join-Path $repoRoot "cmd\app-wails\resource.syso")
     if ($LASTEXITCODE -ne 0) {
         Write-Output "ERROR: windres failed with exit code $LASTEXITCODE"
         exit $LASTEXITCODE
     }
-    $syso = Get-Item (Join-Path $repoRoot "cmd\app-gogui\resource.syso")
+    $syso = Get-Item (Join-Path $repoRoot "cmd\app-wails\resource.syso")
     if ($syso.Length -le 0) { Write-Output "ERROR: resource.syso is empty"; exit 1 }
     Write-Output ("resource.syso written: {0} bytes" -f $syso.Length)
     # The tracked ICO must be reachable exactly where app.rc points.
@@ -469,7 +469,7 @@ $rc = Capture-Step -Job $job -Step "build-shell-resource" -ToolContext "gate:she
 }
 if ($rc -eq 0) { Write-Output "shell resource gate: OK" } else { Fail-Gate "build-shell-resource" }
 
-$rc = Capture-Step -Job $job -Step "build-gogui-shell" -ToolContext "gate:build-gogui-shell" -GoTags -Command {
+$rc = Capture-Step -Job $job -Step "build-wails-shell" -ToolContext "gate:build-wails-shell" -GoTags -Command {
     $bi = "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
     $args_ = @("build", "-trimpath") + $goTags
     $ld = @("-H=windowsgui")
@@ -481,11 +481,11 @@ $rc = Capture-Step -Job $job -Step "build-gogui-shell" -ToolContext "gate:build-
     if ($env:SHEYTAN_BUILD_DATE)    { $ld += "-X ${bi}.date=$($env:SHEYTAN_BUILD_DATE)" }
     if ($env:SHEYTAN_BUILT_BY)      { $ld += "-X ${bi}.builtBy=$($env:SHEYTAN_BUILT_BY)" }
     $args_ += @("-ldflags", ($ld -join " "))
-    $args_ += @("-o", "bin\app-gogui.exe", "./cmd/app-gogui")
+    $args_ += @("-o", "bin\app-wails.exe", "./cmd/app-wails")
     Write-Output ("GO_ARGV: {0}" -f ($args_ -join " "))
     go @args_
 }
-if ($rc -eq 0) { $shellOk = $true } else { Fail-Gate "build-gogui-shell" }
+if ($rc -eq 0) { $shellOk = $true } else { Fail-Gate "build-wails-shell" }
 
 if ($exeOk) {
     $rc = Capture-Step -Job $job -Step "run-version" -ToolContext "runtime:--version" -Command { & "bin\sheytan-music-visualizer.exe" --version }
@@ -682,7 +682,7 @@ if ($exeOk) {
         New-Item -ItemType Directory -Force -Path $appDir | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $appDir "tools\ffmpeg\bin") | Out-Null
         New-Item -ItemType Directory -Force -Path (Join-Path $appDir "data") | Out-Null
-        # RUN 45297707372 SHIP-THE-SHELL: app-gogui.exe is the PRIMARY
+        # RUN 45297707372 SHIP-THE-SHELL: app-wails.exe is the PRIMARY
         # product executable (the thing users double-click); the CLI
         # stays as the scripting/self-check companion.
         # RUN 45347124889 ROOT CAUSE: this gate body previously read
@@ -699,10 +699,10 @@ if ($exeOk) {
         # parent scope. Gate bodies must reference parent variables
         # never; scripts/ci/tests/test-ci-plumbing.sh asserts the
         # audit below.
-        if (Test-Path -LiteralPath "bin\app-gogui.exe" -PathType Leaf) {
-            Copy-StagedFile -Source "bin\app-gogui.exe" -DestDir $appDir
+        if (Test-Path -LiteralPath "bin\app-wails.exe" -PathType Leaf) {
+            Copy-StagedFile -Source "bin\app-wails.exe" -DestDir $appDir
         } else {
-            Write-Output "ERROR: the product desktop shell (bin/app-gogui.exe) was not found beside the built CLI; refusing to stage a CLI-only package"
+            Write-Output "ERROR: the product desktop shell (bin/app-wails.exe) was not found beside the built CLI; refusing to stage a CLI-only package"
             exit 1
         }
         Copy-StagedFile -Source "assets\icon\icon.png" -DestDir $appDir
@@ -796,13 +796,13 @@ if ($exeOk) {
     if ($rc -ne 0) { Fail-Gate "validate-pe" }
 
     # PRODUCT SHELL PE SUBSYSTEM + ICON RESOURCE GATE (run 45297707372):
-    # bin\app-gogui.exe must be IMAGE_SUBSYSTEM_WINDOWS_GUI (2) AND must
+    # bin\app-wails.exe must be IMAGE_SUBSYSTEM_WINDOWS_GUI (2) AND must
     # carry the embedded icon/VERSIONINFO resource (.rsrc section from
-    # cmd/app-gogui/resource.syso). This is the gate that would have
+    # cmd/app-wails/resource.syso). This is the gate that would have
     # caught the "package shipped a CLI, nothing opens" defect.
     if ($shellOk) {
         $rc = Capture-Step -Job $job -Step "validate-pe-gui" -ToolContext "gate:validate-pe-gui" -Command {
-            $exe = "bin\app-gogui.exe"
+            $exe = "bin\app-wails.exe"
             $bytes = [System.IO.File]::ReadAllBytes($exe)
             if ($bytes.Length -lt 0x100) { Write-Output "ERROR: file too small for a PE ($($bytes.Length) bytes)"; exit 1 }
             if ($bytes[0] -ne 77 -or $bytes[1] -ne 90) { Write-Output "ERROR: not a PE executable (missing MZ header)"; exit 1 }
@@ -857,7 +857,7 @@ if ($exeOk) {
         }
         if ($rc -ne 0) { Fail-Gate "validate-pe-gui" }
     } else {
-        Write-Note "BLOCKED: gate validate-pe-gui (build-gogui-shell failed; no product shell binary to validate)"
+        Write-Note "BLOCKED: gate validate-pe-gui (build-wails-shell failed; no product shell binary to validate)"
         Skip-Gate "validate-pe-gui" "product shell build failed"
     }
 
@@ -966,12 +966,12 @@ if ($exeOk) {
         Expand-Archive -Path $zip -DestinationPath $extractRoot
         $appRoot = Join-Path $extractRoot "SHEYTAN-Music-Visualizer-windows-x64"
         # 1. COMPLETE required-path manifest after extraction.
-        # RUN 45297707372: the product desktop shell (app-gogui.exe) and
+        # RUN 45297707372: the product desktop shell (app-wails.exe) and
         # the shell icon (icon.png) are REQUIRED package contents - a
         # CLI-only package is the exact defect that shipped a product
         # that "did not open".
         $requiredPaths = @(
-            "app-gogui.exe",
+            "app-wails.exe",
             "sheytan-music-visualizer.exe",
             "icon.png",
             "license.md",
@@ -1032,13 +1032,13 @@ if ($exeOk) {
         }
         # 3b. Extracted PRODUCT SHELL: GUI subsystem + embedded resource
         # (run 45297707372 ship-the-shell gate, on the archived bytes).
-        $shellExe = Join-Path $appRoot "app-gogui.exe"
+        $shellExe = Join-Path $appRoot "app-wails.exe"
         $shellBytes = [System.IO.File]::ReadAllBytes($shellExe)
-        if ($shellBytes.Length -lt 0x100) { Write-Output "ERROR: extracted app-gogui.exe too small for a PE"; & $cleanup; exit 1 }
+        if ($shellBytes.Length -lt 0x100) { Write-Output "ERROR: extracted app-wails.exe too small for a PE"; & $cleanup; exit 1 }
         $shellPeOff = [BitConverter]::ToInt32($shellBytes, 0x3C)
         $shellOptOff = $shellPeOff + 4 + 20
         $shellSubsystem = [BitConverter]::ToUInt16($shellBytes, $shellOptOff + 68)
-        Write-Output ("extracted app-gogui.exe PE Optional Header Subsystem: {0} (2 = GUI)" -f $shellSubsystem)
+        Write-Output ("extracted app-wails.exe PE Optional Header Subsystem: {0} (2 = GUI)" -f $shellSubsystem)
         if ($shellSubsystem -ne 2) {
             Write-Output "ERROR: extracted product shell lost the Windows GUI subsystem (must stay -H=windowsgui)"
             & $cleanup; exit 1

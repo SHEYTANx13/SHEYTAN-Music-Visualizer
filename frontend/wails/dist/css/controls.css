@@ -1,0 +1,123 @@
+/* Buttons, presets and settings controls. */
+/* Split from the single-shell stylesheet (repair/run-46033044814):
+   one file per UI element, imported in cascade order by index.html. */
+
+/* ------------------------------------------------------------------ */
+/* Buttons, presets, settings                                          */
+/* ------------------------------------------------------------------ */
+
+button {
+    appearance: none;
+    border: 1px solid var(--c-accent-darkBlood);
+    background: var(--c-surface-volcanic);
+    color: var(--c-text-primary);
+    font: inherit;
+    padding: 6px 14px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    min-height: 32px;
+    transition: background var(--motion-fast) var(--motion-easing-standard);
+}
+
+button:hover:not(:disabled) {
+    background: var(--c-accent-darkBlood);
+}
+
+button:active:not(:disabled) {
+    background: var(--c-accent-infernalRed);
+}
+
+button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.preset-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 8px;
+}
+
+.preset-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--c-surface-deepCharcoal);
+    border: 1px solid var(--c-line-divider);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+}
+
+.preset-name {
+    font-weight: 600;
+}
+
+.preset-mode {
+    color: var(--c-text-secondary);
+    font-size: 12px;
+    flex: 1;
+}
+
+.settings-group {
+    border: 1px solid var(--c-line-divider);
+    border-radius: var(--radius-lg);
+    margin: 0 0 12px;
+    padding: 12px 16px;
+}
+
+.settings-group legend {
+    color: var(--c-accent-emberHighlight);
+    font-weight: 600;
+    padding: 0 6px;
+}
+
+.radio-row,
+.check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0;
+    color: var(--c-text-primary);
+}
+
+.radio-row {
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+input[type="radio"],
+input[type="checkbox"] {
+    accent-color: var(--c-accent-infernalRed);
+    width: 16px;
+    height: 16px;
+}
+
+.selfchecks {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.check-pass {
+    color: var(--c-status-success);
+}
+
+.check-fail {
+    color: var(--c-status-error);
+}
+
+.json-view {
+    margin: 0;
+    padding: 12px;
+    background: var(--c-surface-obsidian);
+    border: 1px solid var(--c-line-divider);
+    border-radius: var(--radius-md);
+    overflow: auto;
+    max-height: 420px;
+    font-size: 12px;
+    color: var(--c-text-secondary);
+    white-space: pre;
+}

@@ -1322,3 +1322,31 @@ Key engineering facts established this session (full detail in
   physical touch/GPU hardware UNAVAILABLE by contract; user-authored
   3D template packs remain PLANNED (stated verbatim in the templates
   pane, roadmap and note).
+
+
+### Session record — repair/run-46033044814 (2026-11-28, linux/amd64 sandbox, go1.27.4)
+
+- Inspected runs 46033044814 (preflight zizmor error + build-macos
+  conclusion failure) and 46033044805 (collect-logs emergency fallback:
+  collector_rc=2, manifest MISSING). Hosted job logs were NOT readable
+  (unauthenticated API rate-limited from this IP; the rate limit reset
+  fell outside the working window) — the step-level root causes for the
+  zizmor nonzero exit and the codeql manifest absence remain
+  HOSTED-EVIDENCE-PENDING, recorded honestly. Offline zizmor 1.32.0 at
+  the gate's exact thresholds (--min-severity low --min-confidence low)
+  is CLEAN on this tree; the only local findings are 6
+  template-injection Informational/Low items (steps.* outputs — below
+  the gate threshold by construction).
+- Removed the Go-Gui desktop shell (ui/gogui, cmd/app-gogui) and all
+  go-gui module references; cmd/app-android is the gomobile carrier.
+- Redesigned the Wails frontend into per-element ES modules + CSS
+  files; wired import.audio/export.start/export.cancel through the new
+  native dialog host; added /api/songdna + /api/export + the Song DNA
+  destination.
+- Verification: gofmt clean, go vet (goffi_static) clean, full test
+  suite green (-count=1), race green on the changed packages, CLI
+  --self-check PASS, check-no-fyne (now also no-gogui) PASS, bash -n +
+  YAML parse + node --check on every module + HTML well-formedness,
+  cross-compiles green (windows amd64 app-wails/app-android, darwin
+  arm64 app-wails, linux app-wails goffi_static+purego). The Android
+  APK itself was NOT built locally (no NDK/gomobile in sandbox).

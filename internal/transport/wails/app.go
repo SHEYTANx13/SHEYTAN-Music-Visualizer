@@ -11,9 +11,11 @@ package wails
 // the window lifecycle lives here. See doc.go for the boundary rules.
 
 import (
-	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
-	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio"
-	"github.com/wailsapp/wails/v3/pkg/application"
+        "fmt"
+
+        "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
+        "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio"
+        "github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // BuildApp creates the single-window Wails application for the web
@@ -23,39 +25,75 @@ import (
 // endpoints. It does NOT call app.Run; the caller owns the blocking
 // run and the studio teardown.
 func BuildApp(st *studio.Studio) *application.App {
-	svc := NewService(st)
+        svc := NewService(st)
 
-	app := application.New(application.Options{
-		Name:        brand.ProductName,
-		Description: "SHEYTAN Music Visualizer BETA — web-technology shell (control/status surface; the web shell does not render the visualizer)",
-		Services: []application.Service{
-			application.NewService(svc),
-		},
-		Assets: application.AssetOptions{
-			Handler: NewAssetHandler(svc),
-		},
-	})
+        app := application.New(application.Options{
+                Name:        brand.ProductName,
+                Description: "SHEYTAN Music Visualizer BETA — web-technology shell (control/status surface; the web shell does not render the visualizer)",
+                Services: []application.Service{
+                        application.NewService(svc),
+                },
+                Assets: application.AssetOptions{
+                        Handler: NewAssetHandler(svc),
+                },
+        })
 
-	// app.quit leaves the web layer with an explicit, window-owned
-	// action instead of process-level privileges.
-	svc.setQuitHandler(func() {
-		if a := application.Get(); a != nil {
-			a.Quit()
-		}
-	})
+        // app.quit leaves the web layer with an explicit, window-owned
+        // action instead of process-level privileges.
+        svc.setQuitHandler(func() {
+                if a := application.Get(); a != nil {
+                        a.Quit()
+                }
+        })
 
-	// Exactly ONE top-level window. The title comes from the brand
-	// authority; the obsidian background avoids a white flash before
-	// the first webview paint.
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Name:             "main",
-		Title:            brand.WindowTitle(),
-		Width:            1280,
-		Height:           800,
-		MinWidth:         960,
-		MinHeight:        600,
-		BackgroundColour: application.NewRGBA(0x08, 0x08, 0x08, 0xFF),
-	})
+        // Native dialog host (host.go): import.audio and export.start ask
+        // the OS for a user-selected path. The path is consumed inside Go
+        // (studio.ImportFile / export.Request); it NEVER crosses into the
+        // web layer. A user cancel arrives as ("", nil) and is reported as
+        // no-change, never as a fake error. Audio filters mirror the real
+        // import surface (WAV/MP3/FLAC/Ogg containers, see internal/audio).
+        svc.setDialogs(HostDialogsFuncs{
+                OpenAudio: func() (string, error) {
+                        a := application.Get()
+                        if a == nil {
+                                return "", fmt.Errorf("application is not running")
+                        }
+                        return a.Dialog.OpenFile().
+                                SetTitle("Import music (WAV / MP3 / FLAC / Ogg)").
+                                CanChooseFiles(true).
+                                AddFilter("Audio files", "*.wav;*.mp3;*.flac;*.ogg;*.oga").
+                                AddFilter("WAV", "*.wav").
+                                AddFilter("MP3", "*.mp3").
+                                AddFilter("FLAC", "*.flac").
+                                AddFilter("Ogg Vorbis", "*.ogg;*.oga").
+                                PromptForSingleSelection()
+                },
+                SaveExport: func(defaultName string) (string, error) {
+                        a := application.Get()
+                        if a == nil {
+                                return "", fmt.Errorf("application is not running")
+                        }
+                        return a.Dialog.SaveFile().
+                                SetMessage("Save music video (MP4)").
+                                SetFilename(defaultName).
+                                CanCreateDirectories(true).
+                                AddFilter("MP4 video", "*.mp4").
+                                PromptForSingleSelection()
+                },
+        })
 
-	return app
+        // Exactly ONE top-level window. The title comes from the brand
+        // authority; the obsidian background avoids a white flash before
+        // the first webview paint.
+        app.Window.NewWithOptions(application.WebviewWindowOptions{
+                Name:             "main",
+                Title:            brand.WindowTitle(),
+                Width:            1280,
+                Height:           800,
+                MinWidth:         960,
+                MinHeight:        600,
+                BackgroundColour: application.NewRGBA(0x08, 0x08, 0x08, 0xFF),
+        })
+
+        return app
 }

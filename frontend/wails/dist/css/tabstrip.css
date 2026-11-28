@@ -1,0 +1,43 @@
+/* Workspace tab strip. */
+/* Split from the single-shell stylesheet (repair/run-46033044814):
+   one file per UI element, imported in cascade order by index.html. */
+
+/* ------------------------------------------------------------------ */
+/* Workspace tab strip                                                 */
+/* ------------------------------------------------------------------ */
+
+.tabstrip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 16px;
+    background: var(--c-surface-volcanic);
+    border-bottom: 1px solid var(--c-line-divider);
+}
+
+.tab {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--c-text-secondary);
+    font: inherit;
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+}
+
+.tab:hover {
+    color: var(--c-text-primary);
+    border-color: var(--c-line-divider);
+}
+
+.tab.active {
+    color: var(--c-text-primary);
+    background: var(--c-surface-deepCharcoal);
+    border-color: var(--c-accent-darkBlood);
+}
+
+.tab-unavailable {
+    font-style: italic;
+    opacity: 0.8;
+}

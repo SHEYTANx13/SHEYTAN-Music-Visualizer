@@ -21,13 +21,14 @@ import "fmt"
 // hardcoded indexes.
 type Destination string
 
-// The eleven canonical workspace destinations.
+// The twelve canonical workspace destinations.
 const (
 	DestHome         Destination = "home"
 	DestStudio       Destination = "studio"
 	DestWorlds       Destination = "worlds"
 	DestTemplates    Destination = "templates"
 	DestLibrary      Destination = "library"
+	DestSongDNA      Destination = "songdna"
 	DestExport       Destination = "export"
 	DestRequirements Destination = "requirements"
 	DestDownloads    Destination = "downloads"
@@ -39,8 +40,8 @@ const (
 // Destinations is the canonical ordered destination set.
 var Destinations = []Destination{
 	DestHome, DestStudio, DestWorlds, DestTemplates, DestLibrary,
-	DestExport, DestRequirements, DestDownloads, DestSystemFiles,
-	DestSettings, DestDiagnostics,
+	DestSongDNA, DestExport, DestRequirements, DestDownloads,
+	DestSystemFiles, DestSettings, DestDiagnostics,
 }
 
 // DestinationInfo describes one destination for shell navigation bars.
@@ -70,17 +71,19 @@ func DestinationCatalog() []DestinationInfo {
 			Description: "Built-in visualizer presets with their real parameters; the rendered frames stay native-shell surfaces."},
 		{ID: DestLibrary, Title: "Library", Icon: "library", Order: 5, Available: true,
 			Description: "Imported songs and project files."},
-		{ID: DestExport, Title: "Export", Icon: "export", Order: 6, Available: true,
+		{ID: DestSongDNA, Title: "Song DNA", Icon: "songdna", Order: 6, Available: true,
+			Description: "The measured per-track music DNA: real DSP features and the artistic defaults it drives."},
+		{ID: DestExport, Title: "Export", Icon: "export", Order: 7, Available: true,
 			Description: "Deterministic offline MP4 export and validation."},
-		{ID: DestRequirements, Title: "Requirements", Icon: "requirements", Order: 7, Available: true,
+		{ID: DestRequirements, Title: "Requirements", Icon: "requirements", Order: 8, Available: true,
 			Description: "Local media-tool requirements status (FFmpeg/FFprobe)."},
-		{ID: DestDownloads, Title: "Downloads", Icon: "downloads", Order: 8, Available: true,
+		{ID: DestDownloads, Title: "Downloads", Icon: "downloads", Order: 9, Available: true,
 			Description: "App-managed FFmpeg/FFprobe engine downloads: real file size, real progress, real status (run 45532045379)."},
-		{ID: DestSystemFiles, Title: "System Files", Icon: "system-files", Order: 9, Available: true,
+		{ID: DestSystemFiles, Title: "System Files", Icon: "system-files", Order: 10, Available: true,
 			Description: "Selected-scope file/folder analysis with least privilege."},
-		{ID: DestSettings, Title: "Settings", Icon: "settings", Order: 10, Available: true,
+		{ID: DestSettings, Title: "Settings", Icon: "settings", Order: 11, Available: true,
 			Description: "Theme intensity, renderer preference, performance mode."},
-		{ID: DestDiagnostics, Title: "Diagnostics", Icon: "diagnostics", Order: 11, Available: true,
+		{ID: DestDiagnostics, Title: "Diagnostics", Icon: "diagnostics", Order: 12, Available: true,
 			Description: "Build identity, data layout, log path, renderer evidence."},
 	}
 }

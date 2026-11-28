@@ -50,13 +50,16 @@ current user prompt.
   project state, no mandatory account, no telemetry. Do not introduce
   Python, Node.js, Electron, React, web UIs, Qt/QML or C++ product
   engines.
-- **go-gui owns the desktop UI** (`ui/gogui` on go-gui v0.99.1) — it
-  must never become the export renderer or media pipeline. Frame-thread
-  ownership: shell control values live on the go-gui frame thread;
-  widgets are rebuilt per frame from them; the only cross-goroutine
-  surfaces are uiState and the preview pacer's publish path. The former
-  Fyne surface was removed after parity and its return is guarded by
-  `scripts/ci/check-no-fyne.sh`.
+- **Wails v3 owns the desktop UI** (`cmd/app-wails` on wails v3.1.0;
+  repair/run-46033044814 retired the Go-Gui desktop shell `ui/gogui` +
+  `cmd/app-gogui` together with the former Fyne surface; both returns
+  are guarded by `scripts/ci/check-no-fyne.sh`). The frontend is
+  vanilla ES modules with one stylesheet per element under
+  `frontend/wails/dist/{js,css}` — no monolithic bundle. The web shell
+  never becomes the export renderer or media pipeline; import/export
+  file selection goes through the native dialog host (`host.go`) and
+  chosen paths never cross into the web layer. The gomobile Android
+  carrier lives in `cmd/app-android`.
 - **GPU acceleration has a proof gate.** Never claim acceleration, never
   fake GPU telemetry, never label CPU output as GPU. Detection ≠
   execution ≠ verification. The wgpu renderer reports

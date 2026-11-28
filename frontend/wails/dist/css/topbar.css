@@ -1,0 +1,83 @@
+/* Top command/title bar. */
+/* Split from the single-shell stylesheet (repair/run-46033044814):
+   one file per UI element, imported in cascade order by index.html. */
+
+/* ------------------------------------------------------------------ */
+/* Top command/title bar                                               */
+/* ------------------------------------------------------------------ */
+
+.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--c-surface-deepCharcoal);
+    border-bottom: 1px solid var(--c-line-divider);
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+}
+
+.brand-mark {
+    font-weight: 600;
+    font-size: 18px;
+    color: var(--c-accent-infernalRed);
+    letter-spacing: 0.02em;
+}
+
+.brand-name {
+    font-weight: 600;
+    font-size: 18px;
+}
+
+.brand-beta {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--c-secondary-antiqueGold);
+    border: 1px solid var(--c-secondary-antiqueGold);
+    border-radius: 999px;
+    padding: 1px 8px;
+}
+
+.topbar-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--c-text-secondary);
+    font-size: 12px;
+}
+
+.api-state {
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--c-line-divider);
+}
+
+.api-state-ok {
+    color: var(--c-status-success);
+    border-color: var(--c-status-success);
+}
+
+.api-state-pending {
+    color: var(--c-status-info);
+}
+
+.api-state-error {
+    color: var(--c-status-error);
+    border-color: var(--c-status-error);
+}
+
+.build-version {
+    max-width: 40ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

@@ -9,8 +9,8 @@ import (
 
 func TestDestinationCatalogComplete(t *testing.T) {
 	cat := DestinationCatalog()
-	if len(cat) != 11 {
-		t.Fatalf("catalog has %d destinations, want 11", len(cat))
+	if len(cat) != 12 {
+		t.Fatalf("catalog has %d destinations, want 12", len(cat))
 	}
 	for i, d := range cat {
 		if d.Order != i+1 {
@@ -121,7 +121,7 @@ func TestDTORoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &back); err != nil {
 		t.Fatalf("unmarshal layout: %v", err)
 	}
-	if back.Version != DTOVersion || len(back.TabOrder) != 11 {
+	if back.Version != DTOVersion || len(back.TabOrder) != 12 {
 		t.Fatalf("layout round trip broken: %+v", back)
 	}
 }
@@ -152,8 +152,9 @@ func TestLayoutStoreRoundTripAndRecovery(t *testing.T) {
 	if err == nil || err != ErrRecovered {
 		t.Fatalf("corrupt recovery err=%v, want ErrRecovered", err)
 	}
-	// v0 migration.
-	if err := writeFile(path, []byte(`{"order":["home","studio","worlds","templates","library","export","requirements","downloads","system-files","settings","diagnostics"]}`)); err != nil {
+	// v0 migration (fixture updated for the twelve-destination set:
+	// songdna is a first-class destination since repair/run-46033044814).
+	if err := writeFile(path, []byte(`{"order":["home","studio","worlds","templates","library","songdna","export","requirements","downloads","system-files","settings","diagnostics"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	mig, err := store.Load()

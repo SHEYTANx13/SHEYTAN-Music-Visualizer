@@ -1,0 +1,103 @@
+/* Export pane: real MP4 export controls and the real export job progress
+   (repair/run-46033044814). Choices are validated by the Go facade before
+   any dialog opens; progress comes from the export job, never synthesized. */
+
+.export-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.export-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.export-field label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--c-text-secondary, #c9c4bd);
+}
+
+.export-field select {
+    appearance: none;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm, 8px);
+    border: 1px solid var(--c-line-soft, #2a2a2e);
+    background: var(--c-surface-deepCharcoal, #141416);
+    color: var(--c-text-primary, #efe9e2);
+    font-size: 14px;
+}
+
+.export-field select:focus-visible {
+    outline: var(--focus-ring-width, 2px) solid var(--focus-ring-color, #e0532f);
+    outline-offset: var(--focus-ring-offset, 2px);
+}
+
+.export-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.export-progress {
+    margin-top: 6px;
+    padding: 14px;
+    border: 1px solid var(--c-line-soft, #2a2a2e);
+    border-radius: var(--radius-md, 12px);
+    background: var(--c-surface-deepCharcoal, #141416);
+}
+
+.export-progress-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.export-phase {
+    font-size: 13px;
+    color: var(--c-text-secondary, #c9c4bd);
+    text-transform: capitalize;
+}
+
+.export-percent {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--c-accent-ember, #e0532f);
+}
+
+.export-bar {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--c-surface-obsidian, #0a0a0b);
+    overflow: hidden;
+}
+
+.export-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--c-accent-blood, #b3261e), var(--c-accent-ember, #e0532f));
+    transition: width var(--motion-normal, 240ms) var(--motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+.export-result {
+    margin-top: 12px;
+    color: var(--c-text-secondary, #c9c4bd);
+    font-size: 13px;
+}
+
+.export-error {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm, 8px);
+    border: 1px solid var(--c-status-error, #e5534b);
+    color: var(--c-status-error, #e5534b);
+    background: rgba(229, 83, 75, 0.08);
+    font-size: 13px;
+}

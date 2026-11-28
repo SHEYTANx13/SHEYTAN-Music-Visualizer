@@ -47,7 +47,7 @@ blocked_gate() { SKIPPED_GATES="$SKIPPED_GATES $1"; printf 'BLOCKED: gate %s (%s
 # cgo_import_dynamic symbols that resolve only under the goffi_static
 # static profile or real external cgo linking), which reproduced
 # locally as "unhandled relocation ... (SDYNIMPORT)" for
-# cmd/app-gogui and the ui/gogui, internal/studio and
+# cmd/app-wails and the internal/studio and
 # internal/transport/wails test binaries. Pinning CGO_ENABLED=1 also
 # excludes the purego/goffi fakecgo duplicate-symbol link error class
 # on CGO-disabled runners.
@@ -95,14 +95,14 @@ else
   # RUN 45297707372 SHIP-THE-SHELL REPAIR: the .app bundle used to carry
   # the CLI authority as CFBundleExecutable - a binary that never opens a
   # window, so double-clicking the app appeared dead. The bundle now
-  # carries the native Go-Gui shell (cmd/app-gogui) as its executable,
+  # carries the Wails web shell (cmd/app-wails) as its executable,
   # with the shell icon (icon.icns from the tracked iconset via
   # iconutil) and the CLI as a companion tool.
   GUI_EXE_OK=0
-  if ci_capture "$JOB" build-gogui-shell go build -trimpath "${GO_TAGS[@]}" "${LDFLAGS[@]}" -o bin/app-gogui ./cmd/app-gogui; then
+  if ci_capture "$JOB" build-wails-shell go build -trimpath "${GO_TAGS[@]}" -tags "purego,sheytan_nogpu" "${LDFLAGS[@]}" -o bin/app-wails ./cmd/app-wails; then
     GUI_EXE_OK=1
   else
-    fail_gate build-gogui-shell
+    fail_gate build-wails-shell
   fi
 
   # Parity gates (go-test-race, export-validation, audio-validation,
@@ -119,7 +119,7 @@ else
       # RUN 45297707372 ship-the-shell: CFBundleExecutable is the native
       # Go-Gui shell (the binary that actually opens the window); the
       # CLI authority ships beside it as the scripting companion.
-      cp bin/app-gogui dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/SHEYTAN-Music-Visualizer
+      cp bin/app-wails dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/SHEYTAN-Music-Visualizer
       cp bin/sheytan-music-visualizer dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/sheytan-music-visualizer-cli
       chmod +x dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/SHEYTAN-Music-Visualizer
       chmod +x dist/SHEYTAN-Music-Visualizer.app/Contents/MacOS/sheytan-music-visualizer-cli

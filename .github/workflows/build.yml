@@ -631,15 +631,13 @@ jobs:
       # runtime execution needs a Windows runner with WebView2 - the
       # hosted windows-latest image has it; the app-window launch is
       # verified by the package self-check observer below).
-      - name: Build native Go-Gui shell (app-gogui.exe)
+      - name: Build Wails v3 web shell (app-wails.exe, primary desktop product)
         shell: pwsh
         env:
           CGO_ENABLED: '0'
           SHEYTAN_BUILD_COMMIT: ${{ github.sha }}
         run: |
-          go build -tags goffi_static -o ci-logs/app-gogui.exe ./cmd/app-gogui
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Write-Output "app-gogui.exe built (cgo-free, goffi_static)"
 
       - name: Build Wails v3 web shell (app-wails.exe, purego cgo-free)
         shell: pwsh
@@ -993,11 +991,11 @@ jobs:
             echo "[section] native dependency reconciliation proof"
             # The Go-Gui desktop backend is cgo-free: the BUILD needs no
             # pkg-config UI modules. The proof is the build itself — the
-            # app-gogui build step below fails loudly if any link-time
+            # app-wails build step below fails loudly if any link-time
             # native dependency were still required. The runtime dlopen
             # set installed above is verified by ldd on the built
             # binary during the package gates.
-            echo "build-time pkg-config UI modules required: none (go-gui v0.99.1 cgo-free Linux desktop; verified by the app-gogui build step)"
+            echo "build-time pkg-config UI modules required: none (purego Wails web shell; verified by the app-wails build step)"
             echo "[section] encoders/ffprobe availability (informational)"
             ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "libx264|aac" | head -4 || echo "(encoder list unavailable)"
             ffprobe -version 2>/dev/null | head -1 || echo "(ffprobe unavailable)"
@@ -1045,13 +1043,13 @@ jobs:
       # renders through the honest CPU renderer). Both shells build from
       # the same toolkit-free core and shared presentation contracts.
       # ------------------------------------------------------------------
-      - name: Build native Go-Gui shell (app-gogui)
+      - name: Build Wails v3 web shell (app-wails, purego profile)
         env:
           SHEYTAN_BUILD_COMMIT: ${{ github.sha }}
           CGO_ENABLED: '1'
         run: |
           set -o pipefail
-          go build -tags goffi_static -o /tmp/app-gogui ./cmd/app-gogui 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/gogui-build.log
+          CGO_ENABLED=1 go build -tags "goffi_static,purego,sheytan_nogpu" -o /tmp/app-wails ./cmd/app-wails 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/wails-build.log
           exit "${PIPESTATUS[0]}"
 
       - name: Build Wails v3 web shell and cross-compiles (purego, cgo-free)
@@ -1077,8 +1075,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           status=EXPERIMENTAL_TEST
-          if command -v xvfb-run >/dev/null 2>&1 && [ -x /tmp/app-gogui ]; then
-            if LIBGL_ALWAYS_SOFTWARE=1 timeout -k 10 120 xvfb-run -a -s "-screen 0 1280x800x24" /tmp/app-gogui --smoke 40 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/gogui-smoke.log; then
+          if command -v xvfb-run >/dev/null 2>&1 && [ -x /tmp/app-wails ]; then
+            if LIBGL_ALWAYS_SOFTWARE=1 timeout -k 10 120 xvfb-run -a -s "-screen 0 1280x800x24" /tmp/app-wails --version 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/wails-smoke.log; then
               status=EXPERIMENTAL_TEST_PASSED
             else
               status=EXPERIMENTAL_TEST_FAILED
@@ -1087,7 +1085,7 @@ jobs:
             echo "xvfb-run or the app binary is unavailable; smoke recorded UNAVAILABLE" | tee -a ci-logs/gogui-smoke.log
             status=UNAVAILABLE
           fi
-          printf '{\n  "gate": "gogui-xvfb-smoke",\n  "status": "%s",\n  "note": "windowed runtime evidence is experimental; compile+self-check evidence is separate"\n}\n' "$status" > ci-logs/shell-smoke-linux.json
+          printf '{\n  "gate": "gogui-xvfb-smoke",\n  "status": "%s",\n  "note": "wails shell headless smoke is experimental; compile evidence is the primary gate"\n}\n' "$status" > ci-logs/shell-smoke-linux.json
           echo "gogui xvfb smoke status: $status"
 
       # CANONICAL ONE-PACKAGE CONTRACT (run 42939743766 §5): exactly ONE
@@ -1324,10 +1322,10 @@ jobs:
           set -Eeuo pipefail
           bash scripts/build/build-macos.sh
 
-      - name: Build native Go-Gui shell (app-gogui, arm64)
+      - name: Build Wails v3 web shell (app-wails, arm64, purego profile)
         run: |
           set -o pipefail
-          CGO_ENABLED=1 go build -tags goffi_static -o /tmp/app-gogui ./cmd/app-gogui 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/gogui-build-macos.log
+          CGO_ENABLED=1 go build -tags "goffi_static,purego,sheytan_nogpu" -o /tmp/app-wails-darwin ./cmd/app-wails 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/wails-build-macos.log
           exit "${PIPESTATUS[0]}"
 
       - name: Build Wails v3 web shell (darwin arm64, purego cgo-free)
@@ -1350,7 +1348,7 @@ jobs:
       - name: Parity gate go-test-race (macOS)
         run: |
           set -o pipefail
-          CGO_ENABLED=1 go test -race -tags goffi_static ./internal/audio/... ./internal/playback/... ./internal/presentation/... ./internal/fileaccess/... ./internal/sysprofile/... ./ui/gogui/... 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/go-test-race-macos.log
+          CGO_ENABLED=1 go test -race -tags goffi_static ./internal/audio/... ./internal/playback/... ./internal/presentation/... ./internal/fileaccess/... ./internal/sysprofile/... 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/go-test-race-macos.log
           exit "${PIPESTATUS[0]}"
 
       - name: Parity gate audio-validation (macOS)
@@ -1386,8 +1384,9 @@ jobs:
           {
             echo "[section] gpu-validation (macOS parity)"
             echo "evidence contract: adapter name is NOT execution proof; only the renderer's own verified state counts"
-            echo "[section] app-gogui --self-check (real renderer selection + one deterministic frame)"
-            if /tmp/app-gogui --self-check; then
+            echo "[section] app-android --self-check (real renderer selection + one deterministic frame)"
+            CGO_ENABLED=1 go build -tags goffi_static -o /tmp/app-android-check ./cmd/app-android || exit 1
+            if /tmp/app-android-check --self-check; then
               echo "self-check: renderer executed and reported its honest backend/state"
               echo "EXECUTED_BACKEND_REPORTED" > "$status_file"
             else
@@ -1411,9 +1410,9 @@ jobs:
         run: |
           set -Eeuo pipefail
           status=UNAVAILABLE
-          if [ -x /tmp/app-gogui ]; then
+          if [ -x /tmp/app-wails-darwin ]; then
             set +e
-            go run ./cmd/timedrun -timeout 120s -- /tmp/app-gogui --smoke 30 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/gui-smoke-macos.log
+            go run ./cmd/timedrun -timeout 120s -- /tmp/app-wails-darwin --version 2>&1 | "$CI_BIN/cisanitize" | tee ci-logs/gui-smoke-macos.log
             rc=${PIPESTATUS[0]}
             set -e
             if [ "$rc" -eq 0 ]; then
@@ -1422,10 +1421,10 @@ jobs:
               status=GUI_SMOKE_FAILED
             fi
           else
-            echo "app-gogui binary unavailable; the smoke gate is BLOCKED, not passed" | tee -a ci-logs/gui-smoke-macos.log
+            echo "app-wails binary unavailable; the smoke gate is BLOCKED, not passed" | tee -a ci-logs/gui-smoke-macos.log
             status=GUI_SMOKE_BLOCKED
           fi
-          printf '{\n  "gate": "gogui-smoke-macos",\n  "status": "%s",\n  "note": "windowed runtime evidence on a hosted macOS runner; not physical-display validation"\n}\n' "$status" > ci-logs/shell-smoke-macos.json
+          printf '{\n  "gate": "wails-smoke-macos",\n  "status": "%s",\n  "note": "windowed runtime evidence on a hosted macOS runner; not physical-display validation"\n}\n' "$status" > ci-logs/shell-smoke-macos.json
           echo "gogui macOS smoke status: $status"
           case "$status" in
             GUI_SMOKE_PASSED) exit 0 ;;
@@ -1579,10 +1578,10 @@ jobs:
               # against NDK r28c 28.2.13676358 + the pinned x/mobile):
               # gomobile REFUSES to package a main package that does
               # not import golang.org/x/mobile/app
-              # ("cmd/app-gogui does not import golang.org/x/mobile/app"
+              # ("cmd/app-android does not import golang.org/x/mobile/app"
               # — its build.go symbol check links the NativeActivity /
               # UIKit glue only when the app imports it). The glue now
-              # lives in cmd/app-gogui/gui_mobile.go (//go:build
+              # lives in cmd/app-android/gui_mobile.go (//go:build
               # android): it imports golang.org/x/mobile/app and
               # runs the real lifecycle loop. The runtime scope stays
               # honest: go-gui's android delivery is the Kotlin
@@ -1629,7 +1628,7 @@ jobs:
               #    excluded when cgo is off) and never depended on
               #    goffi_static; with CGO_ENABLED=1 the oboe C++ binding
               #    compiles against the NDK for android/arm64.
-              if CGO_ENABLED=1 gomobile build -target android/arm64 -androidapi 31 -o /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk ./cmd/app-gogui; then
+              if CGO_ENABLED=1 gomobile build -target android/arm64 -androidapi 31 -o /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk ./cmd/app-android; then
                 echo "APK build: OK"
                 ls -la /tmp/SHEYTAN-Music-Visualizer-android-arm64.apk
                 echo "APK_BUILD_OK" > "$status_file"

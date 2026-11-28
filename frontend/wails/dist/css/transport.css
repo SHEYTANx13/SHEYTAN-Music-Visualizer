@@ -1,0 +1,62 @@
+/* Transport controls. */
+/* Split from the single-shell stylesheet (repair/run-46033044814):
+   one file per UI element, imported in cascade order by index.html. */
+
+/* ------------------------------------------------------------------ */
+/* Transport                                                           */
+/* ------------------------------------------------------------------ */
+
+.transport {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    background: var(--c-surface-deepCharcoal);
+    border: 1px solid var(--c-line-divider);
+    border-radius: var(--radius-lg);
+    padding: 12px 16px;
+    margin-bottom: 12px;
+}
+
+.transport-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.transport-volume {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--c-text-secondary);
+}
+
+.transport-volume input[type="range"] {
+    flex: 1;
+    max-width: 320px;
+    accent-color: var(--c-accent-infernalRed);
+}
+
+.position-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 20px;
+    color: var(--c-text-secondary);
+    font-size: 12px;
+    padding: 0 4px;
+    margin-bottom: 8px;
+}
+
+/* Studio import action (repair/run-46033044814): the Import button and
+   its one-line guidance travel together. */
+.studio-import {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.studio-import .note {
+    flex: 1 1 320px;
+    margin: 0;
+}

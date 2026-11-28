@@ -1,0 +1,100 @@
+/* Song DNA pane: the measured per-track visual identity (repair/run-46033044814).
+   Feature values are REAL DSP measurements served by /api/songdna; the bars
+   render exactly those 0..1 values and never synthesize data. */
+
+.dna-state-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+
+.dna-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border: 1px solid var(--c-line-soft, #2a2a2e);
+    color: var(--c-text-secondary, #c9c4bd);
+    background: var(--c-surface-deepCharcoal, #141416);
+}
+
+.dna-state[data-state="ready"] {
+    border-color: var(--c-accent-ember, #e0532f);
+    color: var(--c-accent-ember, #e0532f);
+}
+
+.dna-state[data-state="pending"],
+.dna-state[data-state="no-track"] {
+    color: var(--c-text-secondary, #c9c4bd);
+}
+
+.dna-hero {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.dna-feature {
+    padding: 12px 14px;
+    border: 1px solid var(--c-line-soft, #2a2a2e);
+    border-radius: var(--radius-md, 12px);
+    background: var(--c-surface-deepCharcoal, #141416);
+}
+
+.dna-feature-name {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--c-text-secondary, #c9c4bd);
+    margin-bottom: 8px;
+}
+
+.dna-feature-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--c-text-primary, #efe9e2);
+    margin-bottom: 8px;
+}
+
+.dna-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--c-surface-obsidian, #0a0a0b);
+    overflow: hidden;
+}
+
+.dna-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--c-accent-ember, #e0532f), var(--c-accent-blood, #b3261e));
+    transition: width var(--motion-normal, 240ms) var(--motion-easing-standard, cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+.dna-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px;
+}
+
+.dna-descriptor {
+    margin-top: 14px;
+    padding: 10px 14px;
+    border-left: 3px solid var(--c-accent-ember, #e0532f);
+    background: var(--c-surface-deepCharcoal, #141416);
+    border-radius: 0 var(--radius-md, 12px) var(--radius-md, 12px) 0;
+    color: var(--c-text-primary, #efe9e2);
+    font-size: 14px;
+}
+
+.dna-applied {
+    margin-top: 10px;
+    color: var(--c-text-secondary, #c9c4bd);
+    font-size: 13px;
+}

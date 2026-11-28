@@ -80,11 +80,8 @@ func (e *FacadeError) Error() string {
 // present in this map and not dispatched by RunCommand are a
 // programming bug caught by the command-catalog test.
 var unsupportedReasons = map[presentation.CommandID]string{
-	presentation.CmdImportAudio:        "audio import needs a native file dialog and filesystem read access; the web layer gets neither",
 	presentation.CmdProjectSave:        "project save writes files; filesystem write APIs are never exposed to the web layer",
 	presentation.CmdProjectOpen:        "project open reads user-selected files; file access is a native-shell action",
-	presentation.CmdExportStart:        "deterministic export owns FFmpeg processes and writes MP4 files; not exposed to the web layer in this slice",
-	presentation.CmdExportCancel:       "no export can be started from the web layer, so there is nothing to cancel here",
 	presentation.CmdRendererSelect:     "renderer selection is a native-shell preference (SHEYTAN_GPU_PREFERENCE / native settings); the web shell reports evidence only",
 	presentation.CmdModeSet:            "visualizer mode editing belongs to the live preview in the native shell; the web shell must not fake a visualization",
 	presentation.CmdPaletteSet:         "palette editing belongs to the live preview in the native shell",
@@ -111,6 +108,7 @@ var unsupportedReasons = map[presentation.CommandID]string{
 // the two views (dispatched + unsupported) are exhaustive over the
 // canonical command set.
 var dispatchedCommands = []presentation.CommandID{
+	presentation.CmdImportAudio,
 	presentation.CmdPlayPause,
 	presentation.CmdStop,
 	presentation.CmdSeekBack,
@@ -120,6 +118,8 @@ var dispatchedCommands = []presentation.CommandID{
 	presentation.CmdIntensitySet,
 	presentation.CmdReducedMotionSet,
 	presentation.CmdReducedGlowSet,
+	presentation.CmdExportStart,
+	presentation.CmdExportCancel,
 	presentation.CmdQuit,
 }
 
@@ -179,6 +179,12 @@ type SheytanService struct {
 	// state, never package globals, so tests and shells stay isolated.
 	systemOnce sync.Once
 	system     *systemState
+
+	// dialogs owns the native dialog capability (host.go): import.audio
+	// and export.start ask the OS for a user-selected path through it.
+	// The path never crosses into the web layer; without a registered
+	// host the commands report an honest typed error instead.
+	dialogs hostDialogs
 }
 
 // NewService builds the facade over the given studio. A nil studio is
@@ -205,6 +211,15 @@ func (s *SheytanService) setQuitHandler(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.quit = fn
+}
+
+// setDialogs wires the native dialog host (host.go). Called once from
+// BuildApp; without it, import.audio and export.start report an honest
+// "no native dialog host" error instead of pretending.
+func (s *SheytanService) setDialogs(d hostDialogs) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dialogs = d
 }
 
 // GetBuildInfo returns the normalized build identity snapshot.
@@ -524,12 +539,20 @@ func (s *SheytanService) GetCommands() CommandCatalog {
 
 // commandArgs is the validated argument shape of RunCommand. Pointer
 // fields distinguish "absent" from "set" so missing required values
-// are rejected instead of silently defaulting.
+// are rejected instead of silently defaulting. Width/Height/FPS and
+// the codec/quality strings back the export.start command (export.NewJob
+// validates them again as the authority - the facade validates EARLY
+// so the web layer always gets a typed error, never a raw dump).
 type commandArgs struct {
-	Name    string   `json:"name"`
-	Seconds *float64 `json:"seconds"`
-	Volume  *float64 `json:"volume"`
-	Enabled *bool    `json:"enabled"`
+	Name          string   `json:"name"`
+	Seconds       *float64 `json:"seconds"`
+	Volume        *float64 `json:"volume"`
+	Enabled       *bool    `json:"enabled"`
+	Width         *int     `json:"width"`
+	Height        *int     `json:"height"`
+	FPS           *int     `json:"fps"`
+	VideoCodec    string   `json:"videoCodec"`
+	QualityPreset string   `json:"qualityPreset"`
 }
 
 // parseCommandArgs decodes the JSON argument object. An empty payload
@@ -546,7 +569,7 @@ func parseCommandArgs(argsJSON string) (commandArgs, error) {
 	if err := dec.Decode(&args); err != nil {
 		return commandArgs{}, &FacadeError{
 			Kind:   KindInvalidArgs,
-			Reason: fmt.Sprintf("args must be a JSON object with keys name/seconds/volume/enabled: %v", err),
+			Reason: fmt.Sprintf("args must be a JSON object with keys name/seconds/volume/enabled/width/height/fps/videoCodec/qualityPreset: %v", err),
 		}
 	}
 	return args, nil
@@ -649,6 +672,12 @@ func (s *SheytanService) RunCommand(id string, argsJSON string) error {
 			return argsError(cmd, "enabled is required (true|false)")
 		}
 		s.SetReducedGlow(*args.Enabled)
+	case presentation.CmdImportAudio:
+		return s.runImportAudio(cmd)
+	case presentation.CmdExportStart:
+		return s.runExportStart(cmd, args)
+	case presentation.CmdExportCancel:
+		return s.runExportCancel(cmd)
 	case presentation.CmdQuit:
 		s.mu.Lock()
 		quit := s.quit
@@ -809,6 +838,18 @@ func NewAssetHandler(svc *SheytanService) http.Handler {
 	})
 	api.HandleFunc("POST /api/network/probe", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, svc.ProbeNetwork())
+	})
+
+	// Song DNA + export status surfaces (repair/run-46033044814): the
+	// real measured DNA of the loaded track and the real export job
+	// state. Both are read-only projections of studio state.
+	get("/api/songdna", func(w http.ResponseWriter, _ *http.Request) error {
+		writeJSON(w, http.StatusOK, svc.GetSongDNA())
+		return nil
+	})
+	get("/api/export", func(w http.ResponseWriter, _ *http.Request) error {
+		writeJSON(w, http.StatusOK, svc.GetExportStatus())
+		return nil
 	})
 
 	// Unknown /api paths are an explicit 404 JSON error, never an

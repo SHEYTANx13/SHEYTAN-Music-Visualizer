@@ -1,0 +1,374 @@
+/* Adaptive UI platform layer: container-driven compositions, scroll, touch, reduced motion. */
+/* Split from the single-shell stylesheet (repair/run-46033044814):
+   one file per UI element, imported in cascade order by index.html. */
+
+/* ================================================================== */
+/* Adaptive UI platform layer (SHEYTAN / PRODUCT ENGINEERING RESEARCH, */
+/* "The Adaptive Wails UI Platform", 25 Nov 2026)                      */
+/*                                                                     */
+/* One shell, many compositions. The workspace container is a CSS      */
+/* container, so components adapt to their PANE, not to the window:    */
+/* a docked pane and a full window get correct compositions from the   */
+/* same rules. Screen classes match the blueprint:                     */
+/*   compact  < 640 | medium 640-1023 | expanded 1024-1439 | wide 1440+*/
+/* ================================================================== */
+
+.workspace-root {
+    container-type: inline-size;
+    min-width: 0;
+}
+
+/* Scroll surfaces: every section scrolls with finger drag AND mouse.
+ * touch-action: pan-y keeps vertical finger scrolling native; overscroll
+ * containment stops a pane scroll from chaining into the document;
+ * momentum scrolling on WebKit for the finger-drag feel. */
+.pane,
+.json-view {
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+}
+
+.pane {
+    max-height: calc(100vh - 132px);
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--c-accent-darkBlood) var(--c-surface-obsidian);
+}
+
+.pane::-webkit-scrollbar {
+    width: 12px;
+}
+
+.pane::-webkit-scrollbar-track {
+    background: var(--c-surface-obsidian);
+}
+
+.pane::-webkit-scrollbar-thumb {
+    background: var(--c-accent-darkBlood);
+    border-radius: 6px;
+    border: 2px solid var(--c-surface-obsidian);
+}
+
+/* Drag-to-scroll affordance: main.js adds .drag-scrolling while a
+ * pointer drag pans the pane (works with fingers, pen and mouse). */
+.drag-scrolling {
+    cursor: grabbing;
+    scroll-behavior: auto;
+    user-select: none;
+}
+
+/* Touch friendliness: pointer-based, not device-guessing. On coarse
+ * pointers every interactive control gets the 44 px minimum target
+ * (WCAG 2.5.5 / blueprint touch contract); on fine pointers the
+ * compact desktop metrics are preserved. */
+@media (pointer: coarse) {
+    .tab,
+    .btn,
+    .transport-buttons button,
+    .radio-row label,
+    .check-row,
+    button {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 10px 14px;
+    }
+
+    .tabstrip {
+        gap: 6px;
+    }
+
+    input[type="checkbox"],
+    input[type="radio"] {
+        width: 22px;
+        height: 22px;
+    }
+
+    /* Larger hands need larger grab bars. */
+    .pane::-webkit-scrollbar-thumb {
+        width: 16px;
+        border: 3px solid var(--c-surface-obsidian);
+    }
+}
+
+/* Screen-class compositions. The workspace is a container, so the
+ * grids below adapt to a docked pane as correctly as to the window. */
+@container (max-width: 639px) {
+    .card-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .transport {
+        flex-wrap: wrap;
+    }
+}
+
+@container (min-width: 640px) and (max-width: 1023px) {
+    .card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@container (min-width: 1024px) and (max-width: 1439px) {
+    .card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@container (min-width: 1440px) {
+    .card-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+/* Reduced motion: no smooth scrolling while the user asked for none. */
+@media (prefers-reduced-motion: reduce) {
+    .drag-scrolling {
+        scroll-behavior: auto;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Downloads pane: real file size + real status (run 45532045379).     */
+/* Data comes from the app-managed mediatools manager via /api/        */
+/* mediatools; the UI never invents progress bytes.                    */
+/* ------------------------------------------------------------------ */
+
+.download-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 640px;
+}
+
+.download-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.download-head h3 {
+    margin: 0;
+    font-size: 15px;
+}
+
+.download-state {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--c-text-secondary);
+    border: 1px solid var(--c-line-divider);
+    border-radius: 999px;
+    padding: 4px 10px;
+    white-space: nowrap;
+}
+
+.download-state[data-state="ready"] {
+    color: var(--c-status-success);
+}
+
+.download-state[data-state="downloading"] {
+    color: var(--c-accent-hotEmber);
+}
+
+.download-state[data-state="failed"],
+.download-state[data-state="repair_needed"] {
+    color: var(--c-status-error);
+}
+
+.download-stage {
+    margin: 0;
+    font-size: 12px;
+    color: var(--c-text-secondary);
+}
+
+.download-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.download-bar {
+    height: 10px;
+    border-radius: 999px;
+    background: var(--c-surface-obsidian);
+    border: 1px solid var(--c-line-divider);
+    overflow: hidden;
+}
+
+.download-fill {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--c-accent-darkBlood), var(--c-accent-infernalRed));
+    transition: width var(--motion-base) var(--motion-easing-standard);
+}
+
+.download-kv {
+    display: flex;
+    gap: 24px;
+    margin: 0;
+    flex-wrap: wrap;
+}
+
+.download-kv dt {
+    font-size: 11px;
+    color: var(--c-text-secondary);
+}
+
+.download-kv dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.download-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.download-actions .btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    border-color: var(--c-accent-infernalRed);
+    background: var(--c-accent-darkBlood);
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--c-accent-infernalRed);
+}
+
+/* ------------------------------------------------------------------ */
+/* System profile + network & security (run 45678113841).              */
+/* Real sysprofile facts and the immutable ghreq origin policy; the    */
+/* probe is user-triggered only.                                       */
+/* ------------------------------------------------------------------ */
+
+.probe-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin: 10px 0;
+}
+
+.status-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 2px 12px;
+    border: 1px solid var(--c-line-soft, var(--c-line, #555));
+    border-radius: 999px;
+    font-size: 12px;
+    color: var(--c-text-secondary);
+    text-transform: lowercase;
+}
+
+.status-chip[data-state="reachable"],
+.status-chip[data-state="probed"] {
+    border-color: var(--c-status-ok, #4caf50);
+    color: var(--c-status-ok, #4caf50);
+}
+
+.status-chip[data-state="unreachable"] {
+    border-color: var(--c-status-error, #e53935);
+    color: var(--c-status-error, #e53935);
+}
+
+.status-chip[data-state="probe-running"] {
+    border-color: var(--c-accent-infernalRed, #c0392b);
+    color: var(--c-accent-infernalRed, #c0392b);
+}
+
+/* ------------------------------------------------------------------ */
+/* Preset template parameters (real config values, text only).         */
+/* ------------------------------------------------------------------ */
+
+.preset-item {
+    border: 1px solid var(--c-line-soft, var(--c-line, #555));
+    border-radius: var(--radius-md, 8px);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+}
+
+.preset-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.preset-head .preset-name {
+    flex: 1 1 auto;
+    font-weight: 600;
+}
+
+.preset-params {
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: var(--c-text-secondary);
+    font-variant-numeric: tabular-nums;
+    word-break: break-word;
+}
+
+/* ------------------------------------------------------------------ */
+/* Loading mechanisms: bounded boot skeletons + busy buttons.          */
+/* Skeletons are LOADING states, never fake data; both animations      */
+/* degrade to static under prefers-reduced-motion and the reduced-     */
+/* motion preference (global rules above).                             */
+/* ------------------------------------------------------------------ */
+
+.boot-skeleton {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.skeleton-line {
+    height: 14px;
+    border-radius: 6px;
+    background: linear-gradient(
+        90deg,
+        var(--c-surface-elevated, #1a1a1a) 25%,
+        var(--c-surface-hover, #242424) 50%,
+        var(--c-surface-elevated, #1a1a1a) 75%
+    );
+    background-size: 200% 100%;
+    animation: sheytan-shimmer 1.4s linear infinite;
+}
+
+.skeleton-line:nth-child(2) { width: 85%; }
+.skeleton-line:nth-child(3) { width: 70%; }
+.skeleton-line:nth-child(4) { width: 55%; }
+
+@keyframes sheytan-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+}
+
+.btn.busy {
+    position: relative;
+    padding-left: 30px;
+    cursor: progress;
+}
+
+.btn.busy::before {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    animation: sheytan-spin 0.8s linear infinite;
+}
+
+@keyframes sheytan-spin {
+    to { transform: rotate(360deg); }
+}

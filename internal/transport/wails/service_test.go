@@ -169,10 +169,12 @@ func TestRunCommandValidationAndDispatch(t *testing.T) {
 	}
 
 	// Known-but-unsupported commands carry the boundary reason.
+	// import.audio and export.start/cancel are DISPATCHED since
+	// repair/run-46033044814 (native dialog host), so they are
+	// intentionally absent from this list.
 	for _, id := range []presentation.CommandID{
-		presentation.CmdImportAudio,
 		presentation.CmdProjectSave,
-		presentation.CmdExportStart,
+		presentation.CmdProjectOpen,
 		presentation.CmdAnalyzePath,
 		presentation.CmdMediaToolsInstall,
 	} {
@@ -180,6 +182,20 @@ func TestRunCommandValidationAndDispatch(t *testing.T) {
 		fe := mustBeFacadeError(t, err, KindUnsupportedCommand)
 		if fe.Reason == "" {
 			t.Errorf("command %s must carry an explicit reason", id)
+		}
+	}
+
+	// Dialog-backed commands without a registered host are honest
+	// REJECTED errors (not unsupported, not fake successes).
+	for _, id := range []presentation.CommandID{
+		presentation.CmdImportAudio,
+		presentation.CmdExportStart,
+		presentation.CmdExportCancel,
+	} {
+		err := svc.RunCommand(string(id), "")
+		fe := mustBeFacadeError(t, err, KindRejected)
+		if fe.Command != id || fe.Reason == "" {
+			t.Errorf("command %s error = %+v, want rejected with a reason", id, fe)
 		}
 	}
 
@@ -389,10 +405,12 @@ func TestGetTokensMatchesDesignRaw(t *testing.T) {
 		t.Error("frontend/wails/dist/tokens.json drifted from design/tokens.json — regenerate the copy")
 	}
 
-	// The embedded asset set is exactly the four served files.
+	// The embedded asset set is exactly the module tree: the entry
+	// document, every per-element JS module, every per-element CSS
+	// file and the token copy (repair/run-46033044814 redesign).
 	handled := dist.HandledAssets()
-	if len(handled) != 4 {
-		t.Fatalf("HandledAssets = %v, want the four embedded files", handled)
+	if len(handled) != 27 {
+		t.Fatalf("HandledAssets = %v, want the 27 embedded files", handled)
 	}
 	for _, name := range handled {
 		rc, err := dist.FS().Open(name)
@@ -411,15 +429,49 @@ func TestGetTokensMatchesDesignRaw(t *testing.T) {
 	if !bytes.Contains(index, []byte("SHEYTAN")) || !bytes.Contains(index, []byte("main.js")) {
 		t.Error("index.html must carry the product identity and the script reference")
 	}
-	script, _ := io.ReadAll(mustOpenDist(t, "main.js"))
-	for _, marker := range []string{"/api/diagnostics", "/api/settings", "/api/transport", "/api/command", "tokens.json"} {
-		if !bytes.Contains(script, []byte(marker)) {
-			t.Errorf("main.js missing required endpoint reference %s", marker)
+	// The endpoint contract lives across the per-element modules now
+	// (repair/run-46033044814): every required endpoint must appear
+	// in at least one embedded module, and every module must be
+	// linked from the tree that index.html boots.
+	var combined []byte
+	for _, name := range []string{"main.js", "js/api.js", "js/boot.js", "js/commands.js",
+		"js/dom.js", "js/drag.js", "js/exportpane.js", "js/loaders.js",
+		"js/mediatools.js", "js/songdna.js", "js/state.js", "js/system.js",
+		"js/tabs.js", "js/tokens.js"} {
+		b, err := io.ReadAll(mustOpenDist(t, name))
+		if err != nil {
+			t.Errorf("embedded module %s unreadable: %v", name, err)
+			continue
+		}
+		combined = append(combined, b...)
+	}
+	for _, marker := range []string{"/api/diagnostics", "/api/settings", "/api/transport", "/api/command", "/api/songdna", "/api/export", "tokens.json"} {
+		if !bytes.Contains(combined, []byte(marker)) {
+			t.Errorf("frontend modules missing required endpoint reference %s", marker)
 		}
 	}
-	css, _ := io.ReadAll(mustOpenDist(t, "sheytan.css"))
-	if !bytes.Contains(css, []byte("--c-surface-obsidian")) || !bytes.Contains(css, []byte("prefers-reduced-motion")) {
-		t.Error("sheytan.css must be tokens-driven and reduced-motion aware")
+	var cssCombined []byte
+	for _, name := range []string{"css/base.css", "css/topbar.css", "css/tabstrip.css",
+		"css/workspace.css", "css/transport.css", "css/controls.css", "css/dna.css",
+		"css/export.css", "css/statusbar.css", "css/responsive.css", "css/adaptive.css"} {
+		b, err := io.ReadAll(mustOpenDist(t, name))
+		if err != nil {
+			t.Errorf("embedded stylesheet %s unreadable: %v", name, err)
+			continue
+		}
+		cssCombined = append(cssCombined, b...)
+	}
+	if !bytes.Contains(cssCombined, []byte("--c-surface-obsidian")) || !bytes.Contains(cssCombined, []byte("prefers-reduced-motion")) {
+		t.Error("the element stylesheets must stay tokens-driven and reduced-motion aware")
+	}
+	// index.html links every element stylesheet (no monolithic css).
+	for _, sheet := range []string{"css/base.css", "css/dna.css", "css/export.css", "css/adaptive.css"} {
+		if !bytes.Contains(index, []byte(sheet)) {
+			t.Errorf("index.html does not link the element stylesheet %s", sheet)
+		}
+	}
+	if bytes.Contains(index, []byte("sheytan.css")) {
+		t.Error("index.html must not reference the removed monolithic sheytan.css")
 	}
 }
 
@@ -543,13 +595,17 @@ func TestAssetMuxFacadeHTTP(t *testing.T) {
 		t.Errorf("bogus command error body = %s (err %v), want kind %q", body, err, KindUnknownCommand)
 	}
 
-	// Unsupported command over HTTP: boundary reason attached.
+	// import.audio is DISPATCHED now (repair/run-46033044814: the Wails
+	// shell is the desktop shell, so import works through the native
+	// dialog host). Without a registered host the command is a typed
+	// REJECTED error (HTTP 409 Conflict per facadeStatus) with the exact
+	// reason - never a fake success.
 	code, body = post(`{"id":"import.audio"}`)
-	if code != http.StatusBadRequest {
-		t.Errorf("POST import.audio = %d, want 400", code)
+	if code != http.StatusConflict {
+		t.Errorf("POST import.audio = %d, want 409", code)
 	}
-	if err := json.Unmarshal(body, &apiErr); err != nil || apiErr.Kind != KindUnsupportedCommand {
-		t.Errorf("import.audio error body = %s (err %v), want kind %q", body, err, KindUnsupportedCommand)
+	if err := json.Unmarshal(body, &apiErr); err != nil || apiErr.Kind != KindRejected {
+		t.Errorf("import.audio error body = %s (err %v), want kind %q", body, err, KindRejected)
 	}
 
 	// Valid command over HTTP: ok:true, and the state change is visible
