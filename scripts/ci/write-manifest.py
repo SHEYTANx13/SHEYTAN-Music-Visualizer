@@ -293,8 +293,19 @@ def build_codeql_manifest() -> dict:
     if not run_id.isdigit():
         raise ManifestError(f"RUN_ID={run_id!r} is not numeric")
 
-    result_go = checked_result("RESULT_ANALYZE_GO")
-    result_actions = checked_result("RESULT_ANALYZE_ACTIONS")
+    # RUN 46121470699 repair: checked_result returns (result, result_raw,
+    # result_note); the profile previously assigned the WHOLE TUPLE to
+    # each job row's "result" field, so the serialized manifest carried
+    # "result": ["success", "", ""] — schema validation failed closed,
+    # the manifest never landed, the collector refused (rc=2) and the
+    # emergency fallback reported UNVERIFIED coverage (the exact hosted
+    # signature of runs 46033044805 and 46121470699). The tuple bug ALSO
+    # forced the aggregate to "failure" even when both analyze jobs
+    # succeeded (tuple != "success" comparisons). Index [0] keeps only
+    # the conclusion; scripts/ci/tests/test-ci-plumbing.sh now executes
+    # BOTH profiles end-to-end so this class can never regress silently.
+    result_go = checked_result("RESULT_ANALYZE_GO")[0]
+    result_actions = checked_result("RESULT_ANALYZE_ACTIONS")[0]
     result_codeql = "success" if (result_go == "success" and result_actions == "success") else "failure"
 
     return {

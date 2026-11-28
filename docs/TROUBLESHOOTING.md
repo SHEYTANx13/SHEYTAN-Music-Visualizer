@@ -6,11 +6,12 @@ user-facing diagnostics + troubleshooting document (the former separate
 
 ## App does not open (Windows GUI-subsystem builds)
 
-- **The product executable is `app-gogui.exe`** (run 45297707372
-  ship-the-shell repair). The package also contains
+- **The product executable is `app-wails.exe`** (run 46121470729 truth
+  fix; the Wails web shell is the desktop product since the
+  run-46033044814 retirement). The package also contains
   `sheytan-music-visualizer.exe` — the CLI authority — which opens NO
   window by design (it is the console scripting/self-check tool).
-  Double-click `app-gogui.exe`.
+  Double-click `app-wails.exe`.
 - **First-byte evidence**: the shell opens the runtime log before any
   other startup work. The FIRST record is the startup banner (version,
   commit, Go, OS/arch, PID, data mode, log path); every startup phase
@@ -30,10 +31,11 @@ user-facing diagnostics + troubleshooting document (the former separate
   panics (the whole window lifecycle) are covered by the crash-report
   boundary above; goroutine crashes are covered wherever the runtime
   prints through the teed writer.
-- **Icon on the executable**: `app-gogui.exe` carries the SHEYTAN brand
+- **Icon on the executable**: `app-wails.exe` carries the SHEYTAN brand
   icon + BETA VERSIONINFO as an embedded Windows resource (windres +
-  `.syso` at build time). If Explorer shows a generic icon, the
-  Windows icon cache is stale — the file itself carries the resource.
+  `.syso` at build time, `assets/windows/app.rc`). If Explorer shows a
+  generic icon, the Windows icon cache is stale — the file itself
+  carries the resource.
 
 ## Runtime log
 

@@ -4,9 +4,10 @@ Updated 2026-11-17 (V5 work order §3 — silent-Play root cause, async
 first play, full request-outcome logging contract). Implementation:
 `internal/playback/transport.go` (state machine + clock),
 `internal/playback/output.go` (device outputs), `internal/studio/studio.go`
-(service), `ui/gogui/studio_panel.go` + `ui/gogui/actions.go` (UI +
-logging; the file references below predate the ui/fyne removal and keep
-their historical paths).
+(service), `internal/transport/wails/service.go` + `frontend/wails/dist/js`
+(current shell UI + logging surface; the transport-level event sources
+below keep their historical file references from the retired Go-Gui and
+Fyne shells — run-46033044814 retirement).
 
 ## V5 repair — the app(6).log silent Play (root cause)
 

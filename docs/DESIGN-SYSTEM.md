@@ -1,8 +1,10 @@
 # SHEYTAN Design System — canonical tokens and shell sharing
 
 This document describes the framework-independent design system that
-keeps the native Go-Gui (Gio) shell and the Wails v3 web shell visually
-and behaviorally identical.
+keeps the product's presentation surfaces visually and behaviorally
+identical. The product desktop shell is the Wails v3 web shell
+(`cmd/app-wails` + embedded `frontend/wails/dist`); the retired Go-Gui
+surface is recorded under "Historical shells" in `docs/architecture.md`.
 
 ## Source of truth
 
@@ -44,15 +46,20 @@ obscure timelines, waveforms, text or controls.
 
 ## Consumption rules
 
-1. The native shell builds its Gio theme from `design.MustLoad()`
-   (`ui/gogui/theme.go`); intensity presets and the reduced-motion /
-   reduced-glow switches map onto the same values.
-2. The web shell fetches `tokens.json` (canonical bytes) and injects
-   CSS custom properties (`frontend/wails/dist/sheytan.css`).
-3. Both shells implement framework-native controls separately; they
-   share tokens, navigation destinations, command IDs, DTOs and events
-   (`internal/presentation`), never widget instances.
+1. The Go core loads the canonical document through
+   `design.MustLoad()` (embed + validation); `design.Raw()` is the
+   byte authority the shell serves to the web layer.
+2. The web frontend injects CSS custom properties from the served
+   tokens (canonical bytes fetched at boot: `frontend/wails/dist/js/tokens.js`,
+   applied across the per-element stylesheets in `frontend/wails/dist/css/`;
+   the former single `sheytan.css` file was split into those per-element
+   stylesheets by the run-46033044814 frontend redesign).
+3. Framework-native controls are implemented once, in the web shell;
+   the shell shares tokens, navigation destinations, command IDs, DTOs
+   and events (`internal/presentation`) with the toolkit-free core —
+   never widget instances.
 4. Every persisted user choice (tab order, active destination,
    intensity, renderer preference, performance mode) lives in
    toolkit-free stores (`internal/presentation`, `internal/render`,
-   `internal/perfpolicy`) so both shells read and write identical state.
+   `internal/perfpolicy`) so the shell and the core read and write
+   identical state.

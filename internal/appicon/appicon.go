@@ -6,18 +6,19 @@
 // from the design token palette (deterministic: same inputs, same
 // bytes). Consumers:
 //
-//   - PNG(): the go-gui window icon (WindowCfg.IconPNG — titlebar /
-//     taskbar where the backend supports it) and the Linux package
-//     icon (freedesktop hicolor path in the portable package).
+//   - PNG(): the Wails shell runtime icon (application.Options.Icon —
+//     platform setIcon on Linux, about box and dialogs elsewhere) and
+//     the Linux package icon (freedesktop hicolor path in the portable
+//     package).
 //   - ICO(): the Windows executable resource — scripts/build/
 //     build-windows.ps1 compiles assets/windows/app.rc (which points
 //     at the same tracked icon.ico) with windres into a .syso the Go
-//     linker embeds into app-gogui.exe (Explorer icon, taskbar,
+//     linker embeds into app-wails.exe (Explorer icon, taskbar,
 //     shortcuts) together with the BETA VERSIONINFO block.
 //   - macOS: scripts/build/build-macos.sh builds icon.icns from the
 //     tracked iconset PNGs (iconutil, recorded BLOCKED when absent).
-//   - Android/iOS: gomobile reads cmd/app-gogui/assets/icon.png (the
-//     same tracked PNG) for the launcher icon.
+//   - Android/iOS: gomobile reads the same tracked PNG for the
+//     launcher icon.
 //
 // The package embeds its own copies of the two binary assets so the
 // Go embed contract stays self-contained; the generator writes both

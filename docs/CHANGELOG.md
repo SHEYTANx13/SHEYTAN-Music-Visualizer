@@ -1,5 +1,93 @@
 # Changelog
 
+## Run 46121470729 / 46121470699 repair — gofmt, Wails webview runtime, Windows shell build tags, CodeQL manifest tuple, deterministic zizmor, app icon runtime surface, docs truth cleanup (2026-11-28)
+
+- **gofmt-verify RED on every lane (preflight/linux/macos/windows) —
+  ROOT CAUSE FIXED**: `internal/transport/wails/app.go` carried
+  8-space indentation (gofmt requires tabs); `gofmt -l` reproduced the
+  hosted gate failure verbatim. Reformatted; `gofmt -l .` is clean.
+  The macOS "artifact-path-missing" record was a cascade: package-macos
+  is skipped when earlier gates fail, so the lane uploaded no
+  `.app.zip`.
+- **Linux gui-smoke RED ("application exited before its window became
+  viewable") — ROOT CAUSE FIXED**: the build lane's apt list still
+  targeted the RETIRED go-gui shell (pure-Go X11, no webview) and
+  installed NO webview runtime, while the product shell `app-wails`
+  (Wails v3.1.0 purego backend) dlopens GTK4 + WebKitGTK 6.0 at
+  runtime (`libgtk-4.so.1`, `libwebkitgtk-6.0.so.4`,
+  `libjavascriptcoregtk-6.0.so.1`, `libsoup-3.0.so.0` per upstream
+  `PUREGO_LINUX.md`). build.yml now installs
+  `libgtk-4-1 libwebkitgtk-6.0-4 libjavascriptcoregtk-6.0-1
+  libsoup-3.0-0 libgbm1` (required, fail loudly) plus the ALSA runtime
+  package under its per-image name (`libasound2t64`/`libasound2`
+  probed). Locally reproduced in a Debian 13 sandbox: the same binary
+  panics inside the Wails purego binding (`gtk_get_major_version` nil
+  deref) when the GTK4 stack is absent — the exact hosted failure
+  class.
+- **Windows build-wails-shell RED ("build constraints exclude all Go
+  files") + full staging/zip/verify cascade — ROOT CAUSE FIXED**:
+  every `cmd/app-wails` file is guarded by `purego && sheytan_nogpu`,
+  but build-windows.ps1 built the shell with the generic lane tag set
+  (`goffi_static`) only. The gate now appends
+  `-tags purego,sheytan_nogpu` (Go flag parsing: last `-tags` wins,
+  mirroring the hosted-green Linux lane). Cross-compile proof:
+  `goffi_static` only → excluded-all-files error; with the shell tags →
+  PE32+ GUI executable links clean.
+- **CodeQL collect-logs RED (manifest MISSING, collector rc=2) — ROOT
+  CAUSE FOUND AND FIXED**: `write-manifest.py`'s `build_codeql_manifest`
+  assigned the whole `(result, result_raw, result_note)` TUPLE from
+  `checked_result()` to each job row, so the serialized manifest read
+  `"result": ["success", "", ""]`, schema validation failed closed, the
+  manifest never landed and the collector refused — the exact hosted
+  signature of runs 46033044805 and 46121470699 (the previous session
+  had judged the writer "bulletproof" WITHOUT executing the codeql
+  profile; it was wrong). The tuple bug also flipped the aggregate to
+  "failure" even when both analyze jobs succeeded. Fixed with `[0]`
+  indexing plus NEW plumbing fixture H35 that executes BOTH profiles
+  end-to-end with simulated hosted env (plain-string results, verbatim
+  "abandoned" vocabulary, aggregate honesty).
+- **zizmor preflight RED ("findings at low severity or above") —
+  deterministic OFFLINE mode restored**: the audit had been switched to
+  ONLINE mode (job token) in a previous repair while the workflow
+  header still documented offline as the contract — and the gate
+  labels ANY nonzero exit "findings". Online-only audit units
+  (known-vulnerable-actions, ref-confusion, stale-action-refs,
+  ref-version-mismatch) make the verdict depend on live API/advisory
+  state. The audit runs `--offline` again (verified clean at pinned
+  zizmor 1.32.0 with the exact gate flags: 6 ignored, 18 suppressed),
+  the contradictory comments are reconciled, and the error line now
+  names exit code + captured log instead of asserting "findings" it
+  could not prove.
+- **App icon on the runtime surface**: `application.Options.Icon` is
+  now wired from `internal/appicon.PNG()` in `BuildApp` (Wails hands it
+  to the platform shell on Linux and the about/dialog surfaces
+  elsewhere). The EXECUTION-FILE icon contract stays with the build
+  lanes (Windows `resource.syso` via windres, macOS `AppIcon.icns` via
+  iconutil, Linux freedesktop hicolor PNG) — verified wired in all
+  three lanes; desktop cross-compiles (windows/darwin/linux) green.
+- **Docs truth cleanup (merge + delete + repair)**: the orphaned
+  standalone `docs/RUNTIME-DIAGNOSTICS.md` (not in INDEX, same
+  category) was MERGED into `docs/operations/runtime-diagnostics.md`
+  (startup baseline anchor, play-session correlation, diagnostics
+  export) and deleted; the retired session note `docs/note.md` was
+  deleted (canonical history lives in `docs/ai-notes.md` + git
+  history); every inbound `note.md`/`RUNTIME-DIAGNOSTICS.md` reference
+  was repaired (roadmap, performance-baseline, REQUIREMENTS-TRACEABILITY,
+  export_test.go, build.yml comment). `docs/architecture.md`,
+  `docs/TROUBLESHOOTING.md`, `readme.md`, `docs/INDEX.md` and
+  `internal/appicon`/`assets/windows/app.rc` comments no longer
+  describe the REMOVED go-gui shell as the product surface — they now
+  document the actual Wails shell, its startup sequence, boundary and
+  close contract. The media-tools size-bound exemption lists the real
+  product executable (`app-wails`) instead of the retired
+  (`app-gogui`) in both the bash and PowerShell guards.
+- **Boundaries (honest)**: hosted step-level logs for both runs were
+  NOT readable this session (GitHub API rate limit from this sandbox);
+  the Windows UCRT64 CGO build, the macOS lane and the full Xvfb
+  windowed paint were NOT executed here; the zizmor online-mode finding
+  (if any) is therefore not named — the gate is now deterministic by
+  construction. No remote operation was performed; nothing was pushed.
+
 ## Run 45678113841 repair — conclusion-vocabulary collapse (manifest writer + collector), full system-profile and secure-network surfaces, honest requirements/templates panes, staged loading and animations (2026-11-27)
 
 - **collect-logs RED (manifest MISSING, collector rc=2, emergency

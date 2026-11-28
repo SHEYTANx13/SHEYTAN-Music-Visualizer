@@ -105,10 +105,10 @@ try {
         # per-file bound (a Go+Fyne+wgpu binary is legitimately ~35-50 MiB);
         # the name match is exact and everything else - including any
         # tool/DLL pack file - stays under the bound.
-        # Run 45297707372 ship-the-shell: the native Go-Gui shell
-        # (app-gogui.exe) is the product executable and is exempt
-        # beside the CLI authority.
-        $appExe = ($leaf -eq "sheytan-music-visualizer" -or $leaf -eq "sheytan-music-visualizer.exe" -or $leaf -eq "app-gogui" -or $leaf -eq "app-gogui.exe")
+        # Run 46121470729 truth fix: the Wails web shell (app-wails.exe)
+        # is the product executable and is exempt beside the CLI
+        # authority (the retired app-gogui names must not return).
+        $appExe = ($leaf -eq "sheytan-music-visualizer" -or $leaf -eq "sheytan-music-visualizer.exe" -or $leaf -eq "app-wails" -or $leaf -eq "app-wails.exe")
         if (-not $appExe -and $f.Length -gt $MaxFileBytes) {
             $violations.Add(("oversized file ({0} bytes > {1}): {2}" -f $f.Length, $MaxFileBytes, $rel))
         }

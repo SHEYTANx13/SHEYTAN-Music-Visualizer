@@ -11,32 +11,37 @@ then exports synchronized H.264/AAC MP4 videos up to 3840×2160 (4K). Nothing
 runs in the cloud: decoding, analysis, rendering and encoding happen on your
 machine. No account, no telemetry, no bundled codec binaries.
 
-> Shell architecture (2026-11-19/20 migration, run 44462492262): one
-> toolkit-free Go application core (`internal/*`) with TWO alternative
-> presentation shells and ONE renderer subsystem behind a contract:
-> - **Native Go-Gui shell** (`cmd/app-gogui`, the actual Go-Gui library
->   `github.com/go-gui-org/go-gui v0.99.1` — NOT Gio `gioui.org`, which was
->   removed in the 2026-11-21 migration) —
->   the production desktop shell: one window, the eleven workspace tabs,
->   SHEYTAN design tokens, PixelSurface CPU-frame preview bridge, honest GPU
->   evidence, cgo-free Linux desktop (pure-Go X11, runtime GL dlopen).
-> - **Wails v3 web shell** (`cmd/app-wails`, `wailsapp/wails/v3 v3.1.0`) —
->   an alternative cgo-free web-technology shell (purego profile,
->   `sheytan_nogpu` build tag: the web-shell profile renders through the
->   honest CPU renderer and never claims native GPU execution).
+> Shell architecture (run-46033044814 retirement + run 46121470729
+> verification): one toolkit-free Go application core (`internal/*`)
+> with ONE product desktop shell and ONE renderer subsystem behind a
+> contract:
+> - **Wails v3 web shell** (`cmd/app-wails`, `wailsapp/wails/v3 v3.1.0`,
+>   purego profile + `sheytan_nogpu` build tag) — THE production desktop
+>   shell: one webview window over the embedded shared frontend (vanilla
+>   ES modules + per-element stylesheets, responsive wide/compact
+>   presentations), the validated `/api` facade, native-dialog
+>   import/export and honest CPU-renderer evidence (the web-shell
+>   profile never claims native GPU execution). The former Go-Gui shell
+>   (`cmd/app-gogui`, `ui/gogui`) was retired and removed; the guard
+>   `scripts/ci/check-no-fyne.sh` keeps Fyne and go-gui out of the
+>   module graph.
 > - **GoGPU renderer** (`github.com/gogpu/wgpu v0.34.15`) — the
 >   specialized GPU renderer behind `internal/render`; adapter evidence
 >   states (detected/available/selected/executed/verified) are exact and
 >   software adapters are never labeled GPU.
 
-## Launching the app (run 45297707372 ship-the-shell repair)
+## Launching the app (run 46121470729 ship-the-shell truth)
 
-The packaged product executable is the **native Go-Gui shell** —
-`app-gogui.exe` (Windows), `app-gogui` (Linux), or the `.app` bundle's
-`SHEYTAN-Music-Visualizer` binary (macOS). Launch THAT file; it opens
-the real window, carries the SHEYTAN icon on the executable file, and
-its version label is BETA. The package also ships
-`sheytan-music-visualizer` — the CLI authority — as a CONSOLE companion
+The packaged product executable is the **Wails web shell** —
+`app-wails.exe` (Windows package), `app-wails` (Linux package), or the
+`.app` bundle's `SHEYTAN-Music-Visualizer` binary (macOS, which IS the
+Wails shell as `CFBundleExecutable`). Launch THAT file; it opens the
+real window, carries the SHEYTAN icon (Windows: resource.syso compiled
+from `assets/windows/app.rc`; macOS: `AppIcon.icns` in the bundle;
+Linux: the freedesktop hicolor PNG in the package + the runtime icon
+from `internal/appicon`), and its version label is BETA. The Windows
+and Linux packages also ship `sheytan-music-visualizer` — the CLI
+authority — as a CONSOLE companion
 for scripting, `--version`, `--self-check` and headless export; it
 opens no window by design.
 
@@ -120,7 +125,7 @@ palettes used by the visualizer (`internal/visualizer`).
 
 | Capability | Status |
 |---|---|
-| Studio shell: top command bar, eleven workspace tabs (Home/Studio/Worlds/Templates/Library/Export/Requirements/Downloads/System Files/Settings/Diagnostics), library, live preview, inspector, transport, export dialog | DELIVERED (native Go-Gui shell `cmd/app-gogui` on `github.com/go-gui-org/go-gui v0.99.1` with SHEYTAN token theme; Wails v3 web shell `cmd/app-wails` as the alternative cgo-free profile) |
+| Studio shell: top command bar, eleven workspace tabs (Home/Studio/Worlds/Templates/Library/Export/Requirements/Downloads/System Files/Settings/Diagnostics), library, live preview, inspector, transport, export dialog | DELIVERED (Wails v3 web shell `cmd/app-wails` + `internal/transport/wails` + embedded `frontend/wails/dist` with SHEYTAN token theme — THE product desktop shell; the former native Go-Gui shell was retired, see docs/architecture.md "Historical shells") |
 | Import WAV (int16/int24/int32 + IEEE float32), MP3, FLAC, Ogg/Vorbis via first-party Go decoders | DELIVERED (`internal/audio`) |
 | Import AAC/M4A/ALAC via the user's local FFmpeg (optional adapter, never bundled) | DELIVERED as an optional adapter (`internal/audio/decoders_ffmpeg.go`; registers only when FFmpeg is present) |
 | Layered compositions: a dimmed background mode behind the primary mode | DELIVERED (CPU renderer, deterministic, bounded intensity; `internal/render`) |
@@ -134,9 +139,9 @@ palettes used by the visualizer (`internal/visualizer`).
 | GPU renderer: wgpu (Go-controlled WebGPU) radial-mode shader with verified readback; hardware adapters on Vulkan/DX12/Metal hosts | DELIVERED as code + software-adapter proof; **hardware-GPU execution: NOT AVAILABLE on the verification host** |
 | MP4 export: 1280×720 → 3840×2160 at 24/30/60/**120** fps, H.264 + AAC via FFmpeg, streamed frames, real progress, cancellation, ffprobe validation; 4K120/4K60 functional export tests with exact-cadence ffprobe checks | DELIVERED (`internal/export`; run 43612608237: 4K120 verified locally — 120 frames, exact 1.000 s, ffprobe-validated) |
 | Projects: versioned JSON, atomic save, validation, relink, presets (Hellfire Pulse, Crimson Orbit, Obsidian Wave, Ember Storm) | DELIVERED (`internal/project`) |
-| Fullscreen: single state controller, persisted intent vs observed platform state, event-driven reconciliation (never a force loop) | CONTROLLER DELIVERED (`internal/fullscreen`, state-transition tests PASS); the desktop shell wiring is NOT WIRED since the ui/fyne removal — outstanding work (go-gui exposes `Window.SetFullscreen`/`IsFullscreen`; the adapter + F11/Esc handling is the next slice) |
+| Fullscreen: single state controller, persisted intent vs observed platform state, event-driven reconciliation (never a force loop) | CONTROLLER DELIVERED (`internal/fullscreen`, state-transition tests PASS); the desktop shell wiring is NOT WIRED — outstanding work (Wails v3 exposes window fullscreen controls; the adapter + F11/Esc handling is the next slice) |
 | Runtime logging in every interactive launch: UTC text log, rotation, stderr fallback, startup/subsystem/error records, panic stacks | DELIVERED (`internal/logging` + startup wiring; real-run probe evidence captured) |
-| User-facing diagnostics: Diagnostics destination panel with the diagnostics summary, resolved data mode + log path, Open Logs Folder action | DELIVERED (`ui/gogui` panels + actions; button execution needs an interactive desktop: NOT RUN here) |
+| User-facing diagnostics: Diagnostics destination panel with the diagnostics summary, resolved data mode + log path, Open Logs Folder action | DELIVERED (web shell Diagnostics tab: `internal/transport/wails` facade + `frontend/wails/dist`; button execution needs an interactive desktop: NOT RUN here) |
 | Predictable app-local data layout: portable `data/` beside the executable (portable.mode marker) or installed per-user location (Windows LOCALAPPDATA, Linux XDG), with visible fallback and non-destructive legacy migration | DELIVERED (`internal/apppaths` + package staging gates; resolver/bootstrap/migration tests PASS) |
 | Windows x64 build | DELIVERED as script/workflow definition producing exactly one canonical package (`SHEYTAN-Music-Visualizer-windows-x64.zip`, uploaded VERIFIED or TEST-ONLY); **native Windows execution: NOT RUN on this Linux verification host — hosted `build-windows` owns it** |
 
@@ -183,12 +188,14 @@ decoders are never shared across goroutines.
 
 - **Go** at the `go.mod` toolchain (1.27 line). The desktop build uses CGO.
 - **Linux**: `gcc` (the GoGPU wgpu renderer stack compiles cgo) and the
-  RUNTIME UI libraries only — the go-gui v0.99.1 desktop backend is
-  cgo-free (pure-Go X11 via jezek/xgb; libEGL/libGL/wayland/xkbcommon are
-  dlopened at run time, so no `-dev` headers or pkg-config UI modules are
-  needed):
-  `libegl1 libgl1 libvulkan1 mesa-vulkan-drivers libwayland-client0
-  libxkbcommon0 libx11-6` (mesa-vulkan-drivers for software-Vulkan smoke
+  Wails web-shell RUNTIME libraries — the purego backend dlopens GTK4 +
+  WebKitGTK 6.0 at run time (no `-dev` headers or pkg-config UI modules
+  at build time):
+  `libgtk-4-1 libwebkitgtk-6.0-4 libjavascriptcoregtk-6.0-1 libsoup-3.0-0
+  libgbm1 libegl1 libgl1 libvulkan1 mesa-vulkan-drivers
+  libwayland-client0 libwayland-egl1 libxkbcommon0 libx11-6` plus the
+  ALSA runtime (`libasound2t64` or `libasound2`)
+  (mesa-vulkan-drivers for software-Vulkan smoke
   runs). `xvfb` + `x11-utils` for the virtual-display GUI smoke.
 - **Windows**: MSYS2 **UCRT64** toolchain (not the deprecated MINGW64):
   `mingw-w64-ucrt-x86_64-gcc` and `mingw-w64-ucrt-x86_64-pkgconf`, with

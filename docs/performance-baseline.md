@@ -14,7 +14,7 @@ number here is a universal claim about other machines.
 | Memory | 4 GiB total (3 GiB available at measurement time) |
 | GPU/display | none physically present; Xvfb virtual display (software rendering only) |
 | Go | go1.27.3 (go.mod toolchain) |
-| Commit | 1487628eebbfc3d6f8a173ebefd931c307230909 (plus the local run-42837709122 changes; see note.md) |
+| Commit | 1487628eebbfc3d6f8a173ebefd931c307230909 (plus the local run-42837709122 changes; session note in git history) |
 
 ## Startup (cold / warm) — `first-window-usable`
 

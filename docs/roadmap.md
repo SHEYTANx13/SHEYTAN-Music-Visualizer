@@ -30,12 +30,13 @@ restrained. Black dominates; red is the accent. Identity tokens live in
   coordination, the deterministic frame timeline, render scheduling,
   configuration, diagnostics and export orchestration. First-party engines
   are Go-only and local.
-- **Presentation shells** own the desktop UI only — never the media
-  renderer or export-frame renderer. The native shell is Go-Gui
-  (`ui/gogui`, goffi profile) and the web-technology shell is Wails v3
-  (`internal/transport/wails`, `cmd/app-wails`); both consume the same
-  toolkit-free core contracts. Fyne is retired by the enforced
-  `scripts/ci/check-no-fyne.sh` gate (run 44462492262 migration).
+- **Presentation shell** owns the desktop UI only — never the media
+  renderer or export-frame renderer. The product desktop shell is the
+  Wails v3 web shell (`internal/transport/wails`, `cmd/app-wails`,
+  purego + `sheytan_nogpu` profile), consuming the same toolkit-free
+  core contracts. Fyne and Go-Gui are retired and kept out by the
+  enforced `scripts/ci/check-no-fyne.sh` gate (run 44462492262
+  migration; go-gui retirement run-46033044814).
 - **Local storage** owns project metadata, presets, thumbnails and user
   settings; source media is referenced, not copied unnecessarily.
 - **Audio, graphics and video backend integrations sit behind narrow Go
@@ -242,12 +243,17 @@ DELIVERED (code + local Linux verification; hosted CI is the platform authority)
   (APP-24/25), resolver contract R8 + interpolation R9 (APP-26),
   SC2129 fix + online zizmor mode (APP-27), docs index + traceability
   (APP-29). Local evidence and honest gaps: `docs/REQUIREMENTS-
-  TRACEABILITY.md` and the session `note.md`.
+  TRACEABILITY.md` and that session's execution note (git history;
+  the standalone file was retired by the run-46121470729 docs
+  cleanup).
 
 PLANNED (unchanged, owned by the next hosted run): Windows-hosted rerun
-of the playback suite and observer fixtures, online zizmor audit result
-with the workflow token, CodeQL on the repaired commit, and the
-consolidated-log collector reaching terminal success.
+of the playback suite and observer fixtures, CodeQL on the repaired
+commit, and the consolidated-log collector reaching terminal success.
+(Run-46121470729 update: the static-validation zizmor gate is back to
+the documented deterministic OFFLINE mode — the "online zizmor audit
+result" item is obsolete and was removed; the hosted red class of the
+online gate is recorded in that run's evidence instead.)
 
 ## CI repair session (2026-11-11, run 42921967187)
 

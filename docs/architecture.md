@@ -9,7 +9,8 @@ describe; this page is the orientation layer.
 | Package | Owns |
 | --- | --- |
 | `cmd/sheytan-music-visualizer` | CLI authority: flag parsing, `--version`, `--self-check` (foundation invariants, machine-readable result file), `--export-cli`, world-OBJ export. It never opens a window. |
-| `cmd/app-gogui` | THE product desktop entry: bootstrap-first logging (banner/tee/crash report/exit record) then `ui/gogui.Run` (`gui_desktop.go`, `//go:build !android`; the android gomobile glue is `gui_mobile.go`). The desktop product executable ships from this package. |
+| `cmd/app-wails` | THE product desktop entry: bootstrap-first logging, then the Wails v3 single-window web shell (`internal/transport/wails.BuildApp`, `//go:build purego && sheytan_nogpu`). `--version` / `--build-info-json` print identity and exit; the desktop product executable ships from this package. |
+| `cmd/app-android` | The gomobile/x-mobile carrier (`gui_mobile.go` glue, headless variant for CI self-check evidence). No go-gui, no Fyne. |
 | `cmd/ci-log-collector` | Consolidated plain-text run report (`log.txt`); stdlib-only so it builds even when the app dependency graph is broken. |
 | `internal/apppaths` | THE data-layout authority: portable vs installed mode resolution, directory bootstrap, legacy-log migration (copy, never move). |
 | `internal/logging` | Runtime log: rotation, stderr fallback, verify-writable probe, non-destructive legacy migration helper. |
@@ -30,37 +31,41 @@ describe; this page is the orientation layer.
 | `internal/sysprofile` | Local system profile: CPU/RAM/OS/display/GPU/audio/FFmpeg facts, capability classification, bounded resource-policy modes. |
 | `internal/perf` | Startup stage recorder anchored at true process start; runtime snapshot. |
 | `internal/procattr` | Child-process policy: Windows `HideWindow` + `CREATE_NO_WINDOW` so FFmpeg/ffprobe never flash a console. |
-| `ui/gogui` | The native Go-Gui surface (v0.99.1): the ONE window, command bar, workspace tab strip and eleven destination panels, studio rail/main split, live PixelSurface preview with the pacer bridge, media-tools manager panel, theme (SHEYTAN token palette), responsive classes from the token document, drag-to-scroll + class-resolved scroll bars. The former Fyne surface (`ui/fyne`) was deleted after parity (run 44330231458 update; guard: `scripts/ci/check-no-fyne.sh`). |
+| `internal/transport/wails` | The Go↔web boundary: `service.go` is the toolkit-free `/api` facade (narrow, validated application services), `app.go` owns the ONE Wails window lifecycle, `host.go` the native-dialog host (chosen paths are consumed inside Go and never cross into the web layer), `service_dna.go` / `service_import_export.go` the Song-DNA and export/import projections. |
+| `frontend/wails/dist` | The shared web frontend, EMBEDDED into the binary by `embed.go` (no local server, no external runtime dependency): one HTML document, vanilla ES modules (`js/`, one file per element) and per-element stylesheets (`css/`) with the shared SHEYTAN tokens; responsive via content-driven breakpoints (`responsive.css`, `adaptive.css`). The web shell presents control/status/diagnostics surfaces; it does not render the visualizer canvas (real-time preview lives with the native render stack). |
 
-## Application startup sequence
+## Application startup sequence (desktop web shell, `cmd/app-wails`)
 
-1. `main.run` parses flags; `--version`/`--self-check` exit without a
-   window.
-2. `runGUI` installs the recoverable-panic boundary (log + stderr stack).
-3. `cmd/app-gogui` runs FIRST-BYTE logging (`logging.Bootstrap` +
-   startup banner + stderr tee) before any subsystem; `ui/gogui.Run`
-   logs every phase (design tokens, data layout, studio service,
-   renderer selection, window created) with its reason.
-4. The data layout resolves and bootstraps the contract directories;
+1. `main.run` parses flags; `--version` / `--build-info-json` exit
+   without a window; unexpected arguments are rejected.
+2. `runShell` installs the recoverable-panic boundary and runs
+   FIRST-BYTE logging (`logging.Bootstrap` + startup banner + stderr
+   tee) before any subsystem.
+3. The data layout resolves and bootstraps the contract directories;
    the runtime log opens before window construction; a broken log
    degrades to stderr, never aborts.
-5. The first structured record (startup banner) carries
-   version/commit/builder/date/go/os/arch/pid and the resolved data/log
-   directories.
-6. The single `gui.Window` is created (locked by
-   `ui/gogui/one_window_test.go`); `gui.SetTheme(ThemeDark)` and the
-   SHEYTAN token theme install BEFORE the window so the first frame
-   paints in the dark polarity.
-7. The studio service initializes; persisted renderer preference and
-   resource-policy mode load with revalidation and logged reasons.
-8. The view generator builds every frame from frame-thread-owned
-   control values; `backend.Run` starts the frame loop.
-9. The preview pacer goroutine publishes measured frames through the
-   uiState bridge; nothing on the frame thread ever blocks on audio,
-   FFmpeg, filesystem or analysis work.
-10. On close (or SIGINT/SIGTERM): teardown in dependency order —
-    studio service, renderer, pixel surface — with the exit record
-    (`LogExit`) and any recovered panic persisted as a crash report.
+4. `studio.New()` constructs the studio service; `defer st.Close()`
+   guarantees the idempotent, dependency-safe teardown on EVERY exit
+   path after successful construction (app.Run errors and panics never
+   leak owned workers, transports or scheduler goroutines).
+5. `internal/transport/wails.BuildApp` creates the ONE Wails
+   application: the validated service facade registered as a Wails
+   service, the embedded-asset handler (frontend plus `/api/*`), the
+   brand icon (`internal/appicon`) and the single main window (obsidian
+   background, so no white flash before the first webview paint). It
+   does not call `app.Run`; the caller owns the blocking run.
+6. The quit handler wires the web layer's `app.quit` command to the
+   application's own `Quit` — the web layer holds an explicit,
+   window-owned action, never process-level privileges.
+7. Audio/DSP/render/export work stays off the UI thread in the bounded
+   `internal/jobs` scheduler lanes (see
+   `docs/architecture/queue-orchestration.md`); the web shell polls the
+   read-only `/api` projections and never streams audio samples through
+   the bridge.
+8. On exit: `studio.Close` (analysis cancel + join, scheduler
+   `Shutdown`, transport close) runs through the `appclose`
+   state machine's stage discipline; the exit record (`LogExit`) and
+   any recovered panic persist as a crash report.
 
 ## System-profile flow
 
@@ -81,47 +86,49 @@ provenance sidecar) → DSP analysis (chunked, cache-backed) → Song DNA →
 per-frame `visualizer.FrameInput` → renderer (CPU always available;
 GPU only after classification and a real pipeline validation with
 verified readback; software adapters never impersonate hardware) →
-preview (frames published through the pacer bridge into the window's
-PixelSurface; control values ride the uiState bridge) or export
-(streamed frames piped to local FFmpeg with hidden windows, real
-progress, cancellation that reaches FFmpeg, ffprobe validation before
-atomic finalize).
+preview or export (streamed frames piped to local FFmpeg with hidden
+windows, real progress, cancellation that reaches FFmpeg, ffprobe
+validation before atomic finalize). The web shell surfaces the
+control/status state of these stages through the `/api` facade; the
+real-time preview canvas is owned by the native render stack.
 
-## Go-Gui frame-thread and single-window contract
+## Web-shell boundary and single-window contract
 
-- Exactly ONE primary `gui.Window`; all other surfaces are in-window
-  destinations (no splash window, no hidden second instance; locked by
-  `ui/gogui/one_window_test.go`).
-- Every shell field is owned by the go-gui frame thread (the view
-  generator and widget callbacks). go-gui widgets are rebuilt every
-  frame from those control values; callbacks write them and dispatch.
-  The only cross-goroutine surfaces are `uiState` and the preview
-  pacer's publish path; the frame thread never blocks on adapter
-  enumeration, FFmpeg probes, filesystem scans or project analysis.
-- **Close/shutdown (run 43090342995):** every close surface — titlebar
-  (via `Window.SetCloseIntercept`), File→Quit — enters ONE state machine
-  (`internal/appclose`): running → closeRequested → confirming →
-  cancelling → flushing → closing → closed. Duplicate requests never
-  duplicate dialogs or teardown; active playback/export/import get ONE
-  confirmation; cancel→flush→release stages are bounded and their
-  outcomes recorded; `Window.Close()` is called explicitly and exactly
-  once after cleanup.
-- **Responsive shell (run 43090342995):** one set of shared widget
-  regions is recomposed per breakpoint by `ui/fyne/responsive.go` —
-  phone <480 px (single column, touch-sized action grid, focal preview),
-  compact <1024 px (draggable preview/side-panel split), desktop <1680
-  px (three-region workspace), ultrawide ≥1680 px. The classes come
-  from the token document (`design/tokens.json`) through
-  `ui/gogui/layout.go` (`Breakpoint`, `For`); spacing, touch-target and
-  scroll-bar sizing resolve per class (`ShellTheme.ScrollbarCfgForWidth`,
-  `SpacingProfileForWidth`). Every scroll surface carries drag-to-scroll
-  (a finger or held pointer pans; taps still reach children).
-- **First-frame deferral (run 43090342995):** the renderer probe runs in
-  the render-loop goroutine after the window is visible ("probing…"
-  state until then); the audio device opens lazily on first playback.
-  While nothing plays the preview repaints at ~6 fps instead of 30.
-- Audio/DSP/render run off the UI thread with bounded queues and context
-  cancellation; backpressure protects playback latency.
-- Keyboard transport (Space/←/→) and fullscreen (F11/Esc) are window
-  event handlers reconciled by `internal/fullscreen` (desired vs
-  observed, persisted intent, no force loops).
+- Exactly ONE Wails top-level window (`main`); the workspace
+  destinations are in-page tabs rendered from the canonical
+  `DestinationCatalog` (`/api/destinations`), including honest empty
+  states for unavailable destinations. The retired-toolkit guard
+  (`scripts/ci/check-no-fyne.sh`) keeps Fyne and go-gui out of the
+  tree.
+- `internal/transport/wails/service.go` is deliberately toolkit-free
+  and headless-testable: the facade validates every frontend-supplied
+  argument in Go before any dialog or job starts, and only the window
+  lifecycle (`app.go`, `purego && sheytan_nogpu`) touches the Wails
+  application package.
+- **Close/shutdown:** every close surface — the web `app.quit` command
+  and the window titlebar — ends in ONE teardown path: the Wails
+  `Quit`, then `studio.Close` (idempotent, dependency-safe, bounded;
+  see `internal/appclose` stage discipline and the queue
+  `Shutdown` contract in `docs/architecture/queue-orchestration.md`).
+  Duplicate quit requests never duplicate teardown; active
+  playback/export jobs are cancelled and joined with recorded
+  outcomes.
+- **Responsive shell:** one shared frontend recomposes per breakpoint
+  (`css/responsive.css`, `css/adaptive.css`) — compact <600 px (single
+  column, stacked panels, touch-sized controls), intermediate 600–959
+  px, standard 960–1679 px workspace, ultrawide ≥1680 px. Breakpoints
+  are content-driven CSS media/container queries driven by the token
+  document (`design/tokens.json`); no user-agent or device-model
+  detection.
+- Audio/DSP/render run off the UI thread with bounded queues and
+  context cancellation; backpressure protects playback latency.
+
+## Historical shells
+
+The Fyne surface (`ui/fyne`) was deleted after parity (run
+44330231458 update) and the Go-Gui surface (`ui/gogui`,
+`cmd/app-gogui`) was retired when the Wails web shell became the
+product desktop shell (run-46033044814 repair, deployed to `main` in
+commit 4d1cf6d). Both remain reachable in git history; the guard
+`scripts/ci/check-no-fyne.sh` fails the build if either toolkit
+re-enters the module graph.

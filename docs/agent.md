@@ -116,8 +116,9 @@ The `-tags goffi_static` build tag selects goffi's static dlopen path
 for the wgpu renderer's FFI stubs — required on the CI-canonical Linux
 profile (CGO_ENABLED=1) because the Go internal linker rejects the
 mixed relocations (`goffi_dlopen` SDYNIMPORT vs CGO). The packaged
-build scripts apply it on Linux and Windows; go-gui v0.99.1's native
-desktop backends themselves are cgo-free.
+build scripts apply it on Linux and Windows; the Wails shell additionally
+builds with `purego,sheytan_nogpu` (its source files are guarded by
+those tags; the CPU-renderer profile never claims GPU execution).
 
 Or run the packaged script that does all of the above with full capture:
 

@@ -103,12 +103,14 @@ while IFS=$'\t' read -r SIZE REL; do
   esac
   case "$REL" in
     */sheytan-music-visualizer|*/sheytan-music-visualizer.exe|\
-*/app-gogui|*/app-gogui.exe)
+*/app-wails|*/app-wails.exe)
       # The application executables are exempt from the media-asset
-      # per-file bound (a Go+go-gui+wgpu binary is legitimately
-      # ~35-50 MiB; run 45297707372 ships the native Go-Gui shell
-      # app-gogui beside the CLI authority); the name match is exact
-      # and everything else — including any tool/DLL pack file —
+      # per-file bound (a Go+wails+wgpu binary is legitimately
+      # ~20-50 MiB; the packages ship the Wails web shell app-wails as
+      # the product desktop executable beside the CLI authority,
+      # run-46033044814 retirement + run 46121470729 truth fix: the
+      # retired app-gogui names must not return); the name match is
+      # exact and everything else — including any tool/DLL pack file —
       # stays under the bound.
       ;;
     *)

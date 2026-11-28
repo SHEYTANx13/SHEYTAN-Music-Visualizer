@@ -471,7 +471,17 @@ if ($rc -eq 0) { Write-Output "shell resource gate: OK" } else { Fail-Gate "buil
 
 $rc = Capture-Step -Job $job -Step "build-wails-shell" -ToolContext "gate:build-wails-shell" -GoTags -Command {
     $bi = "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
-    $args_ = @("build", "-trimpath") + $goTags
+    # RUN 46121470729 repair: every cmd/app-wails source file is guarded
+    # by "purego && sheytan_nogpu" (upstream Wails buildguard + the
+    # CPU-renderer profile). The generic lane tag set (goffi_static)
+    # alone excludes ALL files of the package, so this explicit
+    # ./cmd/app-wails build failed hosted with "build constraints
+    # exclude all Go files" and the whole Windows staging/zip/verify
+    # chain failed closed behind it. The shell build appends its own
+    # canonical tag set AFTER $goTags; Go flag parsing makes the LAST
+    # -tags win, mirroring the hosted-green Linux lane
+    # (build-linux.sh build-wails-shell) exactly.
+    $args_ = @("build", "-trimpath") + $goTags + @("-tags", "purego,sheytan_nogpu")
     $ld = @("-H=windowsgui")
     # GUI SUBSYSTEM (run 42598929646 defect H): launching the product
     # shell never attaches a command window; validate-pe-gui below

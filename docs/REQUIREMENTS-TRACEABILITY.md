@@ -12,25 +12,27 @@ point and its CI gate. Verification states:
 - `BLOCKED` — cannot be executed in this environment; the CI workflow owns
   the verification.
 
-The traceability status of every row is also recorded in the run's
-`note.md`. Evidence boundary: local verification ran on a Linux x64
+The traceability status of every row was also recorded in that
+session's execution note (git history; the standalone `note.md` file
+was retired by the run-46121470729 docs cleanup). Evidence boundary: local verification ran on a Linux x64
 sandbox; hosted CI (Windows + Linux) is the authority for platform-specific
 rows and runs after this session's changes are pushed by the user.
 
 | ID | Behavior | Implementation | Tests | CI gate | User entry point | Docs | Status (this session) |
 |---|---|---|---|---|---|---|---|
 
-> Run-45347124889 note: rows whose Implementation/Tests columns cite
-> `ui/fyne/...` files keep those HISTORICAL references (the evidence
-> they describe existed when the row was written). The current UI
-> surface is `ui/gogui` (go-gui v0.99.1): the single-window lock lives
-> in `ui/gogui/one_window_test.go`, the studio UI in
-> `ui/gogui/studio_panel.go`, the actions in `ui/gogui/actions.go`, the
-> diagnostics destination in `ui/gogui/panels.go`; `ui/fyne` was
-> deleted after parity (run 44330231458 update, guard
-> `scripts/ci/check-no-fyne.sh`). The fullscreen desktop wiring
-> (APP-row mentioning F11/Esc) is NOT WIRED in the current shell; the
-> controller (`internal/fullscreen`) remains delivered and tested.
+> Historical-surface note: rows whose Implementation/Tests columns cite
+> `ui/fyne/...` or `ui/gogui/...` files keep those HISTORICAL references
+> (the evidence they describe existed when the row was written; both
+> surfaces are retired — `ui/fyne` removed after parity, run 44330231458,
+> and `ui/gogui` + `cmd/app-gogui` removed by the run-46033044814
+> retirement, deployed in commit 4d1cf6d; guard
+> `scripts/ci/check-no-fyne.sh`). The CURRENT UI surface is the Wails v3
+> web shell: `cmd/app-wails` + `internal/transport/wails` +
+> `frontend/wails/dist` (single main window; in-page destination tabs;
+> validated `/api` facade). The fullscreen desktop wiring (APP-row
+> mentioning F11/Esc) is NOT WIRED in the current shell; the controller
+> (`internal/fullscreen`) remains delivered and tested.
 
 | APP-01 | One primary Fyne main window; all views inside it | `cmd/sheytan-music-visualizer/main.go`, `ui/fyne/app.go` (`NewApp` single-window lifecycle) | `ui/fyne/one_window_test.go` | Linux GUI smoke (Xvfb); Windows process/window fixture | the app window | readme; docs/architecture.md | VERIFIED locally (one-window test PASS); hosted Windows smoke BLOCKED (no local Windows) |
 | APP-02 | Windows GUI: no console window; hidden child processes | `scripts/build/build-windows.ps1` (`-H=windowsgui`), `internal/procattr` | `internal/procattr/procattr_windows_test.go`, PE-subsystem gate (`validate-pe`), `Test-GuiProcessCapture.ps1` | build-windows: `validate-pe`, `verify-extracted-package` | n/a (desktop launch) | docs/ci.md; docs/TROUBLESHOOTING.md | VERIFIED (code + tests present, fixtures run in preflight on pwsh hosts); native Windows execution BLOCKED locally, owned by hosted build-windows |
@@ -103,7 +105,8 @@ Evidence boundary: local verification ran on Linux x64 (pwsh 7.4.6,
 Go 1.27.4 — the run's exact toolchain). Hosted CI (Windows UCRT64 lane,
 Linux desktop lane, CodeQL) owns the platform-specific rows after the
 owner pushes; no hosted run was triggered in this session. Full command
-log and exit codes: repository `ci-logs/` and the run's `note.md`.
+log and exit codes: repository `ci-logs/` and the session execution
+note (git history).
 
 | ID | Report section | Requested behavior | Code path / symbol | Change made or reason retained | Tests / commands and result | Docs | Status | Dependency / next gate | Platform evidence |
 |---|---|---|---|---|---|---|---|---|---|
@@ -127,7 +130,7 @@ log and exit codes: repository `ci-logs/` and the run's `note.md`.
 | R18 | §18 POC scenarios A–E | Go studio / audio / cache / Godot control / preview / offline frames / mux / two-node mesh; scenarios A–E runnable with recorded results | Scenario A/B/C/E code paths exist partially (A: studio slice EXISTING; B determinism: render tests; D: five-platform staged; E: mesh staged) | Godot/two-node POC components not runnable in this window (no Godot, single host) — recorded, staged | render determinism tests PASS (software adapter); five-platform scenario D BLOCKED (single OS sandbox) | roadmap.md; docs/GPU-RENDERING.md | PARTIAL → statuses split: EXISTING_AND_VERIFIED (A slice, determinism), STAGED_WITH_GATE (B full, D, E) | hardware + Godot gates | Linux x64 local (software renderer, honestly labelled) |
 | R19 | §19 Package boundaries | Proposed package map enforced: DSP ⊬ UI; scene ⊬ renderer; serializable render jobs; capability probing separate from encode; versioned Godot IPC; UI consumes immutable snapshots | Actual: `internal/dsp` (no UI imports), `internal/export` (serializable requests), `internal/fflocate` (probe ≠ encode), `internal/content` (UI-independent), `ui/fyne` consumes Studio events/entities | Boundary rules verified by import audit (no UI imports in dsp/content/export core); Godot IPC boundary has no code yet (R05) | `go list` import audit during session; `go vet` clean | docs/architecture.md | EXISTING_AND_VERIFIED (existing boundaries); STAGED_WITH_GATE (Godot/mesh boundaries) | R05 gate | Linux x64 local |
 | R20 | §20 Blockers 1–14 | Track each blocker with evidence/owner/decision | (1) install/launch per platform → CI owned; (2) save/reopen corruption → prevented+tested this session; (3) baseline audio import → verified Linux; (4) 3D lifecycle crash → N/A (no 3D yet); (5) export FPS/A-V sync → validated Linux basic; (6) UI blocked by export → non-blocking export job exists; (7) false HW acceleration → honest adapter classification tests; (8) partial export → cancel/cleanup exists; (9)(10) mesh blockers → N/A; (11) licensing notices → present; (12) CI evidence → this ledger; (13) migration compatibility → additive-only fields tested; (14) known crash/data-loss → five-gate repair closed the confirmed defects | ledger maintained in this file | see rows above | docs/REQUIREMENTS-TRACEABILITY.md | EXISTING_AND_VERIFIED (2,3,5,6,7,8,11,13) / STAGED (1,4,9,10,12-hosted,14-retest) | hosted verification | mixed (per row) |
-| R21 | §21 Agent contract | Evidence per gate; platforms/runtime classes recorded; no unsupported stable label | `ci-logs/` (session evidence), `note.md` (final receipt), `docs/REQUIREMENTS-TRACEABILITY.md` | Every locally-executed gate logged with command + exit code; Windows/CodeQL marked NOT_RETRIEVED where no evidence exists | artifact: source ZIP + note.md in the agent download directory | note.md | IMPLEMENTED_AND_TESTED | owner-hosted rerun | Linux x64 local |
+| R21 | §21 Agent contract | Evidence per gate; platforms/runtime classes recorded; no unsupported stable label | `ci-logs/` (session evidence), session execution note in git history (final receipt), `docs/REQUIREMENTS-TRACEABILITY.md` | Every locally-executed gate logged with command + exit code; Windows/CodeQL marked NOT_RETRIEVED where no evidence exists | artifact: source ZIP + execution note in the agent download directory | session note (git history) | IMPLEMENTED_AND_TESTED | owner-hosted rerun | Linux x64 local |
 | R22 | §22 Research references | Recheck official versions before pinning; record URL/version/date/decision | `go.mod` (fyne v2.8.2 verified live), toolchain go1.27.4 (verified), `internal/mediatools/manifest.json` (pinned FFmpeg n9.0.2-61-gd59078794d assets + digests; run-45042834042 rotation after the previous autobuild was removed upstream) | Fyne v2.8.2 and Go 1.27.4 verified against the live tree in this session; the rotated FFmpeg pin was re-verified from the archive itself on 2026-11-23 (GPL buildconf, no nonfree, libx264/x265 present); Godot 4.7.2 / GStreamer 1.28.9 upstream archive checks NOT retrievable from this sandbox — carried from the work order research, flagged for re-verification before any pin use | `go list -m fyne.io/fyne/v2` = v2.8.2; `go version` = 1.27.4; pinned `ffmpeg -version` = n9.0.2-61-gd59078794d-20261122 | docs/DEPENDENCIES (this ledger row); packaging/FFMPEG-TOOLS-PROVENANCE.md | EXISTING_AND_VERIFIED (in-tree pins); STAGED_WITH_GATE (external version recheck) | owner network recheck | Linux x64 local |
 | R23 | §23 Final product objective | One local-first creative studio across five platforms without false claims | current: Windows/Linux two-lane CI; macOS/Android/iOS lanes NOT present in build-desktop.yml (verified) | No five-platform claim made anywhere in docs this session; platform support matrix states Windows/Linux only | workflow audit (jobs list) | docs/INDEX.md; roadmap.md | STAGED_WITH_GATE | platform lanes land one at a time with real proof | hosted |
 | R24 | §3.12 Content milestone (added) | Full CRUD lifecycle, stable identities, transactional persistence, referential integrity, undo/redo, recovery, import safety, concurrency, UI targeting | `internal/content` (whole package, this session), `internal/project` additive fields, `internal/studio` wiring | IMPLEMENTED this session: typed IDs, revision+hash preconditions, journal recovery, trash/restore/purge, bounded undo/redo, duplicate-aware import, hostile-name mapping, render guard; studio Save/Load routed through the boundary for library-rooted paths | `go test ./internal/content/ ./internal/project/ ./internal/studio/` PASS (count=1, race count=2); scenario matrix in docs/MV-CONTENT-INTEGRITY.md all PASS | docs/MV-CONTENT-INTEGRITY.md | IMPLEMENTED_AND_TESTED (service+wiring); STAGED_WITH_GATE (library browser UI surface) | UI library screens milestone | Linux x64 local; Windows rerun hosted |

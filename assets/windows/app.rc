@@ -1,8 +1,8 @@
 // app.rc - Windows resource script for the SHEYTAN Music Visualizer
-// desktop executable (cmd/app-gogui).
+// desktop executable (cmd/app-wails).
 //
 // Compiled by scripts/build/build-windows.ps1 with the UCRT64 windres
-// into cmd/app-gogui/resource.syso; the Go linker embeds the .syso so
+// into cmd/app-wails/resource.syso; the Go linker embeds the .syso so
 // the EXECUTION FILE itself carries the SHEYTAN brand icon and the
 // product metadata (run 45297707372 repair). The version label follows
 // the product's single-label policy: BETA (no numbered release labels;

@@ -4,7 +4,8 @@ package export
 // FFmpeg: a short synthetic fixture at 1080p and 4K, streamed frames,
 // bounded memory, ffprobe validation, cancel handling and the
 // missing-encoder path. The test skips with an honest message when
-// FFmpeg is not installed (recorded as NOT AVAILABLE in note.md).
+// FFmpeg is not installed (recorded as NOT AVAILABLE in the session
+// notes, preserved in git history).
 
 import (
 	"context"

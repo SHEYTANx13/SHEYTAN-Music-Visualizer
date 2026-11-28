@@ -142,20 +142,21 @@
   reached parity (`go.mod`/`go.sum` contain no Fyne reference;
   `scripts/ci/check-no-fyne.sh` enforces this in CI). TOOLKIT
   MIGRATION (2026-11-21, run 44648357437 repair): `gioui.org` was
-  removed and the native shell now uses the actual Go-Gui library.
-  The current presentation dependencies are:
-  - `github.com/go-gui-org/go-gui v0.99.1` — the native Go-Gui shell
-    toolkit (`cmd/app-gogui`, `ui/gogui`). Immediate-mode Go-first GUI;
-    the Linux desktop backend is CGO-FREE (pure-Go X11 via jezek/xgb,
-    runtime dlopen of libEGL/libGL/wayland/xkbcommon — no `-dev`
-    headers or pkg-config UI modules at build time); Windows desktop is
-    cgo-free; macOS uses the host toolchain (Metal backend).
-  - `github.com/wailsapp/wails/v3 v3.1.0` — the alternative
-    web-technology shell (`cmd/app-wails`,
-    `internal/transport/wails`, `frontend/wails/dist`). Built ONLY in
-    the cgo-free purego profile with the `sheytan_nogpu` tag, because
-    the gogpu fakecgo stack and Wails' purego fakecgo cannot link into
-    one binary; that profile renders through the honest CPU renderer.
+  removed and the native shell now used the actual Go-Gui library.
+  GO-GUI RETIREMENT (run-46033044814 repair, deployed to `main` in
+  commit 4d1cf6d): the Go-Gui desktop shell (`cmd/app-gogui`,
+  `ui/gogui`) was REMOVED and the Wails web shell became THE product
+  desktop shell; the retired-toolkit guard
+  (`scripts/ci/check-no-fyne.sh`) keeps Fyne AND go-gui out of the
+  module graph. The current presentation dependency is:
+  - `github.com/wailsapp/wails/v3 v3.1.0` — the product
+    web-technology desktop shell (`cmd/app-wails`,
+    `internal/transport/wails`, `frontend/wails/dist`). Built in
+    the cgo-free purego profile with the `sheytan_nogpu` tag (the
+    gogpu fakecgo stack and Wails' purego fakecgo cannot link into
+    one binary); that profile renders through the honest CPU
+    renderer. Linux runtime requires GTK4 + WebKitGTK 6.0 (dlopen;
+    installed by the build lane since run 46121470729).
   - `github.com/gogpu/wgpu v0.34.15` (pinned, unchanged) — the native
     GPU renderer behind `internal/render`; `v0.35.2` exists upstream
     and was deliberately NOT adopted (no blind upgrades; the pinned

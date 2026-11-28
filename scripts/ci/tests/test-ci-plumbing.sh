@@ -660,6 +660,55 @@ else
   report FAIL "H33" "manifest env parity fixture failed: $(cat "$T/h33.txt" 2>/dev/null | tail -3)"
 fi
 
+# ---------- H35: codeql profile END-TO-END (run 46121470699 repair) -------
+# The codeql manifest profile had never been EXECUTED by any fixture: a
+# Python tuple leaked into the serialized job rows ("result": ["success",
+# "", ""]), schema validation failed closed, the manifest never landed and
+# both hosted runs (46033044805, 46121470699) went red with the
+# run-42376176493 signature while every local suite stayed green. This
+# fixture executes the writer with a simulated hosted env so the class is
+# structurally impossible again: (1) both analyze jobs "success" must give
+# rc=0, aggregate success and PLAIN-STRING job results; (2) an
+# "abandoned" conclusion must still produce a manifest with the
+# result=failure classification and the aggregate flipped to failure.
+(
+  cd "$T" || exit 3
+  RUN_ID=46121470699 RUN_ATTEMPT=1 \
+  COMMIT_SHA=2280a28b54be73eeba98555f383b58bf752890af REF=refs/heads/main \
+  EVENT=push REPO=SHEYTANx13/SHEYTAN-Music-Visualizer RUNNER_OS_LABEL=Linux \
+  STARTED_AT=2026-11-28T06:00:00Z RESULT_ANALYZE_GO=success RESULT_ANALYZE_ACTIONS=success \
+  python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile codeql --out c1/manifest.json >c1.out 2>&1
+  echo $? > c1.rc
+  RUN_ID=46121470699 RUN_ATTEMPT=2 \
+  COMMIT_SHA=2280a28b54be73eeba98555f383b58bf752890af REF=refs/heads/main \
+  EVENT=push REPO=SHEYTANx13/SHEYTAN-Music-Visualizer RUNNER_OS_LABEL=Linux \
+  STARTED_AT='' RESULT_ANALYZE_GO=abandoned RESULT_ANALYZE_ACTIONS=success \
+  python3 "$REPO_ROOT/scripts/ci/write-manifest.py" --profile codeql --out c2/manifest.json >c2.out 2>&1
+  echo $? > c2.rc
+  python3 - > h35.txt 2>&1 <<'PYH35'
+import json
+ok = open("c1/manifest.json", encoding="ascii")
+d1 = json.load(ok)
+assert d1["codeql"]["result"] == "success", d1["codeql"]
+for job in d1["jobs"]:
+    assert isinstance(job["result"], str) and job["result"] == "success", job
+d2 = json.load(open("c2/manifest.json", encoding="ascii"))
+# "abandoned" is a KNOWN conclusion (run-45678113841 vocabulary): recorded
+# verbatim, aggregate flips to failure because it is not success.
+assert d2["codeql"]["result"] == "failure", d2["codeql"]
+go_row = next(j for j in d2["jobs"] if j["name"] == "analyze (go)")
+assert go_row["result"] == "abandoned" and "result_raw" not in go_row, go_row
+print("H35-OK")
+PYH35
+  echo $? > h35.rc
+)
+if [ "$(cat "$T/c1.rc")" = 0 ] && [ "$(cat "$T/c2.rc")" = 0 ] \
+   && [ "$(cat "$T/h35.rc")" = 0 ] && grep -q "H35-OK" "$T/h35.txt"; then
+  report PASS "H35" "codeql manifest profile end-to-end: success env writes a validated manifest (plain-string job results, aggregate success); abandoned conclusion still writes a manifest classified failure with result_raw recorded"
+else
+  report FAIL "H35" "codeql manifest end-to-end fixture failed: $(cat "$T/h35.txt" 2>/dev/null | tail -3)"
+fi
+
 # ---------- H32: emergency report disambiguates the manifest state ---------
 (
   cd "$T" || exit 3
