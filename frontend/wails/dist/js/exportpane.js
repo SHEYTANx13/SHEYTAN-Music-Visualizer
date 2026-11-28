@@ -69,6 +69,48 @@ function renderExportStatus(doc) {
 }
 
 export function wireExportControls() {
+    // Editing tools (run 46168717789): the shared format args flow into
+    // BOTH export.start and export.preview; the subtitle attachment is
+    // native-dialog state owned by Go (the web layer sees the state
+    // chip only, never a path).
+    const subtitleBtn = $("cmd-export-subtitle");
+    if (subtitleBtn) {
+        subtitleBtn.addEventListener("click", async () => {
+            setBusy(subtitleBtn, true, "Opening...");
+            try {
+                await postCommand("export.subtitle", {});
+                subtitleAttached = true;
+                setText($("export-subtitle-state"), "subtitles attached (burned into the export)");
+                const clear = $("cmd-export-subtitle-clear");
+                if (clear) clear.hidden = false;
+                setStatus("subtitles: file picked — it will be burned into exports and previews");
+            } catch (err) {
+                showAPIError(err.message);
+            } finally {
+                setBusy(subtitleBtn, false);
+            }
+        });
+    }
+    const clearBtn = $("cmd-export-subtitle-clear");
+    if (clearBtn) {
+        clearBtn.addEventListener("click", async () => {
+            try {
+                await postCommand("export.subtitle.clear", {});
+                subtitleAttached = false;
+                setText($("export-subtitle-state"), "no subtitles attached");
+                clearBtn.hidden = true;
+                setStatus("subtitles removed");
+            } catch (err) {
+                showAPIError(err.message);
+            }
+        });
+    }
+    const previewBtn = $("cmd-export-preview");
+    if (previewBtn) {
+        previewBtn.addEventListener("click", () => {
+            startExport(buildSharedExportArgs({ preview: 8 }), previewBtn, "export.preview", "preview started: pick the destination, the sample encodes with your exact settings");
+        });
+    }
     // Height follows the chosen resolution preset (the presets carry
     // data-height); the height select stays user-editable.
     const width = $("export-width");
@@ -82,33 +124,45 @@ export function wireExportControls() {
     const start = $("cmd-export-start");
     if (start) {
         start.addEventListener("click", () => {
-            const args = {
-                width: Number($("export-width")?.value || 1920),
-                height: Number($("export-height")?.value || 1080),
-                fps: Number($("export-fps")?.value || 30),
-                videoCodec: String($("export-codec")?.value || ""),
-                qualityPreset: String($("export-quality")?.value || ""),
-            };
-            startExport(args, start);
+            startExport(buildSharedExportArgs(), start);
         });
     }
     const cancel = $("cmd-export-cancel");
     if (cancel) cancel.addEventListener("click", () => runCommand("export.cancel"));
 }
 
-async function startExport(args, btn) {
+/* The format + editing args shared by export.start and export.preview:
+ * one builder, so a preview is EXACTLY what the full export will do. */
+function buildSharedExportArgs(extra = {}) {
+    return {
+        width: Number($("export-width")?.value || 1920),
+        height: Number($("export-height")?.value || 1080),
+        fps: Number($("export-fps")?.value || 30),
+        videoCodec: String($("export-codec")?.value || ""),
+        qualityPreset: String($("export-quality")?.value || ""),
+        trimStart: Number($("export-trim-start")?.value || 0),
+        trimDuration: Number($("export-trim-duration")?.value || 0),
+        ...extra,
+    };
+}
+
+async function startExport(args, btn, command = "export.start", okMessage = "export started: pick the destination in the native dialog") {
     setBusy(btn, true, "Starting...");
     try {
-        await postCommand("export.start", args);
-        setStatus("export started: pick the destination in the native dialog");
+        await postCommand(command, args);
+        setStatus(okMessage);
     } catch (err) {
         showAPIError(err.message);
-        setStatus(`export.start failed — ${err.message}`);
+        setStatus(`${command} failed — ${err.message}`);
     } finally {
         setBusy(btn, false);
         await loadExportStatus();
     }
 }
+
+/* Subtitle attachment state mirrors the Go-owned native-dialog state;
+ * the web layer never receives the path itself. */
+let subtitleAttached = false;
 
 /* The export pane polls at the transport tick cadence while a job is
  * running (or right after one finished, so the result row lands). The

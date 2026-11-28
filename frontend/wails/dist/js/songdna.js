@@ -11,7 +11,13 @@
  */
 
 import { fetchJSON, showAPIError } from "./api.js";
-import { $, setText, clearNode } from "./dom.js";
+// renderKV is REQUIRED here: the ready-DNA branch renders the defaults
+// and measured tables with it. The missing import made every ready
+// refresh throw "renderKV is not defined", which the catch surfaced as
+// "Backend API unreachable: renderKV is not defined" and froze the
+// bounded polling loop (isAPIHealthy went false), so importing audio
+// appeared to do nothing. Run 46168717789 app repair.
+import { $, setText, clearNode, renderKV } from "./dom.js";
 import { state } from "./state.js";
 
 const FEATURES = [

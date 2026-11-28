@@ -101,3 +101,22 @@
     background: rgba(229, 83, 75, 0.08);
     font-size: 13px;
 }
+
+/* --- Editing tools (run 46168717789) --- */
+
+.export-editing {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0;
+}
+
+.export-editing .note {
+    flex-basis: 100%;
+    margin: 0;
+}
+
+.export-actions .btn {
+    min-height: 44px;
+}

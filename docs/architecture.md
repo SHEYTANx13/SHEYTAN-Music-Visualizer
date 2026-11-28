@@ -97,7 +97,11 @@ real-time preview canvas is owned by the native render stack.
 - Exactly ONE Wails top-level window (`main`); the workspace
   destinations are in-page tabs rendered from the canonical
   `DestinationCatalog` (`/api/destinations`), including honest empty
-  states for unavailable destinations. The retired-toolkit guard
+  states for unavailable destinations. Eleven of the twelve
+  destinations are live surfaces; the Worlds tab (run 46168717789)
+  serves the real per-track multi-scene world plan (`/api/worlds`,
+  internal/mvplan) with honest no-track/pending/ready states. The
+  retired-toolkit guard
   (`scripts/ci/check-no-fyne.sh`) keeps Fyne and go-gui out of the
   tree.
 - `internal/transport/wails/service.go` is deliberately toolkit-free

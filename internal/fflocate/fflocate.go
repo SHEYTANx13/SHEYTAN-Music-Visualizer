@@ -12,7 +12,12 @@
 //  3. App-local portable tools: <app root>/tools/ffmpeg/bin
 //     (apppaths Layout.ToolsFFmpegBin; the user-managed portable
 //     location — shipped as an EMPTY directory in the package).
-//  4. System PATH (exec.LookPath) — the documented external fallback.
+//  4. Well-known system locations (run 46168717789 "search all the
+//     system": OTHER APPLICATIONS routinely install FFmpeg outside
+//     PATH — winget/scoop/choco dirs on Windows, Homebrew/MacPorts on
+//     macOS, /usr/local and friends on Linux). The list is a bounded,
+//     static per-GOOS table probed read-only (existence checks only).
+//  5. System PATH (exec.LookPath) — the documented external fallback.
 //
 // The locator only establishes CANDIDATE paths (existence + regular
 // file). Version/capability probing stays with the callers
@@ -141,6 +146,69 @@ func Locate(o Options) (Result, error) {
 	return Result{}, fmt.Errorf(
 		"fflocate: ffmpeg/ffprobe not found (searched: configured directory, app-managed tools, app-local tools dir, PATH); " +
 			"install FFmpeg locally, use the in-app Media Tools & Codecs download, or place both binaries in <app>/tools/ffmpeg/bin")
+}
+
+// wellKnownDirs returns the bounded per-GOOS list of directories OTHER
+// applications commonly install FFmpeg into (run 46168717789 system
+// recognition). Every entry is probed read-only; nothing is executed
+// during discovery. The list is intentionally static and small (no
+// filesystem walks): discovery must stay O(len(list)) and never scan.
+func wellKnownDirs(goos string) []string {
+	home := os.Getenv("HOME")
+	localappdata := os.Getenv("LOCALAPPDATA")
+	programfiles := os.Getenv("ProgramFiles")
+	programfilesx86 := os.Getenv("ProgramFiles(x86)")
+	var dirs []string
+	switch goos {
+	case "windows":
+		dirs = []string{
+			joinDir(programfiles, "ffmpeg", "bin"),
+			joinDir(programfilesx86, "ffmpeg", "bin"),
+			`C:\ffmpeg\bin`,
+			joinDir(`C:\ProgramData`, "chocolatey", "bin"),
+			joinDir(localappdata, "Microsoft", "WinGet", "Links"),
+			joinDir(localappdata, "Programs", "ffmpeg", "bin"),
+			joinDir(os.Getenv("USERPROFILE"), "scoop", "apps", "ffmpeg", "current", "bin"),
+			joinDir(os.Getenv("USERPROFILE"), "scoop", "shims"),
+		}
+	case "darwin":
+		dirs = []string{
+			"/opt/homebrew/bin",
+			"/usr/local/bin",
+			"/opt/local/bin",
+		}
+	default: // linux and the other XDG platforms
+		dirs = []string{
+			"/usr/local/bin",
+			"/usr/bin",
+			"/snap/bin",
+			"/opt/ffmpeg/bin",
+			joinDir(home, ".local", "bin"),
+			joinDir(home, "bin"),
+		}
+	}
+	out := dirs[:0]
+	for _, d := range dirs {
+		if strings.TrimSpace(d) != "" {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// joinDir joins non-empty path segments (empty segments are skipped so
+// unset environment variables cannot produce relative junk paths).
+func joinDir(segments ...string) string {
+	parts := make([]string, 0, len(segments))
+	for _, s := range segments {
+		if strings.TrimSpace(s) != "" {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return filepath.Join(parts...)
 }
 
 // pairInDir checks the exact binary names inside dir.

@@ -12,40 +12,44 @@ type CommandID string
 // Canonical command identifiers. Values are stable; never rename, only
 // append.
 const (
-	CmdImportAudio        CommandID = "import.audio"
-	CmdPlayPause          CommandID = "transport.play-pause"
-	CmdStop               CommandID = "transport.stop"
-	CmdSeekBack           CommandID = "transport.seek-back"
-	CmdSeekForward        CommandID = "transport.seek-forward"
-	CmdSetVolume          CommandID = "transport.set-volume"
-	CmdProjectSave        CommandID = "project.save"
-	CmdProjectOpen        CommandID = "project.open"
-	CmdExportStart        CommandID = "export.start"
-	CmdExportCancel       CommandID = "export.cancel"
-	CmdRendererSelect     CommandID = "renderer.select"
-	CmdModeSet            CommandID = "visualizer.mode.set"
-	CmdPaletteSet         CommandID = "visualizer.palette.set"
-	CmdSensitivitySet     CommandID = "visualizer.sensitivity.set"
-	CmdBackgroundLayerSet CommandID = "visualizer.background-layer.set"
-	CmdPresetApply        CommandID = "visualizer.preset.apply"
-	CmdIntensitySet       CommandID = "theme.intensity.set"
-	CmdReducedMotionSet   CommandID = "theme.reduced-motion.set"
-	CmdReducedGlowSet     CommandID = "theme.reduced-glow.set"
-	CmdNavigate           CommandID = "navigate"
-	CmdTabsReorder        CommandID = "workspace.tabs.reorder"
-	CmdTabsReset          CommandID = "workspace.tabs.reset"
-	CmdSplitOrientation   CommandID = "workspace.split.orientation"
-	CmdPanelCollapse      CommandID = "workspace.panel.collapse"
-	CmdPanelRestore       CommandID = "workspace.panel.restore"
-	CmdLayoutReset        CommandID = "workspace.layout.reset"
-	CmdMediaToolsInstall  CommandID = "mediatools.install"
-	CmdMediaToolsOpen     CommandID = "mediatools.open"
-	CmdAnalyzePath        CommandID = "systemfiles.analyze"
-	CmdHelpOpen           CommandID = "help.open"
-	CmdLogsReveal         CommandID = "logs.reveal"
-	CmdCopyToClipboard    CommandID = "clipboard.copy"
-	CmdQuit               CommandID = "app.quit"
-	CmdAbout              CommandID = "app.about"
+	CmdImportAudio         CommandID = "import.audio"
+	CmdPlayPause           CommandID = "transport.play-pause"
+	CmdStop                CommandID = "transport.stop"
+	CmdSeekBack            CommandID = "transport.seek-back"
+	CmdSeekForward         CommandID = "transport.seek-forward"
+	CmdSetVolume           CommandID = "transport.set-volume"
+	CmdProjectSave         CommandID = "project.save"
+	CmdProjectOpen         CommandID = "project.open"
+	CmdExportStart         CommandID = "export.start"
+	CmdExportCancel        CommandID = "export.cancel"
+	CmdExportPreview       CommandID = "export.preview"
+	CmdExportSubtitle      CommandID = "export.subtitle"
+	CmdExportSubtitleClear CommandID = "export.subtitle.clear"
+	CmdRendererSelect      CommandID = "renderer.select"
+	CmdModeSet             CommandID = "visualizer.mode.set"
+	CmdPaletteSet          CommandID = "visualizer.palette.set"
+	CmdSensitivitySet      CommandID = "visualizer.sensitivity.set"
+	CmdBackgroundLayerSet  CommandID = "visualizer.background-layer.set"
+	CmdPresetApply         CommandID = "visualizer.preset.apply"
+	CmdIntensitySet        CommandID = "theme.intensity.set"
+	CmdReducedMotionSet    CommandID = "theme.reduced-motion.set"
+	CmdReducedGlowSet      CommandID = "theme.reduced-glow.set"
+	CmdNavigate            CommandID = "navigate"
+	CmdTabsReorder         CommandID = "workspace.tabs.reorder"
+	CmdTabsReset           CommandID = "workspace.tabs.reset"
+	CmdSplitOrientation    CommandID = "workspace.split.orientation"
+	CmdPanelCollapse       CommandID = "workspace.panel.collapse"
+	CmdPanelRestore        CommandID = "workspace.panel.restore"
+	CmdLayoutReset         CommandID = "workspace.layout.reset"
+	CmdMediaToolsInstall   CommandID = "mediatools.install"
+	CmdMediaToolsOpen      CommandID = "mediatools.open"
+	CmdAnalyzePath         CommandID = "systemfiles.analyze"
+	CmdHelpOpen            CommandID = "help.open"
+	CmdLogsReveal          CommandID = "logs.reveal"
+	CmdDiagnosticsExport   CommandID = "diagnostics.export"
+	CmdCopyToClipboard     CommandID = "clipboard.copy"
+	CmdQuit                CommandID = "app.quit"
+	CmdAbout               CommandID = "app.about"
 )
 
 // Shortcut is a desktop keyboard binding for one command. Platforms
@@ -76,13 +80,14 @@ func ValidateCommand(id CommandID) error {
 	switch id {
 	case CmdImportAudio, CmdPlayPause, CmdStop, CmdSeekBack, CmdSeekForward,
 		CmdSetVolume, CmdProjectSave, CmdProjectOpen, CmdExportStart,
-		CmdExportCancel, CmdRendererSelect, CmdModeSet, CmdPaletteSet,
+		CmdExportCancel, CmdExportPreview, CmdExportSubtitle,
+		CmdExportSubtitleClear, CmdRendererSelect, CmdModeSet, CmdPaletteSet,
 		CmdSensitivitySet, CmdBackgroundLayerSet, CmdPresetApply,
 		CmdIntensitySet, CmdReducedMotionSet, CmdReducedGlowSet,
 		CmdNavigate, CmdTabsReorder, CmdTabsReset, CmdSplitOrientation,
 		CmdPanelCollapse, CmdPanelRestore, CmdLayoutReset,
 		CmdMediaToolsInstall, CmdMediaToolsOpen, CmdAnalyzePath,
-		CmdHelpOpen, CmdLogsReveal, CmdCopyToClipboard, CmdQuit, CmdAbout:
+		CmdHelpOpen, CmdLogsReveal, CmdDiagnosticsExport, CmdCopyToClipboard, CmdQuit, CmdAbout:
 		return nil
 	}
 	return fmt.Errorf("presentation: unknown command %q", id)

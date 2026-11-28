@@ -10,13 +10,16 @@ import { fetchJSON } from "./api.js";
 import { $, setText, renderKV, formatDuration } from "./dom.js";
 import { state } from "./state.js";
 import { applyIntensityDefaults, tokenDocOrNull } from "./tokens.js";
+import { loadWorlds } from "./worlds.js";
 
 export async function loadBuildInfo() {
     state.build = await fetchJSON("/api/build-info");
-    setText($("build-version"), `${state.build.version} (commit ${state.build.commit})`);
+    // Run 46168717789 product decision: the commit identifier is no
+    // longer part of the product surface - the version label is the
+    // single user-facing build identity.
+    setText($("build-version"), state.build.version);
     renderKV($("home-build"), [
         ["Version", state.build.version],
-        ["Commit", state.build.commit],
         ["Built", `${state.build.date} by ${state.build.builtBy}`],
         ["Go", state.build.goVersion],
     ]);

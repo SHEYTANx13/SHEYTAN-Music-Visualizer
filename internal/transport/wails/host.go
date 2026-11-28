@@ -29,13 +29,24 @@ type hostDialogs interface {
 	// implementations must not treat it as a path. Returns "" when the
 	// user cancelled.
 	SaveExportPath(defaultName string) (string, error)
+
+	// SaveBundlePath shows the native save-file dialog for the
+	// diagnostics bundle destination (run 46168717789 log catcher).
+	// Returns "" when the user cancelled.
+	SaveBundlePath(defaultName string) (string, error)
+
+	// OpenSubtitlePath shows the native open-file dialog for a subtitle
+	// attachment (export burn-in). Returns "" when the user cancelled.
+	OpenSubtitlePath() (string, error)
 }
 
 // HostDialogsFuncs adapts two functions to hostDialogs. app.go builds
 // it over the real Wails v3 dialog runtime; tests build it over stubs.
 type HostDialogsFuncs struct {
-	OpenAudio  func() (string, error)
-	SaveExport func(defaultName string) (string, error)
+	OpenAudio    func() (string, error)
+	SaveExport   func(defaultName string) (string, error)
+	SaveBundle   func(defaultName string) (string, error)
+	OpenSubtitle func() (string, error)
 }
 
 // OpenAudioPath implements hostDialogs.
@@ -52,6 +63,22 @@ func (f HostDialogsFuncs) SaveExportPath(defaultName string) (string, error) {
 		return "", errDialogsUnavailable
 	}
 	return f.SaveExport(defaultName)
+}
+
+// SaveBundlePath implements hostDialogs.
+func (f HostDialogsFuncs) SaveBundlePath(defaultName string) (string, error) {
+	if f.SaveBundle == nil {
+		return "", errDialogsUnavailable
+	}
+	return f.SaveBundle(defaultName)
+}
+
+// OpenSubtitlePath implements hostDialogs.
+func (f HostDialogsFuncs) OpenSubtitlePath() (string, error) {
+	if f.OpenSubtitle == nil {
+		return "", errDialogsUnavailable
+	}
+	return f.OpenSubtitle()
 }
 
 // errDialogsUnavailable is the typed reason used when the capability

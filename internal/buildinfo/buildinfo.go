@@ -69,10 +69,14 @@ func Normalized() Info {
 }
 
 // Line returns the single-line identity string used by --version.
+// Run 46168717789 product decision: the commit identifier is internal
+// build metadata, not product identity - user-facing version lines no
+// longer carry it. The machine-readable JSON snapshot (BuildSnapshot)
+// keeps the commit field for the package-integrity CI observers.
 func Line() string {
 	i := Normalized()
-	return fmt.Sprintf("%s (commit %s, built %s by %s, %s)",
-		i.Version, i.Commit, i.Date, i.BuiltBy, i.GoVersion)
+	return fmt.Sprintf("%s (built %s by %s, %s)",
+		i.Version, i.Date, i.BuiltBy, i.GoVersion)
 }
 
 // jsonSnapshot is the stable machine-readable build-info shape. Field

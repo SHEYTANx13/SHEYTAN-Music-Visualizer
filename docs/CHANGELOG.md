@@ -1,5 +1,76 @@
 # Changelog
 
+## Run 46168717789 repair + feature run — macOS lane loud-death fix, app log catcher, Worlds tab, editing tools, smart media-tool search/download, commit-free product identity (2026-11-28)
+
+- **build-macos lane RED with ZERO gate evidence (step 7 conclusion
+  failure only) — SILENT-DEATH CLASS FIXED**: the script ran under
+  bare `set -u` on the macOS runner's bash 3.2, where an unguarded
+  abnormal exit dies with exit 1 and NO scannable record (every
+  ci_capture-guarded failure provably emits one, so the absence of any
+  gate record is the signature). The script now uses the
+  hosted-green build-linux.sh mechanics: `set -Eeuo pipefail` plus an
+  ERR trap that converts any unguarded death into an explicit, scannable
+  `ERROR:` record naming the failing command and line, and the
+  linux-proven tag/ldflags expansion idioms. A future anomaly can never
+  again surface as an evidence-less red.
+- **App log catcher (Windows: "no log to attach") — ROOT CAUSE FIXED**:
+  only the CLI authority opened the app log; the Wails product shell
+  (the binary users run) NEVER wrote app.log, so Diagnostics showed a
+  path no file backed. runShell now opens the log before the studio
+  (closed last, after teardown) and hands it to the facade; the
+  Diagnostics tab reports the LIVE writer state (including the honest
+  stderr-fallback failure class) and a new `diagnostics.export`
+  command writes a single ZIP bundle (app log + rotated generation +
+  crash reports + build metadata + data-layout facts) through the
+  native save dialog — everything sanitized app evidence, no media
+  content, no web-layer path access.
+- **"Backend API unreachable: renderKV is not defined" + dead audio
+  selection — ROOT CAUSE FIXED**: `frontend/wails/dist/js/songdna.js`
+  called `renderKV` without importing it; the first ready-DNA refresh
+  threw a ReferenceError, surfaced by the catch as the misleading
+  banner, and `isAPIHealthy` went false — freezing the whole 2 s
+  polling loop, which is why importing audio "did nothing". Import
+  added; the DNA pane, error banner and polling recover.
+- **Worlds tab completed (real product surface)**: the facade serves
+  the REAL per-track multi-scene world plan (`/api/worlds`, internal/
+  mvplan — chapters, world elements, camera, lighting, long-audio
+  policy, notes) with honest no-track/pending/ready/unavailable
+  states; the destination catalog flips Worlds to available; the pane
+  renders identity/camera/lighting cards, the chapter timeline and the
+  bounded element list with its own stylesheet and compact-breakpoint
+  behavior. No invented worlds anywhere.
+- **Video editing tools (export engine + facade + UI)**: trim/cut
+  (`TrimStart`/`TrimDuration` — render timeline and audio stream use
+  the SAME validated window, so the cut cannot drift), subtitle
+  burn-in (`export.subtitle` native picker; SRT/ASS/SSA/WebVTT and
+  every other format the local FFmpeg libass bridge reads; the build
+  is probed for the `subtitles` filter up front — a libass-less FFmpeg
+  is an actionable pre-flight error, never a mid-export death), and
+  `export.preview` — a REAL, ffprobe-validated sample encoded with the
+  EXACT chosen resolution/fps/codec/quality/cut/subtitles (bounded to
+  a representative length) so users choose format/quality with
+  evidence. Regression-pinned by real encode tests.
+- **FFmpeg/FFprobe recognition: search ALL the system**: fflocate
+  gained a bounded, read-only "well-known system locations" rule
+  between the app-local and PATH rules (winget/scoop/choco/Program
+  Files dirs on Windows, Homebrew/MacPorts on macOS, /usr/local,
+  /snap, ~/.local/bin on Linux) so tools installed by OTHER
+  applications are found. Media-tools downloads became smart: a
+  pinned pack that is ALREADY installed (version + digest identity in
+  current/manifest.json + the pair on disk) is never re-downloaded —
+  zero bytes transferred, state flips straight to Ready.
+- **Commit number removed from the product identity**: the human
+  `--version` line, the CLI metadata lines, the topbar version chip
+  and the Home Build card no longer carry the commit identifier; the
+  machine-readable `--build-info-json` contract (the package-integrity
+  CI observers' authority) is deliberately unchanged.
+- **Automation (minimal-design ask)**: after an import finishes, the
+  measured Song DNA personalizes the config as before and, when the
+  user has not customized anything, the video starts from the FIRST
+  built-in template with the DNA tuning applied on top — one action
+  from audio file to running music video.
+
+
 ## Run 46121470729 / 46121470699 repair — gofmt, Wails webview runtime, Windows shell build tags, CodeQL manifest tuple, deterministic zizmor, app icon runtime surface, docs truth cleanup (2026-11-28)
 
 - **gofmt-verify RED on every lane (preflight/linux/macos/windows) —

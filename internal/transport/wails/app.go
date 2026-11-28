@@ -15,6 +15,7 @@ import (
 
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/appicon"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -25,8 +26,13 @@ import (
 // asset handler serving the embedded frontend plus the /api/* facade
 // endpoints. It does NOT call app.Run; the caller owns the blocking
 // run and the studio teardown.
-func BuildApp(st *studio.Studio) *application.App {
+func BuildApp(st *studio.Studio, lg *logging.Log) *application.App {
 	svc := NewService(st)
+	// Run 46168717789 log catcher: the shell owns the LIVE application
+	// log; the diagnostics surface reports its real writer state and
+	// diagnostics.export bundles the file. Nil (headless/tests) keeps
+	// the honest resolution-based states.
+	svc.setRuntimeLog(lg)
 
 	app := application.New(application.Options{
 		Name:        brand.ProductName,
@@ -89,6 +95,33 @@ func BuildApp(st *studio.Studio) *application.App {
 				SetFilename(defaultName).
 				CanCreateDirectories(true).
 				AddFilter("MP4 video", "*.mp4").
+				PromptForSingleSelection()
+		},
+		OpenSubtitle: func() (string, error) {
+			a := application.Get()
+			if a == nil {
+				return "", fmt.Errorf("application is not running")
+			}
+			// Every format the FFmpeg libass bridge reads is offered:
+			// the format support belongs to the filter bridge.
+			return a.Dialog.OpenFile().
+				SetTitle("Attach subtitles (SRT / ASS / SSA / VTT / ...)").
+				CanChooseFiles(true).
+				AddFilter("Subtitle files", "*.srt;*.ass;*.ssa;*.vtt;*.sub;*.sami;*.smi;*.txt").
+				AddFilter("SubRip / WebVTT", "*.srt;*.vtt").
+				AddFilter("ASS / SSA", "*.ass;*.ssa").
+				PromptForSingleSelection()
+		},
+		SaveBundle: func(defaultName string) (string, error) {
+			a := application.Get()
+			if a == nil {
+				return "", fmt.Errorf("application is not running")
+			}
+			return a.Dialog.SaveFile().
+				SetMessage("Export diagnostics bundle (app log + crash reports)").
+				SetFilename(defaultName).
+				CanCreateDirectories(true).
+				AddFilter("ZIP archive", "*.zip").
 				PromptForSingleSelection()
 		},
 	})

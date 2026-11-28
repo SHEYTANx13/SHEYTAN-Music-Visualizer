@@ -64,9 +64,12 @@ func DestinationCatalog() []DestinationInfo {
 			Description: "Product overview, quick actions and session status."},
 		{ID: DestStudio, Title: "Studio", Icon: "studio", Order: 2, Available: true,
 			Description: "Library, live preview, inspector and transport."},
-		{ID: DestWorlds, Title: "Worlds", Icon: "worlds", Order: 3, Available: false,
-			EmptyState:  "Worlds scenes are not implemented in this build.",
-			Description: "Saved multi-scene worlds (planned)."},
+		// Run 46168717789: the Worlds tab is a REAL surface now — it
+		// renders the per-track multi-scene world plan (mvplan) the
+		// analysis pipeline derives from the measured Song DNA, with
+		// honest no-track/pending/ready states (no fake worlds).
+		{ID: DestWorlds, Title: "Worlds", Icon: "worlds", Order: 3, Available: true,
+			Description: "The per-track multi-scene world plan: chapters, world elements, camera and lighting derived from the measured Song DNA."},
 		{ID: DestTemplates, Title: "Templates", Icon: "templates", Order: 4, Available: true,
 			Description: "Built-in visualizer presets with their real parameters; the rendered frames stay native-shell surfaces."},
 		{ID: DestLibrary, Title: "Library", Icon: "library", Order: 5, Available: true,

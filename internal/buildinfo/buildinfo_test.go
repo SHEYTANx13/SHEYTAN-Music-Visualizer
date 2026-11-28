@@ -25,8 +25,11 @@ func TestLineIsSingleLine(t *testing.T) {
 	if strings.Contains(line, "\n") {
 		t.Fatalf("Line() must be single-line: %q", line)
 	}
-	if !strings.Contains(line, "commit") || !strings.Contains(line, "go") {
+	if !strings.Contains(line, "built") || !strings.Contains(line, "go") {
 		t.Fatalf("Line() missing metadata: %q", line)
+	}
+	if strings.Contains(line, "commit") {
+		t.Fatalf("Line() must not carry the commit identifier (run 46168717789): %q", line)
 	}
 }
 

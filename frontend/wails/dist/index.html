@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="css/transport.css">
     <link rel="stylesheet" href="css/controls.css">
     <link rel="stylesheet" href="css/dna.css">
+    <link rel="stylesheet" href="css/worlds.css">
     <link rel="stylesheet" href="css/export.css">
     <link rel="stylesheet" href="css/statusbar.css">
     <link rel="stylesheet" href="css/responsive.css">
@@ -107,7 +108,38 @@
 
         <section id="pane-worlds" class="pane" data-dest="worlds" hidden>
             <h2>Worlds</h2>
-            <div class="empty-state" id="empty-worlds"></div>
+            <p class="pane-desc" id="worlds-desc"></p>
+            <div class="empty-state" id="worlds-state" role="status"></div>
+            <div id="worlds-content" hidden>
+                <div class="card-grid">
+                    <div class="card">
+                        <h3>World identity</h3>
+                        <dl id="worlds-identity" class="kv"></dl>
+                    </div>
+                    <div class="card">
+                        <h3>Camera plan</h3>
+                        <dl id="worlds-camera" class="kv"></dl>
+                    </div>
+                    <div class="card">
+                        <h3>Lighting plan</h3>
+                        <dl id="worlds-lighting" class="kv"></dl>
+                    </div>
+                    <div class="card">
+                        <h3>Long-audio policy</h3>
+                        <dl id="worlds-longaudio" class="kv"></dl>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Chapters (scene spans)</h3>
+                    <ul id="worlds-chapters" class="worlds-chapters"></ul>
+                </div>
+                <div class="card">
+                    <h3>World elements</h3>
+                    <ul id="worlds-elements" class="worlds-elements"></ul>
+                    <p class="note" id="worlds-elements-note"></p>
+                </div>
+                <p class="note" id="worlds-note"></p>
+            </div>
         </section>
 
         <section id="pane-templates" class="pane" data-dest="templates" hidden>
@@ -198,12 +230,28 @@
                         <option value="compat">Compatibility</option>
                     </select>
                 </div>
+                <div class="export-field">
+                    <label for="export-trim-start">Cut from (seconds)</label>
+                    <input type="number" id="export-trim-start" min="0" step="0.5" value="0" inputmode="decimal">
+                </div>
+                <div class="export-field">
+                    <label for="export-trim-duration">Cut length (0 = to the end)</label>
+                    <input type="number" id="export-trim-duration" min="0" step="0.5" value="0" inputmode="decimal">
+                </div>
+            </div>
+            <div class="export-editing" role="group" aria-label="Video editing tools">
+                <button type="button" id="cmd-export-subtitle" class="btn">Attach subtitles&hellip;</button>
+                <button type="button" id="cmd-export-subtitle-clear" class="btn" hidden>Remove subtitles</button>
+                <span id="export-subtitle-state" class="status-chip" role="status">no subtitles attached</span>
+                <p class="note">SRT, ASS/SSA, WebVTT and every other format your FFmpeg&rsquo;s libass bridge reads. Subtitles are burned into the frames, so every player shows them.</p>
             </div>
             <div class="export-actions">
+                <button type="button" id="cmd-export-preview" class="btn">Preview chosen settings&hellip;</button>
                 <button type="button" id="cmd-export-start" class="btn btn-primary">Export Music Video</button>
                 <button type="button" id="cmd-export-cancel" class="btn" disabled>Cancel export</button>
                 <span id="export-state" class="status-chip" data-state="idle" role="status" aria-live="polite">idle</span>
             </div>
+            <p class="note" id="export-preview-note">Preview encodes a short real sample (8 s) with EXACTLY the chosen resolution, frame rate, codec, quality, cut and subtitles &mdash; ffprobe-validated, so you can play it and choose wisely.</p>
             <div class="export-progress" id="export-progress" hidden>
                 <div class="export-progress-head">
                     <span id="export-phase" class="export-phase">phase: rendering</span>
@@ -324,6 +372,11 @@
             <div class="card">
                 <h3>Snapshot</h3>
                 <pre id="diagnostics-json" class="json-view"></pre>
+            </div>
+            <div class="card">
+                <h3>Log bundle</h3>
+                <p class="note">One ZIP with the app log, the rotated generation, crash reports, build metadata and the data-layout facts — everything is sanitized app evidence, safe to attach to a bug report.</p>
+                <button type="button" id="cmd-diagnostics-export" class="btn btn-primary">Export diagnostics bundle&hellip;</button>
             </div>
         </section>
 

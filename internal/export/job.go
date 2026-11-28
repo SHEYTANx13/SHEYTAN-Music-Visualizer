@@ -14,6 +14,7 @@ import (
 	"image"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,27 @@ type Request struct {
 	AudioBitrate  string // e.g. "192k" (AAC; empty = 192k default)
 	AudioWavPath  string // canonical WAV from the PCM cache
 	AudioDuration float64
+
+	// Editing tools (run 46168717789): trim/cut, subtitle burn-in and
+	// the bounded preview sample.
+	//
+	// TrimStart is the cut-in point in seconds (0 = the beginning).
+	// TrimDuration is the cut length in seconds (0 = everything from
+	// TrimStart to the end). Both are validated against AudioDuration;
+	// the render timeline and the audio stream use the SAME window, so
+	// the cut is frame-accurate by construction.
+	TrimStart    float64
+	TrimDuration float64
+	// PreviewSeconds bounds the render to the FIRST PreviewSeconds of
+	// the chosen window (>0). A preview is a REAL encode with the EXACT
+	// chosen resolution/fps/codec/quality/subtitle settings, validated
+	// like a full export — "see the live version in your desired format
+	// and quality" without pretending to be a real-time player.
+	PreviewSeconds float64
+	// SubtitlePath burns a subtitle file (SRT/ASS/SSA/WebVTT and every
+	// other format the local FFmpeg's libass bridge reads) into the
+	// frames. Empty = no subtitle. Validated before rendering starts.
+	SubtitlePath string
 
 	// Frame source: the shared visualizer configuration and DNA. The
 	// same logic/config drives preview and export.
@@ -75,6 +97,11 @@ type Progress struct {
 	EncoderFrame   int
 	Phase          string // rendering | encoding | validating | done
 }
+
+// maxPreviewSeconds bounds the preview sample length (run 46168717789:
+// a preview is a real encode of the chosen settings; 60 s covers a
+// representative choice without pretending to be a full render).
+const maxPreviewSeconds = 60.0
 
 // Job runs one export.
 type Job struct {
@@ -124,9 +151,29 @@ func NewJob(req Request) (*Job, error) {
 	if req.AudioStateProvider == nil {
 		return nil, fmt.Errorf("export: audio state provider is required")
 	}
+	// Editing tools validation (run 46168717789): typed, actionable
+	// errors BEFORE any dialog/render work — never a mid-export death.
+	if req.TrimStart < 0 || req.TrimDuration < 0 {
+		return nil, fmt.Errorf("export: trim start/duration must be >= 0 (got %g/%g)", req.TrimStart, req.TrimDuration)
+	}
+	if req.AudioDuration > 0 && req.TrimStart >= req.AudioDuration {
+		return nil, fmt.Errorf("export: trim start %.2fs is beyond the track duration %.2fs", req.TrimStart, req.AudioDuration)
+	}
+	if req.PreviewSeconds < 0 || req.PreviewSeconds > maxPreviewSeconds {
+		return nil, fmt.Errorf("export: preview length must be in (0, %g] seconds or 0 for a full export, got %g", maxPreviewSeconds, req.PreviewSeconds)
+	}
 	env, err := DetectEnv(false)
 	if err != nil {
 		return nil, err
+	}
+	if req.SubtitlePath != "" {
+		fi, serr := os.Stat(req.SubtitlePath)
+		if serr != nil || fi.IsDir() {
+			return nil, fmt.Errorf("export: subtitle file not found: %s", req.SubtitlePath)
+		}
+		if !HasVideoFilter(env, "subtitles") {
+			return nil, fmt.Errorf("export: the selected FFmpeg build has no subtitles filter (libass missing) — use the in-app Media Tools download, which includes libass, or pick an FFmpeg build with --enable-libass")
+		}
 	}
 	enc, err := ResolveEncoderCodec(env, req.Encoder, req.VideoCodec)
 	if err != nil {
@@ -197,7 +244,21 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 	}()
 
 	start := time.Now()
-	totalFrames := int(j.req.AudioDuration * j.req.FPSRate.Float())
+	// Effective edit window (run 46168717789): [effStart, effStart+effDur)
+	// within the track. TrimDuration 0 = "to the end"; PreviewSeconds
+	// bounds the window further and is the REAL encode sample.
+	effStart := j.req.TrimStart
+	effDur := j.req.AudioDuration - effStart
+	if j.req.TrimDuration > 0 && j.req.TrimDuration < effDur {
+		effDur = j.req.TrimDuration
+	}
+	if j.req.PreviewSeconds > 0 && j.req.PreviewSeconds < effDur {
+		effDur = j.req.PreviewSeconds
+	}
+	if effDur <= 0 {
+		return nil, fmt.Errorf("export: effective export window is empty (trim start %.2fs, track %.2fs)", effStart, j.req.AudioDuration)
+	}
+	totalFrames := int(effDur * j.req.FPSRate.Float())
 	if totalFrames <= 0 {
 		return nil, fmt.Errorf("export: audio duration is zero")
 	}
@@ -229,16 +290,34 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 		"-video_size", fmt.Sprintf("%dx%d", j.req.Width, j.req.Height),
 		"-framerate", j.req.FPSRate.String(),
 		"-i", "pipe:0",
+	}
+	// The audio input uses the SAME edit window as the render timeline:
+	// input seeking on the canonical WAV is sample-accurate, so a cut
+	// video and its cut audio cannot drift apart.
+	if effStart > 0 {
+		args = append(args, "-ss", strconv.FormatFloat(effStart, 'f', 6, 64))
+	}
+	if effDur < j.req.AudioDuration {
+		args = append(args, "-t", strconv.FormatFloat(effDur, 'f', 6, 64))
+	}
+	args = append(args,
 		"-i", j.req.AudioWavPath,
 		"-map", "0:v:0", "-map", "1:a:0",
 		"-c:v", j.enc.Name,
-	}
+	)
 	args = append(args, j.enc.Args...)
 	if j.enc.Name == "libx264" || j.enc.Name == "libx265" {
 		args = append(args,
 			"-crf", q,
 			"-preset", encoderPresetFor(j.req.Width, j.req.Height, j.req.FPSRate.Float()),
 		)
+	}
+	// Subtitle burn-in (run 46168717789): libass renders the subtitles
+	// INTO the frames at encode time — every player shows them, no
+	// player-side subtitle support required. NewJob already proved the
+	// file exists and the filter is supported.
+	if j.req.SubtitlePath != "" {
+		args = append(args, "-vf", SubtitleFilterArg(j.req.SubtitlePath))
 	}
 	args = append(args,
 		"-pix_fmt", "yuv420p",
@@ -292,7 +371,7 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 				return
 			default:
 			}
-			t := float64(i) * float64(j.req.FPSRate.Den) / float64(j.req.FPSRate.Num)
+			t := effStart + float64(i)*float64(j.req.FPSRate.Den)/float64(j.req.FPSRate.Num)
 			img, rerr := j.renderFrame(i, t)
 			if rerr != nil {
 				procErr = fmt.Errorf("export: render frame %d: %w", i, rerr)
@@ -333,7 +412,7 @@ func (j *Job) Run(ctx context.Context) (*Result, error) {
 	// ffprobe validation
 	val, verr := Validate(j.env.FFprobePath, partPath, ValidationExpect{
 		Width: j.req.Width, Height: j.req.Height, FPS: j.req.FPSRate.Float(),
-		VideoCodec: j.req.VideoCodec, ExpectedDuration: j.req.AudioDuration,
+		VideoCodec: j.req.VideoCodec, ExpectedDuration: effDur,
 	})
 	if verr != nil {
 		return nil, fmt.Errorf("export: validation error: %w", verr)

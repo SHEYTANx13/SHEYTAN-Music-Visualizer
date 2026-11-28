@@ -120,6 +120,10 @@ var dispatchedCommands = []presentation.CommandID{
 	presentation.CmdReducedGlowSet,
 	presentation.CmdExportStart,
 	presentation.CmdExportCancel,
+	presentation.CmdExportPreview,
+	presentation.CmdExportSubtitle,
+	presentation.CmdExportSubtitleClear,
+	presentation.CmdDiagnosticsExport,
 	presentation.CmdQuit,
 }
 
@@ -185,6 +189,19 @@ type SheytanService struct {
 	// The path never crosses into the web layer; without a registered
 	// host the commands report an honest typed error instead.
 	dialogs hostDialogs
+
+	// subtitlePath is the user-selected subtitle file for export burn-in
+	// (run 46168717789 editing tools). Chosen through the NATIVE dialog;
+	// the path is consumed inside Go and never crosses into the web
+	// layer (the UI sees "attached"/"none", not the path).
+	subtitlePath string
+
+	// rtLog is the shell's LIVE application log (run 46168717789 log
+	// catcher): attached once from runShell via BuildApp. The
+	// diagnostics surface reports its real writer state and the
+	// diagnostics.export command bundles its file. nil = headless/test
+	// context (honest resolution-based states, no invented log).
+	rtLog *logging.Log
 }
 
 // NewService builds the facade over the given studio. A nil studio is
@@ -227,7 +244,6 @@ func (s *SheytanService) GetBuildInfo() presentation.BuildInfoDTO {
 	i := buildinfo.Normalized()
 	return presentation.BuildInfoDTO{
 		Version:   i.Version,
-		Commit:    i.Commit,
 		Date:      i.Date,
 		BuiltBy:   i.BuiltBy,
 		GoVersion: i.GoVersion,
@@ -418,12 +434,27 @@ func (s *SheytanService) GetDiagnostics() presentation.DiagnosticsDTO {
 	addCheck("data-layout", lay.DataRoot != "",
 		fmt.Sprintf("mode=%s root=%s (%s)", lay.Mode, lay.DataRoot, lay.Reason))
 
+	// Run 46168717789 log catcher: report the LIVE writer state. With
+	// an attached log the check proves the file is real; the stderr
+	// fallback (log directory unwritable) is an explicit FAIL-class
+	// detail, never a silent fake path.
 	logPath := ""
-	if dir, err := logging.Dir(); err != nil {
-		addCheck("log-directory", false, err.Error())
-	} else {
-		logPath = filepath.Join(dir, logging.FileName)
-		addCheck("log-directory", true, dir)
+	if lg := s.runtimeLog(); lg != nil {
+		logPath = lg.Path()
+		if lg.IsFallback() {
+			addCheck("log-writer", false,
+				"runtime log could not be opened; records go to stderr only (nothing to attach) — check the data layout reason above")
+		} else {
+			addCheck("log-writer", true, "active log "+logPath)
+		}
+	}
+	if logPath == "" {
+		if dir, err := logging.Dir(); err != nil {
+			addCheck("log-directory", false, err.Error())
+		} else {
+			logPath = filepath.Join(dir, logging.FileName)
+			addCheck("log-directory", true, dir)
+		}
 	}
 
 	rd := s.rendererEvidence()
@@ -553,6 +584,10 @@ type commandArgs struct {
 	FPS           *int     `json:"fps"`
 	VideoCodec    string   `json:"videoCodec"`
 	QualityPreset string   `json:"qualityPreset"`
+	// Editing tools (run 46168717789): trim window and preview length.
+	TrimStart    *float64 `json:"trimStart"`
+	TrimDuration *float64 `json:"trimDuration"`
+	Preview      *float64 `json:"preview"`
 }
 
 // parseCommandArgs decodes the JSON argument object. An empty payload
@@ -678,6 +713,17 @@ func (s *SheytanService) RunCommand(id string, argsJSON string) error {
 		return s.runExportStart(cmd, args)
 	case presentation.CmdExportCancel:
 		return s.runExportCancel(cmd)
+	case presentation.CmdExportPreview:
+		return s.runExportPreview(cmd, args)
+	case presentation.CmdExportSubtitle:
+		return s.runExportSubtitleAttach(cmd)
+	case presentation.CmdExportSubtitleClear:
+		s.mu.Lock()
+		s.subtitlePath = ""
+		s.mu.Unlock()
+		return nil
+	case presentation.CmdDiagnosticsExport:
+		return s.runDiagnosticsExport(cmd)
 	case presentation.CmdQuit:
 		s.mu.Lock()
 		quit := s.quit
@@ -845,6 +891,13 @@ func NewAssetHandler(svc *SheytanService) http.Handler {
 	// state. Both are read-only projections of studio state.
 	get("/api/songdna", func(w http.ResponseWriter, _ *http.Request) error {
 		writeJSON(w, http.StatusOK, svc.GetSongDNA())
+		return nil
+	})
+
+	// Worlds tab (run 46168717789): the real per-track multi-scene
+	// world plan (mvplan) with honest no-track/pending/ready states.
+	get("/api/worlds", func(w http.ResponseWriter, _ *http.Request) error {
+		writeJSON(w, http.StatusOK, svc.GetWorlds())
 		return nil
 	})
 	get("/api/export", func(w http.ResponseWriter, _ *http.Request) error {

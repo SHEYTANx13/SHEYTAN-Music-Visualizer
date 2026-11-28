@@ -138,3 +138,18 @@ pressure adaptation, journal + crash reconciliation. Future work
 (explicitly not claimed): the in-app web-shell Job Center surface
 rendering these snapshots; watchdog/heartbeat for UI/audio/scheduler
 stalls; goroutine-profile capture behind an explicit opt-in.
+
+## Diagnostics bundle (log catcher, run 46168717789)
+
+The product shell opens the runtime log itself (before this repair
+only the CLI did, so the windowed app produced no `app.log` at all).
+Diagnostics reports the LIVE writer state: an attached file log proves
+its path; a stderr fallback (data root unwritable) is an explicit
+check failure with the data-layout reason — never a silent fake path.
+
+`diagnostics.export` writes a single ZIP through the native save
+dialog: `app.log` (and its rotated generation when present), the
+bounded `crashes/*.txt` reports, `build-info.json` and
+`data-layout.txt`. Every entry is already-sanitized app evidence (the
+ASCII log contract owns the bytes); the bundle contains no media
+content and the chosen path never crosses into the web layer.

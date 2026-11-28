@@ -234,7 +234,7 @@ func checkBuildInfo(out io.Writer) error {
 			return fmt.Errorf("buildinfo.%s is empty", name)
 		}
 	}
-	fmt.Fprintf(out, "  version=%s commit=%s go=%s\n", i.Version, i.Commit, i.GoVersion)
+	fmt.Fprintf(out, "  version=%s go=%s\n", i.Version, i.GoVersion)
 	return nil
 }
 

@@ -265,6 +265,22 @@ func (m *Manager) Install(ctx context.Context) error {
 	ctx, m.cancel = context.WithCancel(ctx)
 	// remember the stable state to restore on cancellation/failure
 	prevState, prevDetail := m.state, m.detail
+	// Run 46168717789 smart-download contract: a pinned pack that is
+	// ALREADY installed (version + digest identity in current/manifest
+	// + the pair on disk) must never be re-downloaded. Zero bytes are
+	// transferred; the state flips straight to Ready.
+	if info, ierr := InspectInstalled(m.opts.DataRoot); ierr == nil &&
+		info.Manifest.Version == m.pack.Version && info.Manifest.SHA256 == m.pack.SHA256 {
+		m.inFlight = false
+		m.cancel = nil
+		m.state = StateReady
+		m.stage = ""
+		m.detail = fmt.Sprintf("already current: pinned pack %s is installed (digest-verified at install time) — no download needed", m.pack.Version)
+		m.lastErr = ""
+		m.mu.Unlock()
+		m.notify()
+		return nil
+	}
 	m.state = StateDownloading
 	m.stage = "download"
 	m.mu.Unlock()

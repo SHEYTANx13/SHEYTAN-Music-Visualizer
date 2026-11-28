@@ -74,13 +74,12 @@ func (s *SheytanService) runImportAudio(cmd presentation.CommandID) error {
 	return nil
 }
 
-// runExportStart dispatches export.start: native save dialog for the
-// destination, then a fully validated export.Request. Argument
-// validation runs BEFORE the dialog host check, so bad input is a
-// typed error even in headless contexts and the dialog is never
-// opened for garbage.
-func (s *SheytanService) runExportStart(cmd presentation.CommandID, args commandArgs) error {
-	width, height, fps := 1920, 1080, 30
+// buildExportRequest validates the shared format/editing arguments and
+// returns the bounded values (run 46168717789: one authority for
+// export.start AND export.preview so a preview is EXACTLY the settings
+// the full export will use).
+func (s *SheytanService) buildExportRequest(cmd presentation.CommandID, args commandArgs, preview bool) (width, height, fps int, trimStart, trimDur, previewSecs float64, videoCodec, quality string, err error) {
+	width, height, fps = 1920, 1080, 30
 	if args.Width != nil {
 		width = *args.Width
 	}
@@ -91,17 +90,46 @@ func (s *SheytanService) runExportStart(cmd presentation.CommandID, args command
 		fps = *args.FPS
 	}
 	if width <= 0 || height <= 0 || width > maxFacadeWidth || height > maxFacadeHeight {
-		return argsError(cmd, "resolution must be within 1x1..%dx%d, got %dx%d",
+		return 0, 0, 0, 0, 0, 0, "", "", argsError(cmd, "resolution must be within 1x1..%dx%d, got %dx%d",
 			maxFacadeWidth, maxFacadeHeight, width, height)
 	}
 	if fps < export.MinFPS || fps > export.MaxFPS {
-		return argsError(cmd, "fps must be in [%d,%d], got %d", export.MinFPS, export.MaxFPS, fps)
+		return 0, 0, 0, 0, 0, 0, "", "", argsError(cmd, "fps must be in [%d,%d], got %d", export.MinFPS, export.MaxFPS, fps)
 	}
 	if !validFacadeCodecs[args.VideoCodec] {
-		return argsError(cmd, "videoCodec must be one of h264|hevc (empty = h264), got %q", args.VideoCodec)
+		return 0, 0, 0, 0, 0, 0, "", "", argsError(cmd, "videoCodec must be one of h264|hevc (empty = h264), got %q", args.VideoCodec)
 	}
 	if !validFacadeQualities[args.QualityPreset] {
-		return argsError(cmd, "qualityPreset must be one of high|balanced|compat (empty = high), got %q", args.QualityPreset)
+		return 0, 0, 0, 0, 0, 0, "", "", argsError(cmd, "qualityPreset must be one of high|balanced|compat (empty = high), got %q", args.QualityPreset)
+	}
+	if args.TrimStart != nil {
+		trimStart = *args.TrimStart
+	}
+	if args.TrimDuration != nil {
+		trimDur = *args.TrimDuration
+	}
+	if trimStart < 0 || trimDur < 0 {
+		return 0, 0, 0, 0, 0, 0, "", "", argsError(cmd, "trimStart/trimDuration must be >= 0, got %g/%g", trimStart, trimDur)
+	}
+	if args.Preview != nil {
+		previewSecs = *args.Preview
+	}
+	if previewSecs < 0 {
+		return 0, 0, 0, 0, 0, 0, "", "", argsError(cmd, "preview must be >= 0 (0 = no preview bound), got %g", previewSecs)
+	}
+	videoCodec, quality = args.VideoCodec, args.QualityPreset
+	return width, height, fps, trimStart, trimDur, previewSecs, videoCodec, quality, nil
+}
+
+// runExportStart dispatches export.start: native save dialog for the
+// destination, then a fully validated export.Request. Argument
+// validation runs BEFORE the dialog host check, so bad input is a
+// typed error even in headless contexts and the dialog is never
+// opened for garbage.
+func (s *SheytanService) runExportStart(cmd presentation.CommandID, args commandArgs) error {
+	width, height, fps, trimStart, trimDur, _, videoCodec, quality, aerr := s.buildExportRequest(cmd, args, false)
+	if aerr != nil {
+		return aerr
 	}
 
 	host := s.dialogsHost()
@@ -130,12 +158,107 @@ func (s *SheytanService) runExportStart(cmd presentation.CommandID, args command
 		Width:         width,
 		Height:        height,
 		FPS:           fps,
-		VideoCodec:    args.VideoCodec,
-		QualityPreset: args.QualityPreset,
+		VideoCodec:    videoCodec,
+		QualityPreset: quality,
+		TrimStart:     trimStart,
+		TrimDuration:  trimDur,
+		SubtitlePath:  s.exportSubtitlePath(),
 	}
 	if err := s.studio.StartExport(req); err != nil {
 		return reject(cmd, err)
 	}
+	return nil
+}
+
+// exportSubtitlePath returns the attached subtitle file ("" when none).
+func (s *SheytanService) exportSubtitlePath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.subtitlePath
+}
+
+// setExportSubtitlePath stores the dialog-chosen subtitle path.
+func (s *SheytanService) setExportSubtitlePath(p string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.subtitlePath = p
+}
+
+// runExportPreview dispatches export.preview (run 46168717789 editing
+// tools): the user picks a destination in the native save dialog and
+// the job encodes a REAL, ffprobe-validated sample with the EXACT
+// chosen resolution/fps/codec/quality/trim/subtitle settings, bounded
+// to a representative length. The user then plays the sample and
+// decides with evidence, not guesses.
+func (s *SheytanService) runExportPreview(cmd presentation.CommandID, args commandArgs) error {
+	width, height, fps, trimStart, trimDur, previewSecs, videoCodec, quality, aerr := s.buildExportRequest(cmd, args, true)
+	if aerr != nil {
+		return aerr
+	}
+	if previewSecs <= 0 {
+		return argsError(cmd, "preview length must be > 0 seconds (e.g. 8), got %g", previewSecs)
+	}
+
+	host := s.dialogsHost()
+	if host == nil {
+		return &FacadeError{Command: cmd, Kind: KindRejected,
+			Reason: "no native dialog host registered (headless or test context cannot open OS dialogs)"}
+	}
+
+	track := s.studio.Track()
+	if track == nil {
+		return reject(cmd, fmt.Errorf("no track loaded: import music before previewing"))
+	}
+
+	base := exportDefaultName(track.SourceName)
+	defaultName := strings.TrimSuffix(base, ".mp4") + "-preview.mp4"
+	path, err := host.SaveExportPath(defaultName)
+	if err != nil {
+		return &FacadeError{Command: cmd, Kind: KindRejected,
+			Reason: fmt.Sprintf("preview dialog failed: %v", err)}
+	}
+	if strings.TrimSpace(path) == "" {
+		return nil // user cancelled the dialog; no state change
+	}
+
+	req := export.Request{
+		OutputPath:     path,
+		Width:          width,
+		Height:         height,
+		FPS:            fps,
+		VideoCodec:     videoCodec,
+		QualityPreset:  quality,
+		TrimStart:      trimStart,
+		TrimDuration:   trimDur,
+		PreviewSeconds: previewSecs,
+		SubtitlePath:   s.exportSubtitlePath(),
+	}
+	if err := s.studio.StartExport(req); err != nil {
+		return reject(cmd, err)
+	}
+	return nil
+}
+
+// runExportSubtitleAttach opens the native subtitle picker. Every
+// format the local FFmpeg libass bridge accepts is offered (SRT,
+// ASS/SSA, WebVTT, MicroDVD, SubViewer and more); the format support
+// belongs to the filter bridge, not to this app's allowlist. The path
+// stays inside Go; the web layer only sees the attach state.
+func (s *SheytanService) runExportSubtitleAttach(cmd presentation.CommandID) error {
+	host := s.dialogsHost()
+	if host == nil {
+		return &FacadeError{Command: cmd, Kind: KindRejected,
+			Reason: "no native dialog host registered (headless or test context cannot open OS dialogs)"}
+	}
+	path, err := host.OpenSubtitlePath()
+	if err != nil {
+		return &FacadeError{Command: cmd, Kind: KindRejected,
+			Reason: fmt.Sprintf("subtitle dialog failed: %v", err)}
+	}
+	if strings.TrimSpace(path) == "" {
+		return nil // user cancelled; keep the previous attachment
+	}
+	s.setExportSubtitlePath(path)
 	return nil
 }
 

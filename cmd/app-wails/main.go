@@ -36,8 +36,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/apppaths"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/brand"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo"
+	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/logging"
 	"github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/studio"
 	wailsshell "github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/transport/wails"
 )
@@ -87,13 +89,29 @@ func run(args []string, out, errW io.Writer) int {
 // dependency-safe by contract), so neither app.Run errors nor panics
 // leak owned workers, transports or scheduler goroutines.
 func runShell() error {
+	// Run 46168717789 log catcher: THE PRODUCT SHELL NOW WRITES THE APP
+	// LOG. Previously only the CLI opened it, so app-wails.exe (the
+	// shell users actually run) produced no app.log at all and the
+	// Diagnostics tab showed a path no file backed. The log is opened
+	// BEFORE the studio so the startup banner lands in the file, and
+	// closed LAST so the shutdown is captured. A failed open falls
+	// back to the stderr logger inside logging.Init (honest, recorded)
+	// — the shell still starts.
+	lay := apppaths.Resolve(apppaths.OSEnv())
+	lg, _, logErr := logging.Init(lay, os.Getenv("SHEYTAN_DEBUG") != "")
+	if logErr != nil {
+		// The fallback logger is already active and the error is
+		// recorded in it; startup proceeds with the visible fallback.
+		fmt.Fprintf(os.Stderr, "%s: runtime log fallback: %v\n", brand.ProductName, logErr)
+	}
 	st, err := studio.New()
 	if err != nil {
 		return fmt.Errorf("create studio: %w", err)
 	}
 	defer st.Close()
+	defer lg.Close()
 
-	app := wailsshell.BuildApp(st)
+	app := wailsshell.BuildApp(st, lg)
 	if err := app.Run(); err != nil {
 		return fmt.Errorf("web shell runtime: %w", err)
 	}

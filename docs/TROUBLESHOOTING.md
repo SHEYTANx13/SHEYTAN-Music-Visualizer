@@ -4,6 +4,28 @@ Status: current as of run 43541087097 (2026-11-14). This is the canonical
 user-facing diagnostics + troubleshooting document (the former separate
 `docs/diagnostics.md` was merged here — one subject, one document).
 
+## No log to attach (Windows and every platform)
+
+The app shell writes the runtime log at the path shown in Diagnostics
+(data root `logs/app.log`). Since run 46168717789 the Wails shell opens
+this log itself — before this repair only the CLI did, so the product
+window produced no log at all. Use **Diagnostics → Export diagnostics
+bundle** to write a single ZIP (app log, rotated generation, crash
+reports, build metadata, data-layout facts) through a native save
+dialog and attach it to a bug report. If the log writer is a stderr
+fallback, Diagnostics says so explicitly (the data-layout reason is the
+place to look).
+
+## "Backend API unreachable: renderKV is not defined"
+
+This was a frontend import bug (fixed in run 46168717789): the Song DNA
+pane called `renderKV` without importing it, so the first ready-DNA
+refresh threw, the error banner showed the misleading message and the
+polling loop froze (importing audio appeared to do nothing). If a
+similar "Backend API unreachable: <ReferenceError>" message appears, it
+is a JavaScript failure surfaced through the banner — the banner names
+the real error; check the named symbol's import line.
+
 ## App does not open (Windows GUI-subsystem builds)
 
 - **The product executable is `app-wails.exe`** (run 46121470729 truth

@@ -63,11 +63,15 @@ var QualityPresets = []string{"high", "balanced", "compat"}
 type Environment struct {
 	FFmpegPath       string          `json:"ffmpegPath"`
 	FFprobePath      string          `json:"ffprobePath"`
-	Source           string          `json:"source,omitempty"` // fflocate rule: override / app-local / path
+	Source           string          `json:"source,omitempty"` // fflocate rule: override / app-local / system / path
 	Version          string          `json:"version"`
 	Encoders         map[string]bool `json:"encoders"`                   // encoder name -> present
 	HardwareEncoders []string        `json:"hardwareEncoders,omitempty"` // proof-encoded OK
 	Notes            []string        `json:"notes,omitempty"`
+
+	// filters caches the probed `-filters` table (internal only, never
+	// serialized). Owned by the env mutex (see HasVideoFilter).
+	filters map[string]bool `json:"-"`
 }
 
 var (
@@ -208,6 +212,76 @@ func ProbeHardwareEncoder(env *Environment, name string) error {
 			name, err, firstLine(stderr.String()))
 	}
 	return nil
+}
+
+// HasVideoFilter reports whether this FFmpeg build supports the named
+// video filter (probed once per binary via `-filters`, cached under the
+// same env mutex as the process cache). Run 46168717789: the subtitle
+// burn-in feature needs libass ("subtitles" filter); a build without it
+// is refused with an actionable error BEFORE any frame is rendered —
+// never an opaque mid-export failure.
+func HasVideoFilter(env *Environment, name string) bool {
+	if env == nil || name == "" {
+		return false
+	}
+	envMu.Lock()
+	defer envMu.Unlock()
+	if cachedEnv != nil && cachedEnv.FFmpegPath == env.FFmpegPath {
+		if cachedEnv.filters == nil {
+			if err := probeFilters(env); err != nil {
+				return false
+			}
+			cachedEnv.filters = env.filters
+		}
+		return cachedEnv.filters[name]
+	}
+	if err := probeFilters(env); err != nil {
+		return false
+	}
+	return env.filters[name]
+}
+
+// probeFilters runs `ffmpeg -filters` and records the supported filter
+// names on env. Errors leave the map empty (callers report honestly).
+func probeFilters(env *Environment) error {
+	if env.filters == nil {
+		env.filters = map[string]bool{}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, env.FFmpegPath,
+		"-hide_banner", "-filters")
+	procattr.Configure(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("export: probing ffmpeg filters: %w", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		// `ffmpeg -filters` rows: " T.. name       description".
+		if len(fields) >= 3 {
+			env.filters[fields[1]] = true
+		}
+	}
+	return nil
+}
+
+// SubtitleFilterArg builds the `-vf` value that burns a subtitle file
+// into the video. FFmpeg accepts every format its libass bridge reads
+// (SRT, ASS/SSA, WebVTT, MicroDVD, SubViewer, ...): the formats are the
+// filter's contract, not ours. The path is escaped per the ffmpeg
+// filter quoting rules (backslash, colon, quote) so Windows drive
+// letters and spaces survive the filter parser; no shell is involved
+// (exec argument slice only).
+func SubtitleFilterArg(path string) string {
+	// Explicit backslash normalization (NOT filepath.ToSlash, which is
+	// a no-op on POSIX hosts): the filter parser needs forward slashes
+	// on every platform, including Windows drive paths.
+	p := strings.ReplaceAll(path, "\\", "/")
+	p = strings.ReplaceAll(p, "\\", "\\\\")
+	p = strings.ReplaceAll(p, ":", "\\:")
+	p = strings.ReplaceAll(p, "'", "\\'")
+	return "subtitles='" + p + "'"
 }
 
 // ProofHardwareEncoders validates each listed hardware encoder with a

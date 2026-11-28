@@ -258,3 +258,75 @@ func TestQualityArgsAndSanitize(t *testing.T) {
 // contract: not used in CI assertions here, kept for diagnostics.
 var _ = color.RGBA{}
 var _ = exec.Command
+
+// TestExportTrimWindowPreview (run 46168717789): the editing tools
+// contract — a trim window + preview bound produce a REAL, validated
+// encode whose duration matches the EFFECTIVE window, not the full
+// track. Frame timeline and audio use the same window, so the cut is
+// coherent by construction; ffprobe proves it on the actual file.
+func TestExportTrimWindowPreview(t *testing.T) {
+	requireFFmpeg(t)
+	dir := t.TempDir()
+	wav, provider, duration := syntheticFixture(t, dir, 30.0)
+	out := filepath.Join(dir, "trimmed-preview.mp4")
+	req := Request{
+		OutputPath: out, Width: 640, Height: 360, FPS: 30,
+		QualityPreset: "high", Encoder: "auto",
+		AudioWavPath: wav, AudioDuration: duration,
+		Config:                 visualizer.Config{Mode: visualizer.ModeBars},
+		AudioStateProvider:     provider,
+		WaveformWindowProvider: func(float64) []float32 { return nil },
+		TrimStart:              5.0,
+		TrimDuration:           4.0,
+		PreviewSeconds:         2.0,
+	}
+	job, err := NewJob(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := job.Run(context.Background())
+	if err != nil {
+		t.Fatalf("trimmed preview export failed: %v", err)
+	}
+	if res.Duration < 1.8 || res.Duration > 2.4 {
+		t.Fatalf("preview duration = %.3fs, want ~2.0s (the bounded effective window)", res.Duration)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("preview output missing: %v", err)
+	}
+}
+
+// TestExportTrimBeyondTrackFails (run 46168717789): a trim start past
+// the track end is a typed pre-flight failure, never a mid-render
+// surprise.
+func TestExportTrimBeyondTrackFails(t *testing.T) {
+	dir := t.TempDir()
+	wav, provider, duration := syntheticFixture(t, dir, 3.0)
+	req := Request{
+		OutputPath: filepath.Join(dir, "x.mp4"), Width: 320, Height: 240, FPS: 24,
+		AudioWavPath: wav, AudioDuration: duration,
+		Config:             visualizer.Config{Mode: visualizer.ModeBars},
+		AudioStateProvider: provider,
+		TrimStart:          10.0,
+	}
+	if _, err := NewJob(req); err == nil {
+		t.Fatal("trim start beyond the track duration must be rejected by NewJob")
+	}
+}
+
+// TestSubtitleFilterArgEscaping (run 46168717789): the burn-in filter
+// path survives the ffmpeg filter parser on every platform (backslash,
+// colon, quote), including Windows drive letters.
+func TestSubtitleFilterArgEscaping(t *testing.T) {
+	cases := map[string]string{
+		"/tmp/subs.srt":             "subtitles='/tmp/subs.srt'",
+		`C:\Users\weird name\v.srt`: `subtitles='C\:/Users/weird name/v.srt'`,
+		`C:\a'b\v.ass`:              `subtitles='C\:/a\'b/v.ass'`,
+		"/path/with:colon/x.vtt":    "subtitles='/path/with\\:colon/x.vtt'",
+	}
+	for in, want := range cases {
+		if got := SubtitleFilterArg(in); got != want {
+			t.Fatalf("SubtitleFilterArg(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -22,6 +22,7 @@ import {
 import { loadMediaTools, wireMediaTools } from "./mediatools.js";
 import { loadNetwork, loadSystem } from "./system.js";
 import { dnaNeedsPolling, loadSongDNA } from "./songdna.js";
+import { loadWorlds, worldNeedsPolling } from "./worlds.js";
 import { exportNeedsPolling, loadExportStatus, wireExportControls } from "./exportpane.js";
 import { wireButtons, wireIntensityOptions, wireApplyPresetButtons } from "./commands.js";
 import { wireDragScroll } from "./drag.js";
@@ -48,6 +49,7 @@ export async function loadAll() {
             loadNetwork(),
             loadMediaTools(),
             loadSongDNA(),
+            loadWorlds(),
             loadExportStatus(),
         ]);
         hideBootSkeletons();
@@ -91,6 +93,9 @@ export function startTransportPolling() {
             await loadMediaTools();
             // Song DNA lands while an analysis can still be running.
             if (dnaNeedsPolling()) await loadSongDNA();
+            // The Worlds pane polls only while an analysis can still be
+            // in flight — the plan lands with the DNA, never before.
+            if (worldNeedsPolling()) await loadWorlds();
             // Export progress lands while a job can be running (and one
             // extra beat after a completion so the result row appears).
             if (exportNeedsPolling()) await loadExportStatus();

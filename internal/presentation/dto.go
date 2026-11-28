@@ -12,7 +12,6 @@ const DTOVersion = 1
 // BuildInfoDTO is the build identity snapshot.
 type BuildInfoDTO struct {
 	Version   string `json:"version"`
-	Commit    string `json:"commit"`
 	Date      string `json:"date"`
 	BuiltBy   string `json:"builtBy"`
 	GoVersion string `json:"goVersion"`

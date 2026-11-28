@@ -15,5 +15,6 @@ export const state = {
     library: null,
     media: null,
     dna: null,
+    worlds: null,
     exportJob: null,
 };

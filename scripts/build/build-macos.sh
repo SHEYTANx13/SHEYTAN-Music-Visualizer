@@ -13,7 +13,24 @@
 # canonical macos-arm64.app.zip candidate. The macOS package is an
 # unsigned test build, honestly labeled; no notarization or developer-ID
 # signing is claimed without actual signing evidence.
-set -u
+# RUN 46168717789 repair (the macOS lane failed hosted with NO gate
+# record at all — the extract carried only step/job conclusions, and
+# every ci_capture-guarded failure path provably emits a scannable
+# ERROR line). The lane previously ran under bare `set -u` on the
+# macOS runner's bash 3.2, where an unguarded abnormal exit (set -u
+# unbound-variable class or any unguarded command failure) dies
+# SILENTLY: exit 1, no gate record, no diagnostic. This script now
+# uses the same mechanics as the hosted-green build-linux.sh:
+#   - `set -Eeuo pipefail`: every unguarded failure becomes the script's
+#     own failure AND
+#   - the ERR trap converts ANY unguarded death into an explicit,
+#     scannable `ERROR:` record naming the failing command and line,
+#     so the consolidated diagnostics can never again report a macOS
+#     failure with zero gate evidence.
+# The hosted-green linux lane's exact array-expansion idioms are used
+# (unquoted $GO_TAGS string + "${LDFLAGS[@]+"${LDFLAGS[@]}"}" guard —
+# the bash-3.2-safe forms build-linux.sh already proved hosted).
+set -Eeuo pipefail
 
 # Load the canonical capture helpers (ci_capture, ci_sanitize).
 . scripts/ci/capture.sh
@@ -39,6 +56,13 @@ fail_gate() {
 skip_gate() { SKIPPED_GATES="$SKIPPED_GATES $1"; printf 'SKIPPED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"; }
 blocked_gate() { SKIPPED_GATES="$SKIPPED_GATES $1"; printf 'BLOCKED: gate %s (%s)\n' "$1" "$2" >>"$CI_LOG_FILE"; }
 
+# RUN 46168717789 loud-death trap: any UNGUARDED failure under
+# `set -Eeuo pipefail` emits a scannable ERROR record before the
+# script exits, naming the exact failing command and line. Guarded
+# gates (ci_capture ... || fail_gate) never trigger it — their
+# evidence contract owns the record.
+trap 'rc=$?; if [ "$rc" -ne 0 ]; then printf "ERROR: unguarded failure in %s at line %s (command: %s; exit %s) — this line is the loud-death record for an otherwise silent exit class\n" "$JOB" "${BASH_LINENO[0]:-unknown}" "${BASH_COMMAND:-unknown}" "$rc" | tee -a "$CI_LOG_FILE" >&2; fi' ERR
+
 # RUN 45532045379 repair (canonical Go profile): every Go gate below
 # pins the repository-canonical link profile documented in
 # scripts/build/build-windows.ps1 and used by the build-macos workflow
@@ -52,7 +76,7 @@ blocked_gate() { SKIPPED_GATES="$SKIPPED_GATES $1"; printf 'BLOCKED: gate %s (%s
 # excludes the purego/goffi fakecgo duplicate-symbol link error class
 # on CGO-disabled runners.
 export CGO_ENABLED=1
-GO_TAGS=(-tags goffi_static)
+GO_TAGS="-tags goffi_static"
 
 note "SHEYTAN MUSIC VISUALIZER :: PHASE 2 LOCAL VERIFICATION (MACOS)"
 note "Mode: desktop (reduced parity set; see header)"
@@ -78,13 +102,14 @@ else
 
   ci_capture "$JOB" go-mod-verify go mod verify || fail_gate go-mod-verify
 
-  ci_capture "$JOB" go-test go test "${GO_TAGS[@]}" ./... || fail_gate go-test
-  ci_capture "$JOB" go-vet go vet "${GO_TAGS[@]}" ./... || fail_gate go-vet
-  ci_capture "$JOB" go-build-packages go build "${GO_TAGS[@]}" ./... || fail_gate go-build-packages
+  ci_capture "$JOB" go-test go test $GO_TAGS ./... || fail_gate go-test
+  ci_capture "$JOB" go-vet go vet $GO_TAGS ./... || fail_gate go-vet
+  ci_capture "$JOB" go-build-packages go build $GO_TAGS ./... || fail_gate go-build-packages
 
   BI=github.com/SHEYTANx13/SHEYTAN-Music-Visualizer/internal/buildinfo
-  LDFLAGS=(-ldflags "-X ${BI}.version=${SHEYTAN_BUILD_VERSION:-BETA} -X ${BI}.commit=${SHEYTAN_BUILD_COMMIT:-unknown} -X ${BI}.date=${SHEYTAN_BUILD_DATE:-unknown} -X ${BI}.builtBy=${SHEYTAN_BUILT_BY:-github-actions}")
-  if ci_capture "$JOB" build-executable go build -trimpath "${GO_TAGS[@]}" "${LDFLAGS[@]}" -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer; then
+  LDVALS=("-X ${BI}.version=${SHEYTAN_BUILD_VERSION:-BETA}" "-X ${BI}.commit=${SHEYTAN_BUILD_COMMIT:-unknown}" "-X ${BI}.date=${SHEYTAN_BUILD_DATE:-unknown}" "-X ${BI}.builtBy=${SHEYTAN_BUILT_BY:-github-actions}")
+  LDFLAGS=(-ldflags "${LDVALS[*]}")
+  if ci_capture "$JOB" build-executable go build -trimpath $GO_TAGS "${LDFLAGS[@]+"${LDFLAGS[@]}"}" -o bin/sheytan-music-visualizer ./cmd/sheytan-music-visualizer; then
     CI_TOOL_CONTEXT="runtime:--version" ci_capture "$JOB" run-version bash -c './bin/sheytan-music-visualizer --version | tee /tmp/version.txt; grep -q "version: BETA" /tmp/version.txt || grep -q "version BETA" /tmp/version.txt || grep -q "BETA" /tmp/version.txt' ||
       fail_gate run-version
   else
@@ -99,7 +124,7 @@ else
   # with the shell icon (icon.icns from the tracked iconset via
   # iconutil) and the CLI as a companion tool.
   GUI_EXE_OK=0
-  if ci_capture "$JOB" build-wails-shell go build -trimpath "${GO_TAGS[@]}" -tags "purego,sheytan_nogpu" "${LDFLAGS[@]}" -o bin/app-wails ./cmd/app-wails; then
+  if ci_capture "$JOB" build-wails-shell go build -trimpath $GO_TAGS -tags "purego,sheytan_nogpu" "${LDFLAGS[@]+"${LDFLAGS[@]}"}" -o bin/app-wails ./cmd/app-wails; then
     GUI_EXE_OK=1
   else
     fail_gate build-wails-shell

@@ -22,6 +22,7 @@ export async function runCommand(id, args) {
         if (id === "visualizer.preset.apply") setStatus(`preset applied: ${args && args.name}`);
         if (id === "import.audio") setStatus("import: native dialog handled by the OS");
         if (id === "export.start") setStatus("export: destination chosen, job handed to the export lane");
+        if (id === "diagnostics.export") setStatus("diagnostics: bundle written — attach it to your bug report");
         // Panes that show command-adjacent state refresh lazily via the
         // 2 s transport tick and their own loaders; nothing faked here.
     } catch (err) {
@@ -43,6 +44,7 @@ export function wireButtons() {
         "cmd-seek-back": () => runCommand("transport.seek-back", { seconds: 10 }),
         "cmd-seek-forward": () => runCommand("transport.seek-forward", { seconds: 10 }),
         "cmd-import": () => runCommand("import.audio"),
+        "cmd-diagnostics-export": () => runCommand("diagnostics.export"),
     };
     for (const [id, fn] of Object.entries(map)) {
         const btn = $(id);
